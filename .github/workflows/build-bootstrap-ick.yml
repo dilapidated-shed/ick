@@ -1,0 +1,81 @@
+name: Build bootstrap ICK
+
+on:
+  push:
+    branches:
+      - bootstrap/ick-binary
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out ICK GCC line
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/the-equality-sign-means-equality
+          ref: equality
+          fetch-depth: 1
+          path: src
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex bison texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev zstd
+
+      - name: Configure
+        run: |
+          mkdir build stage
+          cd build
+          ../src/configure \
+            --prefix="$GITHUB_WORKSPACE/stage" \
+            --enable-languages=c \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls
+
+      - name: Build C compiler
+        run: |
+          make -C build -j2 all-gcc all-target-libgcc
+          make -C build install-gcc install-target-libgcc
+          ln -s gcc stage/bin/ick
+
+      - name: Verify ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          stage/bin/ick --version
+          cat > /tmp/ordinary.c <<'EOF'
+          int main(void) { return 0; }
+          EOF
+          stage/bin/ick /tmp/ordinary.c -o /tmp/ordinary
+          /tmp/ordinary
+
+          cat > /tmp/ick.c <<'EOF'
+          int main(void)
+          {
+            int a ← 0;
+            7 → a;
+            return a = 7 ? 0 : 1;
+          }
+          EOF
+          stage/bin/ick -std=c23.= /tmp/ick.c -o /tmp/ick-smoke
+          /tmp/ick-smoke
+
+      - name: Package
+        run: |
+          tar --zstd -cf ick-x86_64-linux.tar.zst -C stage .
+          sha256sum ick-x86_64-linux.tar.zst > ick-x86_64-linux.tar.zst.sha256
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ick-x86_64-linux
+          path: |
+            ick-x86_64-linux.tar.zst
+            ick-x86_64-linux.tar.zst.sha256
+          if-no-files-found: error
+          retention-days: 30
