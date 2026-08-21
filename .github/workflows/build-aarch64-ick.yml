@@ -65,13 +65,19 @@ jobs:
         run: |
           make -C build -j2 all-gcc
           make -C build install-gcc
-          ln -s aarch64-linux-gnu-gcc stage/bin/ick-aarch64
+          cat > stage/bin/ick-aarch64 <<'EOF'
+          #!/bin/sh
+          exec "$(dirname "$0")/aarch64-linux-gnu-gcc" "$@"
+          EOF
+          chmod +x stage/bin/ick-aarch64
 
       - name: Verify AArch64 target
         shell: bash
         run: |
           set -euxo pipefail
           stage/bin/ick-aarch64 --version
+          cc1_path="$(stage/bin/ick-aarch64 -print-prog-name=cc1)"
+          test -x "$cc1_path"
 
           cat > /tmp/plain.c <<'EOF'
           int add(int a, int b) { return a + b; }
