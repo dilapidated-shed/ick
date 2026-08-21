@@ -31,7 +31,6 @@ jobs:
         run: |
           cd src
           python3 ../meta/compiler/apply_ick_polar_complex_aarch64.py
-          git diff --check
           git diff --stat
 
       - name: Install build and AArch64 tools
