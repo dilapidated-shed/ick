@@ -1,0 +1,104 @@
+name: Build AArch64 ICK
+
+on:
+  push:
+    branches:
+      - aarch64-polar-bootstrap
+  pull_request:
+    branches:
+      - bootstrap/ick-binary
+  workflow_dispatch:
+
+jobs:
+  build-aarch64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out ICK GCC polar line
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/the-equality-sign-means-equality
+          ref: 756f5b0aeeabc67caf804380495f82d86b87b878
+          fetch-depth: 1
+          path: src
+
+      - name: Install build and AArch64 tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex bison texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev zstd \
+            binutils-aarch64-linux-gnu
+
+      - name: Configure AArch64 cross compiler
+        run: |
+          mkdir build stage
+          cd build
+          ../src/configure \
+            --target=aarch64-linux-gnu \
+            --prefix="$GITHUB_WORKSPACE/stage" \
+            --enable-languages=c \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-threads \
+            --without-headers \
+            --disable-libatomic \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv
+
+      - name: Build compiler
+        run: |
+          make -C build -j2 all-gcc
+          make -C build install-gcc
+          ln -s aarch64-linux-gnu-gcc stage/bin/ick-aarch64
+
+      - name: Verify AArch64 code generation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          stage/bin/ick-aarch64 --version
+
+          cat > /tmp/plain.c <<'EOF'
+          int add(int a, int b) { return a + b; }
+          EOF
+          stage/bin/ick-aarch64 -O2 -c /tmp/plain.c -o /tmp/plain.o
+          readelf -h /tmp/plain.o | tee /tmp/plain.elf
+          grep -q 'Machine:.*AArch64' /tmp/plain.elf
+
+          cat > /tmp/complex.c <<'EOF'
+          double _Complex multiply(double _Complex a, double _Complex b)
+          {
+            return a * b;
+          }
+          EOF
+          stage/bin/ick-aarch64 -O2 -S /tmp/complex.c -o /tmp/complex.s
+          stage/bin/ick-aarch64 -O2 -c /tmp/complex.c -o /tmp/complex.o
+          readelf -h /tmp/complex.o | tee /tmp/complex.elf
+          grep -q 'Machine:.*AArch64' /tmp/complex.elf
+          cat /tmp/complex.s
+
+          # The current circles-are-balanced source uses polar arithmetic as a
+          # working form and then reconstructs Cartesian components. Seeing the
+          # polar math calls here proves that this ICK middle-end path survives
+          # AArch64 lowering; removing those round-trip calls belongs to the
+          # physical (rho,theta) representation follow-up.
+          grep -Eq 'hypot|atan2' /tmp/complex.s
+
+      - name: Package AArch64 compiler
+        run: |
+          tar --zstd -cf ick-aarch64-linux.tar.zst -C stage .
+          sha256sum ick-aarch64-linux.tar.zst > ick-aarch64-linux.tar.zst.sha256
+
+      - name: Upload AArch64 compiler
+        uses: actions/upload-artifact@v4
+        with:
+          name: ick-aarch64-linux
+          path: |
+            ick-aarch64-linux.tar.zst
+            ick-aarch64-linux.tar.zst.sha256
+          if-no-files-found: error
+          retention-days: 30
