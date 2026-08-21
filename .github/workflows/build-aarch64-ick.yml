@@ -30,7 +30,7 @@ jobs:
       - name: Apply physical polar complex representation
         run: |
           cd src
-          python3 ../meta/compiler/apply_ick_polar_complex.py
+          python3 ../meta/compiler/apply_ick_polar_complex_aarch64.py
           git diff --check
           git diff --stat
 
