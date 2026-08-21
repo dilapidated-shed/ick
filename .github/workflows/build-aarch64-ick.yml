@@ -14,13 +14,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - name: Check out ICK GCC polar line
+      - name: Check out ICK patch and build definition
+        uses: actions/checkout@v4
+        with:
+          path: meta
+
+      - name: Check out inspected GCC polar line
         uses: actions/checkout@v4
         with:
           repository: isomorphisms/the-equality-sign-means-equality
           ref: 756f5b0aeeabc67caf804380495f82d86b87b878
           fetch-depth: 1
           path: src
+
+      - name: Apply physical polar complex representation
+        run: |
+          cd src
+          python3 ../meta/compiler/apply_ick_polar_complex.py
+          git diff --check
+          git diff --stat
 
       - name: Install build and AArch64 tools
         run: |
@@ -56,7 +68,7 @@ jobs:
           make -C build install-gcc
           ln -s aarch64-linux-gnu-gcc stage/bin/ick-aarch64
 
-      - name: Verify AArch64 code generation
+      - name: Verify AArch64 target
         shell: bash
         run: |
           set -euxo pipefail
@@ -66,9 +78,43 @@ jobs:
           int add(int a, int b) { return a + b; }
           EOF
           stage/bin/ick-aarch64 -O2 -c /tmp/plain.c -o /tmp/plain.o
-          readelf -h /tmp/plain.o | tee /tmp/plain.elf
+          aarch64-linux-gnu-readelf -h /tmp/plain.o | tee /tmp/plain.elf
           grep -q 'Machine:.*AArch64' /tmp/plain.elf
 
+      - name: Verify physical polar object representation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > /tmp/storage.c <<'EOF'
+          double _Complex stored = 3.0 + 4.0i;
+          EOF
+          stage/bin/ick-aarch64 -O2 -c /tmp/storage.c -o /tmp/storage.o
+          aarch64-linux-gnu-readelf -h /tmp/storage.o | tee /tmp/storage.elf
+          grep -q 'Machine:.*AArch64' /tmp/storage.elf
+          aarch64-linux-gnu-objcopy --dump-section .data=/tmp/storage.data /tmp/storage.o
+          python3 - <<'PY'
+          import math
+          import struct
+          from pathlib import Path
+
+          raw = Path('/tmp/storage.data').read_bytes()
+          if len(raw) != 16:
+              raise SystemExit(f'expected exactly 16 data bytes, got {len(raw)}')
+          radius, angle = struct.unpack('<dd', raw)
+          expected_angle = math.atan2(4.0, 3.0)
+          if abs(radius - 5.0) > 1.0e-12:
+              raise SystemExit(f'physical complex slot 0 is {radius}, expected radius 5')
+          if abs(angle - expected_angle) > 1.0e-12:
+              raise SystemExit(
+                  f'physical complex slot 1 is {angle}, expected argument {expected_angle}'
+              )
+          print(f'polar storage verified: radius={radius}, angle={angle}')
+          PY
+
+      - name: Verify native polar multiplication lowering
+        shell: bash
+        run: |
+          set -euxo pipefail
           cat > /tmp/complex.c <<'EOF'
           double _Complex multiply(double _Complex a, double _Complex b)
           {
@@ -77,16 +123,18 @@ jobs:
           EOF
           stage/bin/ick-aarch64 -O2 -S /tmp/complex.c -o /tmp/complex.s
           stage/bin/ick-aarch64 -O2 -c /tmp/complex.c -o /tmp/complex.o
-          readelf -h /tmp/complex.o | tee /tmp/complex.elf
+          aarch64-linux-gnu-readelf -h /tmp/complex.o | tee /tmp/complex.elf
           grep -q 'Machine:.*AArch64' /tmp/complex.elf
           cat /tmp/complex.s
 
-          # The current circles-are-balanced source uses polar arithmetic as a
-          # working form and then reconstructs Cartesian components. Seeing the
-          # polar math calls here proves that this ICK middle-end path survives
-          # AArch64 lowering; removing those round-trip calls belongs to the
-          # physical (rho,theta) representation follow-up.
-          grep -Eq 'hypot|atan2' /tmp/complex.s
+          # Physical polar multiplication should be radius multiplication and
+          # argument addition, with no Cartesian→polar→Cartesian round trip.
+          grep -q 'fmul' /tmp/complex.s
+          grep -q 'fadd' /tmp/complex.s
+          if grep -Eq 'hypot|atan2|cos|sin' /tmp/complex.s; then
+            echo 'complex multiplication still contains a polar conversion round trip' >&2
+            exit 1
+          fi
 
       - name: Package AArch64 compiler
         run: |
