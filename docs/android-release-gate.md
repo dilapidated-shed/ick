@@ -12,8 +12,7 @@ This is useful evidence, but it is not yet a full Android release compiler.
 
 ## Gaps that remain
 
-- the repository named `ick` is not yet the source of truth for the GCC-derived compiler tree
-- the old bootstrap workflow follows a moving external branch and its only recorded run failed during verification
+- the new squashed `gcc/` reference plus `ick/source/` source-of-truth path must reproduce the old AArch64 receipt on its own current head
 - the successful Android boundary uses an AArch64 GNU/Linux-target ICK object plus Android NDK assembly/linking rather than a fully qualified Android ICK driver
 - only the AArch64 boundary is qualified
 - `armeabi-v7a`, `x86_64`, and `x86` Android output are not qualified

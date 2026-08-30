@@ -6,7 +6,12 @@ ICK is intended to remain free software and to preserve the licensing boundaries
 
 The compiler line is derived from GCC. GCC-derived source remains under the license stated by the corresponding upstream files, normally GNU GPL version 3 or later. Copyright and license notices inherited from GCC must not be removed merely because a file is renamed, simplified, or moved into ICK.
 
-During the repository transition, the live GCC-derived ICK source is still in `isomorphisms/rhs`. The ICK repository must not pretend that the small wrapper in this repository is the complete compiler until that source-of-truth problem is resolved.
+The `gcc/` submodule records the exact unmodified reference source.
+`ick/source/` contains complete GCC-derived files and remains under their
+inherited file-level licenses. `ick/SOURCE.lock` records the GCC base and the
+transitional `isomorphisms/rhs` commit from which the first squashed ICK source
+layer was imported. Materializing the two layers does not change either one's
+license.
 
 ## Runtime-library exception
 
@@ -28,7 +33,7 @@ Before an ICK compiler artifact is published:
 
 1. Record the exact source commit used to build it.
 2. Preserve all applicable GCC copyright and license notices.
-3. Include or point unambiguously to the complete corresponding source required by the applicable licenses.
+3. Include the pinned `gcc/` source and `ick/source/` layer, or point unambiguously to the complete corresponding source required by the applicable licenses.
 4. Preserve the GCC Runtime Library Exception on every covered runtime file.
 5. Record licenses and checksums for separately vendored data such as the meaning model.
 6. Do not describe a compiler artifact as clean-room or independently licensed when it contains GCC-derived source.
