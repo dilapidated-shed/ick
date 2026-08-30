@@ -36,7 +36,7 @@ The current release lane should first qualify the minimum supported by the pinne
 
 Runtime page size is an operating-system property, not a CPU identity and not a proxy for device size. ICK should describe the maximum load-segment alignment its output satisfies and then test that the same artifact loads on the intended runtime page sizes.
 
-Do not create separate `arm64-4k` and `arm64-16k` compiler back ends unless a real incompatibility requires separate code generation. Prefer one correctly aligned Android object/shared library that is valid on both 4 KiB and 16 KiB systems.
+Do not create separate `arm64-4k` and `arm64-16k` compiler back ends unless a real incompatibility requires separate code generation. Prefer one correctly aligned 64-bit Android object/shared library that is valid on both 4 KiB and 16 KiB systems. [Android's current NDK guidance](https://android.googlesource.com/platform/ndk/+/master/docs/BuildSystemMaintainers.md#page-sizes) applies the 16 KiB runtime boundary to `arm64-v8a` and `x86_64`; the 32-bit ABIs retain 4 KiB load alignment.
 
 For systems without virtual-memory paging, such as many bare-metal and retro targets, this dimension can simply be absent.
 

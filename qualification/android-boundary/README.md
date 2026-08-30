@@ -37,5 +37,12 @@ Android runtime execution, NDK headers, C++ interop, TLS, sanitizers, LTO,
 long-double ABI details, arbitrary Android platform APIs, an APK, or F-Droid
 packaging.
 
+The load-alignment gate follows the Android platform boundary rather than
+pretending every CPU has a 16 KiB runtime: `arm64-v8a` and `x86_64` require
+16 KiB-compatible `PT_LOAD` segments, while the two 32-bit ABIs retain their
+4 KiB requirement. [Android's NDK build-system guidance](https://android.googlesource.com/platform/ndk/+/master/docs/BuildSystemMaintainers.md#page-sizes)
+states that 16 KiB page-size devices are 64-bit and that there are no plans to
+change the page size for the 32-bit ABIs.
+
 The Actions artifact is short-lived qualification output.  A consumer should
 use an immutable release archive and verify its published SHA-256 checksum.

@@ -32,6 +32,7 @@ jobs:
             wrong_ndk_driver: i686-linux-android21-clang
             elf_class: ELF64
             elf_machine: AArch64
+            required_load_alignment: 16384
             target_flags: -ffixed-x18
           - abi: armeabi-v7a
             gnu_target: arm-linux-gnueabi
@@ -41,6 +42,7 @@ jobs:
             wrong_ndk_driver: aarch64-linux-android21-clang
             elf_class: ELF32
             elf_machine: ARM
+            required_load_alignment: 4096
             target_flags: -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp
           - abi: x86_64
             gnu_target: x86_64-linux-gnu
@@ -50,6 +52,7 @@ jobs:
             wrong_ndk_driver: i686-linux-android21-clang
             elf_class: ELF64
             elf_machine: Advanced Micro Devices X86-64
+            required_load_alignment: 16384
             target_flags: -march=x86-64-v2 -mno-avx -mno-movbe
           - abi: x86
             gnu_target: i686-linux-gnu
@@ -59,6 +62,7 @@ jobs:
             wrong_ndk_driver: x86_64-linux-android21-clang
             elf_class: ELF32
             elf_machine: Intel 80386
+            required_load_alignment: 4096
             target_flags: -march=i686 -mssse3 -mno-sse4 -mno-sse4.1 -mno-sse4.2 -mno-avx -mno-movbe -mfpmath=sse -mstackrealign -mpreferred-stack-boundary=4 -mincoming-stack-boundary=4
 
     steps:
@@ -289,7 +293,7 @@ jobs:
           grep -Eiq 'incompatible|wrong ELF class|different ELF class' \
             /tmp/wrong-target.log
 
-      - name: Verify 16 KiB-compatible load alignment
+      - name: Verify ABI-appropriate load alignment
         shell: bash
         run: |
           set -euxo pipefail
@@ -303,7 +307,7 @@ jobs:
           )
           test "${#aligns[@]}" -gt 0
           for align in "${aligns[@]}"; do
-            test "$((align))" -ge 16384
+            test "$((align))" -ge ${{ matrix.required_load_alignment }}
           done
 
       - name: Record qualification boundary
@@ -317,8 +321,8 @@ jobs:
           PASS: ICK compiler built and its own installed `cc1` was used
 
           PASS: expected ELF class/machine, PIC object, Android API 21 link,
-          exported scalar boundary, mismatched-target refusal, and 16 KiB load
-          alignment
+          exported scalar boundary, mismatched-target refusal, and the ABI's
+          required load alignment
 
           SKIP: Android runtime execution, complete Wegert library, APK, and
           F-Droid packaging remain outside this foundation job
