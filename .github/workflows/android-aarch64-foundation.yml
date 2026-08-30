@@ -1,0 +1,185 @@
+name: Android AArch64 foundation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ICK_SOURCE_COMMIT: 7458b3c29fe535eb7dda3b1c756b362cee5c889d
+  ANDROID_NDK_VERSION: 29.0.14206865
+  ANDROID_API: 21
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out foundation metadata
+        uses: actions/checkout@v6
+
+      - name: Check out pinned GCC-derived ICK source
+        uses: actions/checkout@v6
+        with:
+          repository: isomorphisms/rhs
+          ref: ${{ env.ICK_SOURCE_COMMIT }}
+          fetch-depth: 1
+          path: src
+
+      - name: Verify source and license provenance
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C src rev-parse HEAD)" = "$ICK_SOURCE_COMMIT"
+          test -s src/COPYING3
+          test -s src/COPYING.RUNTIME
+          test -s src/gcc/config/linux-android.h
+
+      - name: Install compiler build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential file flex bison texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev \
+            binutils-aarch64-linux-gnu
+
+      - name: Configure pinned AArch64 ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir build stage
+          cd build
+          ../src/configure \
+            --target=aarch64-linux-gnu \
+            --prefix="$GITHUB_WORKSPACE/stage" \
+            --with-as="$(command -v aarch64-linux-gnu-as)" \
+            --with-ld="$(command -v aarch64-linux-gnu-ld)" \
+            --enable-languages=c \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-threads \
+            --without-headers \
+            --disable-libatomic \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv
+
+      - name: Build pinned AArch64 ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make -C build -j2 all-gcc
+          make -C build install-gcc
+          stage/bin/aarch64-linux-gnu-gcc --version
+
+      - name: Compile Android-boundary object with Android ABI register rule
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ick="$GITHUB_WORKSPACE/stage/bin/aarch64-linux-gnu-gcc"
+          source=src/.github/ick-aarch64/ick-android-math.c
+
+          "$ick" -std=gnu11 -O2 -fPIC -ffixed-x18 -fvisibility=hidden \
+            -S "$source" -o /tmp/ick-android-math.s
+          if grep -Eq '(^|[^[:alnum:]_])(x18|w18)([^[:alnum:]_]|$)' \
+              /tmp/ick-android-math.s; then
+            echo 'Android-reserved x18 was used' >&2
+            exit 1
+          fi
+
+          "$ick" -std=gnu11 -O2 -fPIC -ffixed-x18 -fvisibility=hidden \
+            -c "$source" -o /tmp/ick-android-math.o
+          aarch64-linux-gnu-readelf -h /tmp/ick-android-math.o \
+            | tee /tmp/ick-android-math.elf
+          grep -q 'Machine:.*AArch64' /tmp/ick-android-math.elf
+          aarch64-linux-gnu-nm -u /tmp/ick-android-math.o \
+            | tee /tmp/ick-android-math.undefined
+          ! grep -Eq '__mul(sc|dc|xc)3|__div(sc|dc|xc)3' \
+            /tmp/ick-android-math.undefined
+
+      - name: Install pinned Android NDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Fetch pinned NDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdkmanager "ndk;$ANDROID_NDK_VERSION"
+
+      - name: Verify current-NDK API floor and link Android shared library
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          ndk="$sdk_root/ndk/$ANDROID_NDK_VERSION"
+          llvm_bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          ndk_cc="$llvm_bin/aarch64-linux-android${ANDROID_API}-clang"
+          test -x "$ndk_cc"
+
+          python3 - "$ndk/meta/platforms.json" "$ANDROID_API" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          requested = int(sys.argv[2])
+          minimum = int(metadata['min'])
+          assert requested >= minimum, (requested, minimum)
+          assert requested == minimum, (
+              f'foundation gate should exercise the NDK floor: '
+              f'requested {requested}, NDK minimum {minimum}'
+          )
+          PY
+
+          "$ndk_cc" -std=c11 -O2 -fPIC -fvisibility=hidden \
+            -c src/.github/ick-aarch64/ndk-bridge.c \
+            -o /tmp/ndk-bridge.o
+          "$ndk_cc" -shared \
+            -Wl,-z,defs \
+            -Wl,-z,text \
+            -Wl,--fatal-warnings \
+            -Wl,-soname,libick-foundation.so \
+            /tmp/ick-android-math.o /tmp/ndk-bridge.o \
+            -lm -o /tmp/libick-foundation.so
+
+          "$llvm_bin/llvm-readelf" -h /tmp/libick-foundation.so \
+            | tee /tmp/libick-foundation.elf
+          grep -q 'Machine:.*AArch64' /tmp/libick-foundation.elf
+
+          "$llvm_bin/llvm-nm" -D --defined-only /tmp/libick-foundation.so \
+            | tee /tmp/libick-foundation.exports
+          grep -Eq '[[:space:]]ick_complex_cartesian$' \
+            /tmp/libick-foundation.exports
+          grep -Eq '[[:space:]]wegert_ick_runtime_probe$' \
+            /tmp/libick-foundation.exports
+
+      - name: Verify 16 KiB-compatible ELF load alignment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          llvm_bin="$sdk_root/ndk/$ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          "$llvm_bin/llvm-readelf" -lW /tmp/libick-foundation.so \
+            | tee /tmp/libick-foundation.program-headers
+          python3 - /tmp/libick-foundation.program-headers <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text()
+          aligns = []
+          for line in text.splitlines():
+              if line.lstrip().startswith('LOAD '):
+                  match = re.search(r'\s(0x[0-9a-fA-F]+)\s*$', line)
+                  assert match, line
+                  aligns.append(int(match.group(1), 16))
+          assert aligns, 'no PT_LOAD segments found'
+          assert all(a >= 16384 for a in aligns), aligns
+          PY

@@ -1,0 +1,4 @@
+gcc_repository=https://github.com/gcc-mirror/gcc.git
+gcc_commit=6294f1d9e7536e5ffcde09d1528c918d63abfef5
+import_repository=https://github.com/isomorphisms/rhs.git
+import_commit=7458b3c29fe535eb7dda3b1c756b362cee5c889d
