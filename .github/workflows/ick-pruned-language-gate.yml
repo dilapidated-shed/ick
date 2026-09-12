@@ -1,0 +1,113 @@
+name: ICK pruned language gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  c-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out ICK source and pinned GCC reference
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Materialize the owned C-only source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sh ick/materialize.sh gcc source
+
+          while IFS= read -r path; do
+            case "$path" in
+              ""|\#*) continue ;;
+            esac
+            test ! -e "source/$path"
+          done < ick/PRUNE
+
+          test -d source/gcc/c
+          test -d source/gcc/c-family
+          test -d source/gcc/testsuite/gcc.dg
+          test -d source/gcc/testsuite/c-c++-common
+          test -d source/libcody
+          test -d source/libcpp
+
+          grep -Fqx \
+            'DEFTREECODE (OVERLOAD, "overload", tcc_exceptional, 0)' \
+            source/gcc/c-family/c-common.def
+          grep -Fqx \
+            'DEFTREECODE (TEMPLATE_DECL, "template_decl", tcc_declaration, 0)' \
+            source/gcc/c-family/c-common.def
+          grep -Fqx \
+            'DEFTREECODE (USING_DECL, "using_decl", tcc_declaration, 0)' \
+            source/gcc/c-family/c-common.def
+          grep -Fqx \
+            'DEFTREECODE (ALIGNOF_EXPR, "alignof_expr", tcc_expression, 1)' \
+            source/gcc/c-family/c-common.def
+          grep -Fqx \
+            'DEFTREECODE (EXPR_STMT, "expr_stmt", tcc_expression, 1)' \
+            source/gcc/c-family/c-common.def
+
+      - name: Install C-only cross compiler build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential flex bison texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev \
+            binutils-aarch64-linux-gnu
+
+      - name: Configure pruned C-only ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir build stage
+          cd build
+          ../source/configure \
+            --target=aarch64-linux-gnu \
+            --prefix="$GITHUB_WORKSPACE/stage" \
+            --with-as="$(command -v aarch64-linux-gnu-as)" \
+            --with-ld="$(command -v aarch64-linux-gnu-ld)" \
+            --enable-languages=c \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-threads \
+            --without-headers \
+            --disable-libatomic \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv
+
+      - name: Build and smoke-test C-only ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make -C build -j2 all-gcc
+          make -C build install-gcc
+          ick="$GITHUB_WORKSPACE/stage/bin/aarch64-linux-gnu-gcc"
+          "$ick" --version
+          cat > /tmp/prune-smoke.c <<'EOF'
+          int add(int a, int b) { return a + b; }
+          EOF
+          "$ick" -O2 -fPIC -c /tmp/prune-smoke.c -o /tmp/prune-smoke.o
+          aarch64-linux-gnu-readelf -h /tmp/prune-smoke.o \
+            | grep -q 'Machine:.*AArch64'
+
+      - name: Record focused qualification boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: owned pruned source materialized and built with `--enable-languages=c`
+
+          PASS: installed ICK driver produced an AArch64 PIC object
+
+          SKIP: Android runtime execution, complete Wegert library, APK, and
+          F-Droid packaging remain outside this focused pruning gate
+          EOF

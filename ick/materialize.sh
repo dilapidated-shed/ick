@@ -7,7 +7,7 @@ reference=${1:-"$repository_root/gcc"}
 output=${2:-"$repository_root/build/ick-source"}
 
 # This file is deliberately shell-readable: the build has one immutable GCC
-# reference and one immutable import receipt.
+# reference and immutable source/pruning receipts.
 . "$script_dir/SOURCE.lock"
 
 test -d "$reference"
@@ -22,6 +22,17 @@ git -C "$reference" cat-file -e "$gcc_commit:COPYING.RUNTIME"
 
 (cd "$repository_root" && sha256sum -c ick/OVERLAY.sha256)
 
+while IFS= read -r path; do
+  case "$path" in
+    ""|\#*) continue ;;
+    /*|*..*)
+      echo "unsafe prune path: $path" >&2
+      exit 1
+      ;;
+  esac
+  git -C "$reference" cat-file -e "$gcc_commit:$path"
+done < "$script_dir/PRUNE"
+
 if test -e "$output"; then
   echo "refusing to overwrite materialized source: $output" >&2
   exit 1
@@ -29,6 +40,14 @@ fi
 
 mkdir -p "$output"
 git -C "$reference" archive "$gcc_commit" | tar -xf - -C "$output"
+
+while IFS= read -r path; do
+  case "$path" in
+    ""|\#*) continue ;;
+  esac
+  rm -rf -- "$output/$path"
+  test ! -e "$output/$path"
+done < "$script_dir/PRUNE"
 
 find "$script_dir/source" -type f -print | LC_ALL=C sort |
 while IFS= read -r source; do
@@ -48,5 +67,6 @@ cat <<EOF
 ICK source materialized
   GCC reference: $gcc_repository $gcc_commit
   ICK import:    $import_repository $import_commit
+  C-only prune:  $prune_repository $prune_commit
   output:        $output
 EOF
