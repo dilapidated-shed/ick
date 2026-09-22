@@ -1,0 +1,329 @@
+name: Android ABI foundation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_NDK_VERSION: 29.0.14206865
+  ANDROID_API: 21
+
+jobs:
+  qualify:
+    name: ${{ matrix.abi }} source and boundary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            gnu_target: aarch64-linux-gnu
+            binutils_package: binutils-aarch64-linux-gnu
+            binutils_prefix: aarch64-linux-gnu
+            ndk_driver: aarch64-linux-android21-clang
+            wrong_ndk_driver: i686-linux-android21-clang
+            elf_class: ELF64
+            elf_machine: AArch64
+            required_load_alignment: 16384
+            target_flags: -ffixed-x18
+          - abi: armeabi-v7a
+            gnu_target: arm-linux-gnueabi
+            binutils_package: binutils-arm-linux-gnueabi
+            binutils_prefix: arm-linux-gnueabi
+            ndk_driver: armv7a-linux-androideabi21-clang
+            wrong_ndk_driver: aarch64-linux-android21-clang
+            elf_class: ELF32
+            elf_machine: ARM
+            required_load_alignment: 4096
+            target_flags: -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp
+          - abi: x86_64
+            gnu_target: x86_64-linux-gnu
+            binutils_package: binutils-x86-64-linux-gnu
+            binutils_prefix: x86_64-linux-gnu
+            ndk_driver: x86_64-linux-android21-clang
+            wrong_ndk_driver: i686-linux-android21-clang
+            elf_class: ELF64
+            elf_machine: Advanced Micro Devices X86-64
+            required_load_alignment: 16384
+            target_flags: -march=x86-64-v2 -mno-avx -mno-movbe
+          - abi: x86
+            gnu_target: i686-linux-gnu
+            binutils_package: binutils-i686-linux-gnu
+            binutils_prefix: i686-linux-gnu
+            ndk_driver: i686-linux-android21-clang
+            wrong_ndk_driver: x86_64-linux-android21-clang
+            elf_class: ELF32
+            elf_machine: Intel 80386
+            required_load_alignment: 4096
+            target_flags: -march=i686 -mssse3 -mno-sse4 -mno-sse4.1 -mno-sse4.2 -mno-avx -mno-movbe -mfpmath=sse -mstackrealign -mpreferred-stack-boundary=4 -mincoming-stack-boundary=4
+
+    steps:
+      - name: Check out ICK source and pinned GCC reference
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Verify and materialize the squashed ICK source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          . ick/SOURCE.lock
+          test "$(git -C gcc rev-parse HEAD)" = "$gcc_commit"
+          sh ick/materialize.sh gcc source
+          test -s source/COPYING3
+          test -s source/COPYING.RUNTIME
+          test -s source/gcc/config/linux-android.h
+          test -s source/gcc/testsuite/gcc.dg/ick-complex-polar-layout.c
+
+      - name: Install compiler build tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential file flex bison texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev \
+            "${{ matrix.binutils_package }}"
+
+      - name: Configure ${{ matrix.abi }} ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          target_as="$(command -v "${{ matrix.binutils_prefix }}-as")"
+          target_ld="$(command -v "${{ matrix.binutils_prefix }}-ld")"
+          mkdir build stage
+          cd build
+          ../source/configure \
+            --target="${{ matrix.gnu_target }}" \
+            --prefix="$GITHUB_WORKSPACE/stage" \
+            --with-as="$target_as" \
+            --with-ld="$target_ld" \
+            --enable-languages=c \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-threads \
+            --without-headers \
+            --disable-libatomic \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv
+
+      - name: Build ${{ matrix.abi }} ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make -C build -j2 all-gcc
+          make -C build install-gcc
+          ick="$GITHUB_WORKSPACE/stage/bin/${{ matrix.gnu_target }}-gcc"
+          "$ick" --version
+          cc1_path="$("$ick" -print-prog-name=cc1)"
+          test -x "$cc1_path"
+          case "$cc1_path" in
+            "$GITHUB_WORKSPACE/stage"/*) ;;
+            *) echo "cc1 escaped the ICK installation: $cc1_path" >&2; exit 1 ;;
+          esac
+
+      - name: Verify ordinary C and target identity
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ick="$GITHUB_WORKSPACE/stage/bin/${{ matrix.gnu_target }}-gcc"
+          readelf="${{ matrix.binutils_prefix }}-readelf"
+          read -r -a target_flags <<< '${{ matrix.target_flags }}'
+
+          cat > /tmp/plain.c <<'EOF'
+          int add(int left, int right) { return left + right; }
+          EOF
+          "$ick" "${target_flags[@]}" -std=c11 -O2 -fPIC \
+            -c /tmp/plain.c -o /tmp/plain.o
+          "$readelf" -h /tmp/plain.o | tee /tmp/plain.elf
+          grep -q 'Class:.*${{ matrix.elf_class }}' /tmp/plain.elf
+          grep -q 'Machine:' /tmp/plain.elf
+          grep -Fq '${{ matrix.elf_machine }}' /tmp/plain.elf
+
+      - name: Verify Android-specific compile rules
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ick="$GITHUB_WORKSPACE/stage/bin/${{ matrix.gnu_target }}-gcc"
+          readelf="${{ matrix.binutils_prefix }}-readelf"
+          read -r -a target_flags <<< '${{ matrix.target_flags }}'
+          source_file=qualification/android-boundary/ick-android-math.c
+
+          "$ick" "${target_flags[@]}" -std=gnu11 -O2 -fPIC \
+            -fvisibility=hidden -S "$source_file" -o /tmp/ick-android-math.s
+          "$ick" "${target_flags[@]}" -std=gnu11 -O2 -fPIC \
+            -fvisibility=hidden -c "$source_file" -o /tmp/ick-android-math.o
+
+          case '${{ matrix.abi }}' in
+            arm64-v8a)
+              if grep -Eq '(^|[^[:alnum:]_])(x18|w18)([^[:alnum:]_]|$)' \
+                  /tmp/ick-android-math.s; then
+                echo 'Android-reserved x18 was used' >&2
+                exit 1
+              fi
+              ;;
+            armeabi-v7a)
+              "$readelf" -A /tmp/ick-android-math.o | tee /tmp/arm.attributes
+              grep -q 'Tag_CPU_arch: v7' /tmp/arm.attributes
+              grep -q 'Tag_THUMB_ISA_use: Thumb-2' /tmp/arm.attributes
+              if grep -q 'Tag_ABI_VFP_args: VFP registers' /tmp/arm.attributes; then
+                echo 'hard-float argument convention is not Android armeabi-v7a' >&2
+                exit 1
+              fi
+              ;;
+            x86)
+              "$ick" "${target_flags[@]}" -Q --help=target \
+                -c /tmp/plain.c -o /tmp/options.o | tee /tmp/x86-options
+              grep -Eq -- '-mstackrealign[[:space:]]+\[enabled\]' /tmp/x86-options
+              ;;
+            x86_64)
+              "$ick" "${target_flags[@]}" -dM -E -x c /dev/null \
+                > /tmp/x86_64-macros
+              grep -q '^#define __SSE4_2__ 1$' /tmp/x86_64-macros
+              grep -q '^#define __POPCNT__ 1$' /tmp/x86_64-macros
+              ! grep -q '^#define __AVX__ 1$' /tmp/x86_64-macros
+              ;;
+          esac
+
+          "${{ matrix.binutils_prefix }}-nm" -u /tmp/ick-android-math.o \
+            | tee /tmp/ick-android-math.undefined
+          ! grep -Eq '__mul(sc|dc|xc)3|__div(sc|dc|xc)3' \
+            /tmp/ick-android-math.undefined
+
+      - name: Install pinned Android NDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Fetch pinned Android NDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdkmanager "ndk;$ANDROID_NDK_VERSION"
+
+      - name: Verify API floor and scalar ABI sizes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          ndk="$sdk_root/ndk/$ANDROID_NDK_VERSION"
+          llvm_bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          ndk_cc="$llvm_bin/${{ matrix.ndk_driver }}"
+          ick="$GITHUB_WORKSPACE/stage/bin/${{ matrix.gnu_target }}-gcc"
+          read -r -a target_flags <<< '${{ matrix.target_flags }}'
+          test -x "$ndk_cc"
+
+          minimum="$(sed -n 's/.*"min"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+            "$ndk/meta/platforms.json" | head -1)"
+          test "$ANDROID_API" = "$minimum"
+
+          "$ick" "${target_flags[@]}" -dM -E -x c /dev/null > /tmp/ick.macros
+          "$ndk_cc" -dM -E -x c /dev/null > /tmp/ndk.macros
+          for macro in \
+              __SIZEOF_POINTER__ __SIZEOF_LONG__ __SIZEOF_INT__ \
+              __SIZEOF_FLOAT__ __SIZEOF_DOUBLE__ __BYTE_ORDER__; do
+            ick_value="$(awk -v name="$macro" '$2 == name { print $3 }' /tmp/ick.macros)"
+            ndk_value="$(awk -v name="$macro" '$2 == name { print $3 }' /tmp/ndk.macros)"
+            test -n "$ick_value"
+            test "$ick_value" = "$ndk_value"
+          done
+          ! grep -Eq '(^|[^[:alnum:]_])long[[:space:]]+double([^[:alnum:]_]|$)' \
+            qualification/android-boundary/ick-android-math.c
+
+      - name: Link ICK and reference Android shared libraries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          ndk="$sdk_root/ndk/$ANDROID_NDK_VERSION"
+          llvm_bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          ndk_cc="$llvm_bin/${{ matrix.ndk_driver }}"
+          wrong_ndk_cc="$llvm_bin/${{ matrix.wrong_ndk_driver }}"
+          bridge=qualification/android-boundary/ndk-bridge.c
+          source_file=qualification/android-boundary/ick-android-math.c
+
+          "$ndk_cc" -std=c11 -O2 -fPIC -fvisibility=hidden \
+            -c "$bridge" -o /tmp/ndk-bridge.o
+          "$ndk_cc" -shared \
+            -Wl,-z,defs -Wl,-z,text -Wl,--fatal-warnings \
+            -Wl,-soname,libick-foundation.so \
+            /tmp/ick-android-math.o /tmp/ndk-bridge.o \
+            -lm -o /tmp/libick-foundation.so
+
+          "$ndk_cc" -std=gnu11 -O2 -fPIC -fvisibility=hidden \
+            -c "$source_file" -o /tmp/reference-android-math.o
+          "$ndk_cc" -shared \
+            -Wl,-z,defs -Wl,-z,text -Wl,--fatal-warnings \
+            -Wl,-soname,libreference-foundation.so \
+            /tmp/reference-android-math.o /tmp/ndk-bridge.o \
+            -lm -o /tmp/libreference-foundation.so
+
+          "$llvm_bin/llvm-readelf" -h /tmp/libick-foundation.so \
+            | tee /tmp/libick-foundation.elf
+          grep -q 'Class:.*${{ matrix.elf_class }}' /tmp/libick-foundation.elf
+          grep -q 'Machine:' /tmp/libick-foundation.elf
+          grep -Fq '${{ matrix.elf_machine }}' /tmp/libick-foundation.elf
+
+          "$llvm_bin/llvm-nm" -D --defined-only /tmp/libick-foundation.so \
+            | awk '{ print $3 }' | sed '/^$/d' | sort -u > /tmp/ick.exports
+          "$llvm_bin/llvm-nm" -D --defined-only /tmp/libreference-foundation.so \
+            | awk '{ print $3 }' | sed '/^$/d' | sort -u > /tmp/reference.exports
+          diff -u /tmp/reference.exports /tmp/ick.exports
+          grep -qx 'ick_complex_cartesian' /tmp/ick.exports
+          grep -qx 'wegert_ick_runtime_probe' /tmp/ick.exports
+
+          if "$wrong_ndk_cc" -shared -Wl,-z,defs \
+              /tmp/ick-android-math.o -o /tmp/wrong-target.so \
+              -lm \
+              >/tmp/wrong-target.log 2>&1; then
+            echo 'mismatched Android target accepted the ICK object' >&2
+            exit 1
+          fi
+          grep -Eiq 'incompatible|wrong ELF class|different ELF class' \
+            /tmp/wrong-target.log
+
+      - name: Verify ABI-appropriate load alignment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          llvm_bin="$sdk_root/ndk/$ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          "$llvm_bin/llvm-readelf" -lW /tmp/libick-foundation.so \
+            | tee /tmp/libick-foundation.program-headers
+          mapfile -t aligns < <(
+            awk '$1 == "LOAD" { print $NF }' \
+              /tmp/libick-foundation.program-headers
+          )
+          test "${#aligns[@]}" -gt 0
+          for align in "${aligns[@]}"; do
+            test "$((align))" -ge ${{ matrix.required_load_alignment }}
+          done
+
+      - name: Record qualification boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### ${{ matrix.abi }} foundation receipt
+
+          PASS: pinned GCC reference and squashed ICK source materialized
+
+          PASS: ICK compiler built and its own installed `cc1` was used
+
+          PASS: expected ELF class/machine, PIC object, Android API 21 link,
+          exported scalar boundary, mismatched-target refusal, and the ABI's
+          required load alignment
+
+          SKIP: Android runtime execution, complete Wegert library, APK, and
+          F-Droid packaging remain outside this foundation job
+          EOF

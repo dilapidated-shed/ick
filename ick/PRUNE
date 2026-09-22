@@ -1,0 +1,27 @@
+# Exact C-only pruning imported from isomorphisms/rhs at
+# 6a1f781fb036a110c5f4dacff9a12769a5b0a706.
+c++tools
+gcc/cobol
+gcc/cp
+gcc/objc
+gcc/objcp
+gcc/testsuite/cobol.dg
+gcc/testsuite/g++.dg
+gcc/testsuite/g++.old-deja
+gcc/testsuite/g++.target
+gcc/testsuite/obj-c++.dg
+gcc/testsuite/objc.dg
+gcc/testsuite/lib/cobol-dg.exp
+gcc/testsuite/lib/cobol.exp
+gcc/testsuite/lib/g++-dg.exp
+gcc/testsuite/lib/g++.exp
+gcc/testsuite/lib/mike-g++.exp
+gcc/testsuite/lib/obj-c++-dg.exp
+gcc/testsuite/lib/obj-c++.exp
+gcc/testsuite/lib/objc-dg.exp
+gcc/testsuite/lib/objc-torture.exp
+gcc/testsuite/lib/objc.exp
+libgcobol
+libobjc
+libstdc++-v3
+libvtv
