@@ -20,7 +20,24 @@ fi
 git -C "$reference" cat-file -e "$gcc_commit:COPYING3"
 git -C "$reference" cat-file -e "$gcc_commit:COPYING.RUNTIME"
 
+manifest_paths=$(mktemp "${TMPDIR:-/tmp}/ick-overlay-manifest.XXXXXX")
+source_paths=$(mktemp "${TMPDIR:-/tmp}/ick-overlay-source.XXXXXX")
+trap 'rm -f "$manifest_paths" "$source_paths"' EXIT HUP INT TERM
+
+awk '{ print $2 }' "$script_dir/OVERLAY.sha256" | LC_ALL=C sort \
+  > "$manifest_paths"
+(cd "$repository_root" && find ick/source -type f -print | LC_ALL=C sort) \
+  > "$source_paths"
+
+if ! cmp -s "$manifest_paths" "$source_paths"; then
+  echo "overlay manifest does not exactly match ick/source" >&2
+  diff -u "$manifest_paths" "$source_paths" >&2 || :
+  exit 1
+fi
+
 (cd "$repository_root" && sha256sum -c ick/OVERLAY.sha256)
+rm -f "$manifest_paths" "$source_paths"
+trap - EXIT HUP INT TERM
 
 while IFS= read -r path; do
   case "$path" in
