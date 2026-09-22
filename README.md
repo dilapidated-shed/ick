@@ -21,7 +21,10 @@ See:
 - [`docs/targets.md`](docs/targets.md) for the orthogonal target model.
 - [`docs/android-release-gate.md`](docs/android-release-gate.md) for the Android/F-Droid compiler qualification matrix.
 
-The existing AArch64 work is evidence that ICK can participate in an Android build, but it is not yet evidence that ICK can build every release ABI. Release qualification is explicit and per target.
+The current four-ABI workflow proves the focused compiler/object/link boundary
+for every public Android NDK ABI. It does not yet prove Android runtime
+execution, the complete Wegert library, APK packaging, or F-Droid rebuilding.
+Release qualification remains explicit and per target.
 
 To materialize the compiler source:
 
