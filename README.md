@@ -20,6 +20,7 @@ See:
 - [`LICENSING.md`](LICENSING.md) for the GCC/runtime/model licensing boundaries.
 - [`docs/targets.md`](docs/targets.md) for the orthogonal target model.
 - [`docs/android-release-gate.md`](docs/android-release-gate.md) for the Android/F-Droid compiler qualification matrix.
+- [`docs/imprecise-types.md`](docs/imprecise-types.md) for the E3M2 and E5M3 storage-type boundary.
 
 The current four-ABI workflow proves the focused compiler/object/link boundary
 for every public Android NDK ABI. It does not yet prove Android runtime
@@ -34,6 +35,13 @@ sh ick/materialize.sh gcc build/ick-source
 ```
 
 See [`ick/README.md`](ick/README.md) for the source-ownership rule.
+
+## Imprecise storage types
+
+`<ick/imprecise.h>` exposes distinct one-byte `E3M2` and `E5M3` C types
+with explicit binary32 encode/decode operations. They are storage types rather
+than invented arithmetic types; the qualification suite requires ICK to reject
+ordinary arithmetic on both.
 
 ## Meaning model
 
