@@ -16,8 +16,25 @@ env:
   ANDROID_API: 21
 
 jobs:
+  imprecise-semantics:
+    name: E3M2 and E5M3 semantics
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out ICK
+        uses: actions/checkout@v6
+
+      - name: Exercise every storage code
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iick/include \
+            qualification/imprecise-types/semantic.c \
+            -o /tmp/ick-imprecise-semantic
+          /tmp/ick-imprecise-semantic
+
   qualify:
     name: ${{ matrix.abi }} source and boundary
+    needs: imprecise-semantics
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     strategy:
@@ -150,6 +167,32 @@ jobs:
           grep -q 'Class:.*${{ matrix.elf_class }}' /tmp/plain.elf
           grep -q 'Machine:' /tmp/plain.elf
           grep -Fq '${{ matrix.elf_machine }}' /tmp/plain.elf
+
+      - name: Verify E3M2 and E5M3 storage types with ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ick="$GITHUB_WORKSPACE/stage/bin/${{ matrix.gnu_target }}-gcc"
+          read -r -a target_flags <<< '${{ matrix.target_flags }}'
+
+          "$ick" "${target_flags[@]}" -std=c11 -O2 -fPIC -Iick/include \
+            -c qualification/imprecise-types/compile.c \
+            -o /tmp/ick-imprecise.o
+          "${{ matrix.binutils_prefix }}-nm" -u /tmp/ick-imprecise.o \
+            > /tmp/ick-imprecise.undefined
+          test ! -s /tmp/ick-imprecise.undefined
+
+          for kind in E3 E5; do
+            if "$ick" "${target_flags[@]}" -std=c11 -O2 -Iick/include \
+                -DTEST_$kind \
+                -c qualification/imprecise-types/reject-arithmetic.c \
+                -o /tmp/reject-$kind.o \
+                > /tmp/reject-$kind.log 2>&1; then
+              echo "$kind arithmetic was accepted" >&2
+              exit 1
+            fi
+            grep -qi 'invalid operands' /tmp/reject-$kind.log
+          done
 
       - name: Verify Android-specific compile rules
         shell: bash
@@ -319,6 +362,8 @@ jobs:
           PASS: pinned GCC reference and squashed ICK source materialized
 
           PASS: ICK compiler built and its own installed `cc1` was used
+
+          PASS: E3M2/E5M3 storage types compiled and invented arithmetic was rejected
 
           PASS: expected ELF class/machine, PIC object, Android API 21 link,
           exported scalar boundary, mismatched-target refusal, and the ABI's
