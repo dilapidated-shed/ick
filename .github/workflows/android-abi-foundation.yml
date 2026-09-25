@@ -16,8 +16,43 @@ env:
   ANDROID_API: 21
 
 jobs:
+  imprecise-semantics:
+    name: Five numeric types and Circle96 semantics
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out ICK
+        uses: actions/checkout@v6
+
+      - name: Exercise every storage code
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iick/include \
+            qualification/imprecise-types/semantic.c \
+            -o /tmp/ick-imprecise-semantic
+          /tmp/ick-imprecise-semantic
+
+      - name: Report residuals without judging them
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cc -std=c11 -Wall -Wextra -O2 -Iick/include \
+            qualification/imprecise-types/residuals.c \
+            -o /tmp/ick-residuals
+          /tmp/ick-residuals | tee /tmp/ick-residuals.txt
+          {
+            echo '### Compact-type and Circle96 residuals'
+            echo
+            echo 'Residual convention: result - reference. Residual magnitude is diagnostic only.'
+            echo
+            echo '```text'
+            grep -E '^(summary|sample,circle96|report_complete)' /tmp/ick-residuals.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   qualify:
     name: ${{ matrix.abi }} source and boundary
+    needs: imprecise-semantics
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     strategy:
@@ -150,6 +185,33 @@ jobs:
           grep -q 'Class:.*${{ matrix.elf_class }}' /tmp/plain.elf
           grep -q 'Machine:' /tmp/plain.elf
           grep -Fq '${{ matrix.elf_machine }}' /tmp/plain.elf
+
+      - name: Verify five numeric types and Circle96 with ICK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ick="$GITHUB_WORKSPACE/stage/bin/${{ matrix.gnu_target }}-gcc"
+          read -r -a target_flags <<< '${{ matrix.target_flags }}'
+
+          "$ick" "${target_flags[@]}" -std=c11 -O2 -fPIC -ffreestanding -nostdinc \
+            -Iick/include -c qualification/imprecise-types/compile.c \
+            -o /tmp/ick-imprecise.o
+          "${{ matrix.binutils_prefix }}-nm" -u /tmp/ick-imprecise.o \
+            | tee /tmp/ick-imprecise.undefined
+          ! grep -Eq '__aeabi_d|__(add|sub|mul|div)df3' \
+            /tmp/ick-imprecise.undefined
+
+          for kind in E5M3 CIRCLE CIRCLE_ROTATION_MIX; do
+            if "$ick" "${target_flags[@]}" -std=c11 -O2 -ffreestanding -nostdinc \
+                -Iick/include -DTEST_$kind \
+                -c qualification/imprecise-types/reject-arithmetic.c \
+                -o /tmp/reject-$kind.o \
+                > /tmp/reject-$kind.log 2>&1; then
+              echo "$kind category error was accepted" >&2
+              exit 1
+            fi
+            grep -Eqi 'invalid operands|incompatible types' /tmp/reject-$kind.log
+          done
 
       - name: Verify Android-specific compile rules
         shell: bash
@@ -319,6 +381,8 @@ jobs:
           PASS: pinned GCC reference and squashed ICK source materialized
 
           PASS: ICK compiler built and its own installed `cc1` was used
+
+          PASS: Float16/E4M3/E5M2/E3M2/E5M3 and Circle96 compiled with their intended arithmetic/category boundaries
 
           PASS: expected ELF class/machine, PIC object, Android API 21 link,
           exported scalar boundary, mismatched-target refusal, and the ABI's

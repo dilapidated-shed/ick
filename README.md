@@ -20,6 +20,8 @@ See:
 - [`LICENSING.md`](LICENSING.md) for the GCC/runtime/model licensing boundaries.
 - [`docs/targets.md`](docs/targets.md) for the orthogonal target model.
 - [`docs/android-release-gate.md`](docs/android-release-gate.md) for the Android/F-Droid compiler qualification matrix.
+- [`docs/imprecise-types.md`](docs/imprecise-types.md) for the five low-precision numeric types.
+- [`docs/circle96.md`](docs/circle96.md) for finite Circle96 machine geometry.
 
 The current four-ABI workflow proves the focused compiler/object/link boundary
 for every public Android NDK ABI. It does not yet prove Android runtime
@@ -34,6 +36,17 @@ sh ick/materialize.sh gcc build/ick-source
 ```
 
 See [`ick/README.md`](ick/README.md) for the source-ownership rule.
+
+## Imprecise storage types
+
+`<ick/imprecise.h>` exposes the five low-precision numeric types `Float16`,
+`E4M3`, `E5M2`, `E3M2`, and `E5M3`. The first four use explicit binary32
+one-operation-then-requantize arithmetic; unsigned storage-only `E5M3` has no
+invented arithmetic.
+
+`<ick/circle.h>` exposes `Circle96`, `Rotation96`, `Reflection96`, and
+`Tangent96` as distinct geometric categories with exact 96-position rotation,
+reflection, sector, and local-displacement operations.
 
 ## Meaning model
 
