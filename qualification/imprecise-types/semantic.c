@@ -1,8 +1,7 @@
-#include <stdint.h>
 #include <ick/imprecise.h>
 
 static int
-expect_e3(uint32_t bits, uint8_t code)
+expect_e3(ick_u32 bits, ick_byte code)
 {
     return e3m2_code(e3m2_from_float(ick_float_from_bits(bits))) == code;
 }
@@ -14,7 +13,7 @@ main(void)
     unsigned code;
 
     for (code = 0; code < 64; ++code)
-        if (e3m2_code(e3m2_from_float(e3m2_to_float(e3m2_from_code(code)))) != code)
+        if (e3m2_code(e3m2_from_float(e3m2_to_float(e3m2_from_code((ick_byte)code)))) != code)
             return 1;
 
     if (!expect_e3(0x3d000000u, 0)       /* 0.03125: tie -> even zero. */
@@ -36,7 +35,7 @@ main(void)
         return 5;
 
     for (code = 0; code < 256; ++code) {
-        E5M3 original = e5m3_from_code((uint8_t)code);
+        E5M3 original = e5m3_from_code((ick_byte)code);
         E5M3 round_tripped;
         if (!e5m3_from_float(e5m3_to_float(original), &round_tripped)
             || e5m3_code(round_tripped) != code)
