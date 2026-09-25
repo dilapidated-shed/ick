@@ -168,7 +168,7 @@ jobs:
           grep -q 'Machine:' /tmp/plain.elf
           grep -Fq '${{ matrix.elf_machine }}' /tmp/plain.elf
 
-      - name: Verify E3M2 and E5M3 storage types with ICK
+      - name: Verify five numeric types and Circle96 with ICK
         shell: bash
         run: |
           set -euxo pipefail
