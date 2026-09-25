@@ -341,19 +341,19 @@ print_operation_samples(void)
         float aq = TO(a), bq = TO(b);                                            \
         float reference = aq + bq;                                               \
         float result = TO(ADD(a, b));                                             \
-        printf("sample," FORMAT ",add,%.9g,%.9g,%.9g,%.9g,%.9g\\n",          \
+        printf("sample," FORMAT ",add,%.9g,%.9g,%.9g,%.9g,%.9g\n",          \
                aq, bq, reference, result, result - reference);                   \
         reference = aq - bq;                                                     \
         result = TO(SUB(a, b));                                                   \
-        printf("sample," FORMAT ",subtract,%.9g,%.9g,%.9g,%.9g,%.9g\\n",     \
+        printf("sample," FORMAT ",subtract,%.9g,%.9g,%.9g,%.9g,%.9g\n",     \
                aq, bq, reference, result, result - reference);                   \
         reference = aq * bq;                                                     \
         result = TO(MUL(a, b));                                                   \
-        printf("sample," FORMAT ",multiply,%.9g,%.9g,%.9g,%.9g,%.9g\\n",     \
+        printf("sample," FORMAT ",multiply,%.9g,%.9g,%.9g,%.9g,%.9g\n",     \
                aq, bq, reference, result, result - reference);                   \
         reference = aq / bq;                                                     \
         result = TO(DIV(a, b));                                                   \
-        printf("sample," FORMAT ",divide,%.9g,%.9g,%.9g,%.9g,%.9g\\n",       \
+        printf("sample," FORMAT ",divide,%.9g,%.9g,%.9g,%.9g,%.9g\n",       \
                aq, bq, reference, result, result - reference);                   \
     } while (0)
 
