@@ -32,6 +32,24 @@ jobs:
             -o /tmp/ick-imprecise-semantic
           /tmp/ick-imprecise-semantic
 
+      - name: Report residuals without judging them
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cc -std=c11 -Wall -Wextra -O2 -Iick/include \
+            qualification/imprecise-types/residuals.c \
+            -o /tmp/ick-residuals
+          /tmp/ick-residuals | tee /tmp/ick-residuals.txt
+          {
+            echo '### Compact-type and Circle96 residuals'
+            echo
+            echo 'Residual convention: result - reference. Residual magnitude is diagnostic only.'
+            echo
+            echo '```text'
+            grep -E '^(summary|sample,circle96|report_complete)' /tmp/ick-residuals.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   qualify:
     name: ${{ matrix.abi }} source and boundary
     needs: imprecise-semantics
