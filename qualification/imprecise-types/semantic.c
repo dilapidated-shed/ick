@@ -62,6 +62,9 @@ main(void)
         return 31;
     if (e3m2_code(e3m2_from_float(-1000.0f)) != 63)
         return 32;
+    if (e3m2_code(e3m2_from_float(ick_float_from_bits(0x7fc00000u))) != 0
+        || e3m2_code(e3m2_from_float(ick_float_from_bits(0xffc00000u))) != 0)
+        return 33;
 
     for (code = 0; code < 256; ++code) {
         E5M3 value = e5m3_from_code((ick_byte)code);
