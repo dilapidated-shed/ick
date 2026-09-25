@@ -70,8 +70,7 @@ finite/infinite overflow to that value. NaN remains NaN.
 ICK follows the OCP MX FP6 E3M2 element encoding documented in the ARM Thumb
 backend. The six payload bits are one sign bit, three exponent bits, and two
 mantissa bits. E3M2 has subnormals and signed zero but no infinity or NaN
-encoding. Overflow saturates at 28. A source NaN maps to signed zero, matching
-the current project policy.
+encoding. Overflow saturates at 28. A source NaN maps to positive zero, matching the current Idriç source policy.
 
 ## E5M3
 
