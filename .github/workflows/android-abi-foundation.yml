@@ -175,16 +175,16 @@ jobs:
           ick="$GITHUB_WORKSPACE/stage/bin/${{ matrix.gnu_target }}-gcc"
           read -r -a target_flags <<< '${{ matrix.target_flags }}'
 
-          "$ick" "${target_flags[@]}" -std=c11 -O2 -fPIC -Iick/include \
-            -c qualification/imprecise-types/compile.c \
+          "$ick" "${target_flags[@]}" -std=c11 -O2 -fPIC -ffreestanding -nostdinc \
+            -Iick/include -c qualification/imprecise-types/compile.c \
             -o /tmp/ick-imprecise.o
           "${{ matrix.binutils_prefix }}-nm" -u /tmp/ick-imprecise.o \
             > /tmp/ick-imprecise.undefined
           test ! -s /tmp/ick-imprecise.undefined
 
           for kind in E3 E5; do
-            if "$ick" "${target_flags[@]}" -std=c11 -O2 -Iick/include \
-                -DTEST_$kind \
+            if "$ick" "${target_flags[@]}" -std=c11 -O2 -ffreestanding -nostdinc \
+                -Iick/include -DTEST_$kind \
                 -c qualification/imprecise-types/reject-arithmetic.c \
                 -o /tmp/reject-$kind.o \
                 > /tmp/reject-$kind.log 2>&1; then
