@@ -322,7 +322,7 @@ e3m2_from_float(float value)
     ick_byte code;
 
     if (ick_float_bits_are_nan(bits))
-        return e3m2_from_code(sign);
+        return e3m2_from_code(0);
     if (magnitude_bits == 0)
         return e3m2_from_code(sign);
     if (magnitude_bits >= ick_float_bits(28.0f))
