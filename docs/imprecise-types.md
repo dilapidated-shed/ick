@@ -1,81 +1,107 @@
-# E3M2 and E5M3 storage types
+# Imprecise numeric types
 
-ICK exposes the currently specified low-precision formats through
-`<ick/imprecise.h>`.
+ICK exposes the same five low-precision numeric concepts currently defined by
+the Idriç/Edriç source layer:
 
-They are deliberately distinct C types:
+- `Float16`
+- `E4M3`
+- `E5M2`
+- `E3M2`
+- `E5M3`
 
-```c
-typedef struct { ick_byte payload; } E3M2;
-typedef struct { ick_byte payload; } E5M3;
+The C boundary lives in `<ick/imprecise.h>`. The header is freestanding: it
+uses no libc headers and requires only an eight-bit byte, a 32-bit unsigned
+integer type, and IEEE-like binary32 `float`.
+
+## Storage
+
+```text
+Float16   16 bits
+E4M3       8 bits
+E5M2       8 bits
+E3M2       6 payload bits in one byte
+E5M3       8 bits
 ```
 
-Both occupy one byte in C objects.  They are storage types, not new C
-arithmetic types.  Ordinary arithmetic on either type is therefore rejected by
-C rather than silently promoted to an invented scalar arithmetic model.
+They are distinct C structure types rather than aliases for integer containers.
+Raw payload access is explicit through the corresponding `*_from_code` and
+`*_code` functions.
+
+## Arithmetic policy
+
+`Float16`, `E4M3`, `E5M2`, and `E3M2` follow the Idriç policy: decode to
+binary32, perform exactly one binary32 operation, then requantize to the
+destination format. ICK provides explicit add, subtract, multiply, and divide
+functions for those four types.
+
+This intentionally does not route through binary64.
+
+`E5M3` is different. It is the unsigned Ootomo-Naruse eight-bit storage
+format. It has explicit encode/decode operations but no scalar arithmetic
+contract. Because it is a distinct structure type, ordinary C arithmetic on it
+is rejected.
+
+## Float16
+
+`Float16` uses IEEE binary16 storage. Conversion from binary32 uses
+round-to-nearest, ties-to-even, including subnormals and the normal overflow
+boundary at 65520. Infinities remain infinities and NaNs remain NaNs; NaN
+payloads are canonicalized by the storage conversion.
+
+This mirrors the source-level Float16 contract carried by Idriç PR #49 while
+giving ICK a concrete two-byte representation.
+
+## E4M3
+
+ICK uses the OCP OFP8 E4M3 encoding: one sign bit, four exponent bits, and three
+mantissa bits. The maximum finite magnitude is 448. Construction uses
+round-to-nearest, ties-to-even and saturates finite/infinite overflow to the
+maximum finite value. The reserved NaN encoding remains NaN.
+
+## E5M2
+
+ICK uses the OCP OFP8 E5M2 encoding: one sign bit, five exponent bits, and two
+mantissa bits. The maximum finite magnitude used by the Idriç arithmetic policy
+is 57344. Construction uses round-to-nearest, ties-to-even and saturates
+finite/infinite overflow to that value. NaN remains NaN.
 
 ## E3M2
 
-ICK follows the OCP FP6 E3M2 element encoding documented in the Idric ARM
-backend at commit
-`a2e12da5fba7d499507807a8f394323fbeecbdcf`:
-
-https://github.com/isomorphisms/idric-arm-thumb/blob/a2e12da5fba7d499507807a8f394323fbeecbdcf/specifications/e3m2.md
-
-The low six payload bits contain one sign bit, three exponent bits, and two
-mantissa bits.  The public boundary is:
-
-```c
-E3M2 e3m2_from_code(ick_byte);
-ick_byte e3m2_code(E3M2);
-E3M2 e3m2_from_float(float);
-float e3m2_to_float(E3M2);
-```
-
-`e3m2_from_float` implements round-to-nearest, ties-to-even, signed zero,
-subnormals, and saturation to the maximum finite magnitude.  The source
-specification leaves NaN conversion implementation-defined; ICK maps a source
-NaN to signed zero.  The two unused high bits of a byte are cleared at the
-code boundary.
+ICK follows the OCP MX FP6 E3M2 element encoding documented in the ARM Thumb
+backend. The six payload bits are one sign bit, three exponent bits, and two
+mantissa bits. E3M2 has subnormals and signed zero but no infinity or NaN
+encoding. Overflow saturates at 28. A source NaN maps to signed zero, matching
+the current project policy.
 
 ## E5M3
 
-ICK follows the Ootomo-Naruse unsigned eight-bit storage format documented in
-the Idric ARM backend at commit
-`7c976d85e1b477d93c01db8f6392cffe117251d2`:
+ICK follows the Ootomo-Naruse unsigned storage format documented in the ARM
+Thumb backend. The published conversion applies to positive normal binary32
+inputs, so `e5m3_from_float` remains partial and returns failure for values
+outside that domain. `e5m3_to_float` implements the published midpoint
+reconstruction for every one of the 256 payload codes.
 
-https://github.com/isomorphisms/idric-arm-thumb/blob/7c976d85e1b477d93c01db8f6392cffe117251d2/specifications/e5m3.md
+## Source alignment
 
-This E5M3 has five exponent bits and three mantissa bits and no sign bit.  It
-is not a signed 1+5+3 nine-bit float.  The public boundary is:
+The policy comes from the current Idriç work:
 
-```c
-E5M3 e5m3_from_code(ick_byte);
-ick_byte e5m3_code(E5M3);
-int e5m3_from_float(float, E5M3 *);
-float e5m3_to_float(E5M3);
-```
+- PR #49: Float16 binary32-carrier semantics
+- PR #120: first-class E4M3, E5M2, E3M2, and E5M3 source semantics
 
-The published FP32-to-E5M3 rule is partial, so ICK keeps it partial.
-`e5m3_from_float` returns 1 only for positive normal binary32 inputs whose
-exponent lies in the non-wrapping E5M3 source range; it returns 0 and leaves
-the output unchanged for zero, negative values, subnormals, infinities, NaNs,
-out-of-range values, or a null output pointer.
+The E3M2 and E5M3 storage references are also recorded in
+`isomorphisms/idric-arm-thumb`.
 
-`e5m3_to_float` is defined for all 256 payload codes and uses the published
-midpoint reconstruction.
+## Qualification
 
-## Compiler boundary
+The host semantic probe checks:
 
-The header requires an eight-bit byte and IEEE-like binary32 `float`. It is
-freestanding and includes no libc headers; `ick_byte` and `ick_u32` are
-defined from compiler-provided C types.  The
-Android qualification matrix compiles the probe with each of ICK's four
-qualified compiler targets.  A separate host semantic probe exhausts all 64
-E3M2 codes and all 256 E5M3 codes and checks the E3M2 tie, saturation, NaN,
-and signed-zero rules.
+- every 65,536 Float16 payload;
+- every finite positive E4M3 payload;
+- every finite positive E5M2 payload;
+- all 64 E3M2 payloads;
+- all 256 E5M3 payloads;
+- representative overflow and tie boundaries;
+- the four arithmetic formats' requantization policy.
 
-The one-byte object representation does not promise that a C ABI passes these
-single-member structures exactly like `ick_byte`.  External ABI boundaries
-should pass the payload code as `ick_byte` unless both sides deliberately
-share the same structure ABI.
+The Android four-ABI matrix then compiles the same freestanding interface with
+ICK itself and verifies that no binary64 helper has entered the boundary.
