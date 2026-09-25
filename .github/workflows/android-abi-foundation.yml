@@ -17,7 +17,7 @@ env:
 
 jobs:
   imprecise-semantics:
-    name: E3M2 and E5M3 semantics
+    name: Five numeric types and Circle96 semantics
     runs-on: ubuntu-24.04
     steps:
       - name: Check out ICK
@@ -179,19 +179,20 @@ jobs:
             -Iick/include -c qualification/imprecise-types/compile.c \
             -o /tmp/ick-imprecise.o
           "${{ matrix.binutils_prefix }}-nm" -u /tmp/ick-imprecise.o \
-            > /tmp/ick-imprecise.undefined
-          test ! -s /tmp/ick-imprecise.undefined
+            | tee /tmp/ick-imprecise.undefined
+          ! grep -Eq '__aeabi_d|__(add|sub|mul|div)df3' \
+            /tmp/ick-imprecise.undefined
 
-          for kind in E3 E5; do
+          for kind in E5M3 CIRCLE CIRCLE_ROTATION_MIX; do
             if "$ick" "${target_flags[@]}" -std=c11 -O2 -ffreestanding -nostdinc \
                 -Iick/include -DTEST_$kind \
                 -c qualification/imprecise-types/reject-arithmetic.c \
                 -o /tmp/reject-$kind.o \
                 > /tmp/reject-$kind.log 2>&1; then
-              echo "$kind arithmetic was accepted" >&2
+              echo "$kind category error was accepted" >&2
               exit 1
             fi
-            grep -qi 'invalid operands' /tmp/reject-$kind.log
+            grep -Eqi 'invalid operands|incompatible types' /tmp/reject-$kind.log
           done
 
       - name: Verify Android-specific compile rules
@@ -363,7 +364,7 @@ jobs:
 
           PASS: ICK compiler built and its own installed `cc1` was used
 
-          PASS: E3M2/E5M3 storage types compiled and invented arithmetic was rejected
+          PASS: Float16/E4M3/E5M2/E3M2/E5M3 and Circle96 compiled with their intended arithmetic/category boundaries
 
           PASS: expected ELF class/machine, PIC object, Android API 21 link,
           exported scalar boundary, mismatched-target refusal, and the ABI's
