@@ -28,6 +28,11 @@ for every public Android NDK ABI. It does not yet prove Android runtime
 execution, the complete Wegert library, APK packaging, or F-Droid rebuilding.
 Release qualification remains explicit and per target.
 
+Qualification workflows check out the exact PR head and pin external actions
+by commit. The shared ai-ci contract under `.github/ai-ci/` rejects mutable
+action references and a return to synthetic merge checkouts. These source
+checks do not replace compiler, Android runtime, or device acceptance.
+
 To materialize the compiler source:
 
 ```sh
@@ -58,4 +63,4 @@ The model is deliberately the same pinned artifact used by IRK so that a word do
 sh model/fetch.sh
 ```
 
-The working R prototype lives at https://github.com/isomorphisms/irk.
+The working R prototype lives at https://github.com/dilapidated-shed/irk.
