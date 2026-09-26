@@ -13,7 +13,7 @@ jobs:
   vendor:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Download and verify the pinned model
         run: sh model/fetch.sh
       - name: Commit model files when they changed
@@ -24,4 +24,3 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "Vendor the pinned meaning model"
           git push
-

@@ -16,12 +16,27 @@ env:
   ANDROID_API: 21
 
 jobs:
+  workflow-integrity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Keep action pins and qualification source exact
+        uses: isomorphisms/ai-ci@b3af13b3ab2bac9dd7c72bf9dd855ed5a17609b5
+        with:
+          suite: .github/ai-ci/suite.tsv
+
   imprecise-semantics:
     name: Five numeric types and Circle96 semantics
     runs-on: ubuntu-24.04
     steps:
       - name: Check out ICK
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Exercise every storage code
         shell: bash
@@ -102,8 +117,10 @@ jobs:
 
     steps:
       - name: Check out ICK source and pinned GCC reference
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
           submodules: true
 
       - name: Verify and materialize the squashed ICK source
@@ -264,7 +281,7 @@ jobs:
             /tmp/ick-android-math.undefined
 
       - name: Install pinned Android NDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
         with:
           packages: ''
 
