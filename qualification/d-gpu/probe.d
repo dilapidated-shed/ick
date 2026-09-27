@@ -13,3 +13,9 @@ int deviceOnly(int value)
 {
     return value + 1;
 }
+
+@attribute("gpu_kernel")
+extern(C) void launchEntry(int* value)
+{
+    *value += 1;
+}
