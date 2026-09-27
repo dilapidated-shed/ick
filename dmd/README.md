@@ -9,7 +9,7 @@ build that compiler.  It deliberately does not import druntime, Phobos, the
 language specification, upstream CI configuration, repository history, or the
 upstream compiler test suites.
 
-`SOURCE.lock` records the exact provenance after the one-shot loader has run.
+`SOURCE.lock` records the exact provenance of the committed snapshot. The one-shot loader used to create it is removed after the load succeeds.
 
 Baseline build on a machine with a D compiler and C++ compiler:
 
