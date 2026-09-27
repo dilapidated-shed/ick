@@ -246,6 +246,8 @@ static const attribute_spec d_langhook_gnu_attributes[] =
 	     d_handle_gpu_attribute, NULL),
   ATTR_SPEC ("gpu_only", 0, 0, true, false, false, false,
 	     d_handle_gpu_attribute, NULL),
+  ATTR_SPEC ("gpu_kernel", 0, 0, true, false, false, false,
+	     d_handle_gpu_attribute, NULL),
   ATTR_SPEC ("simd", 0, 1, true,  false, false, false,
 	     d_handle_simd_attribute, NULL),
   ATTR_SPEC ("used", 0, 0, true, false, false, false,
@@ -294,6 +296,19 @@ insert_decl_attribute (tree decl, const char *attrname, tree value)
    the `gcc.attribute' module.  */
 
 static bool
+target_uda_attribute_p (const char *name)
+{
+  tree ident = get_identifier (name);
+
+  for (auto scoped_attributes : targetm.attribute_table)
+    for (const attribute_spec &p : scoped_attributes->attributes)
+      if (get_identifier (p.name) == ident)
+	return true;
+
+  return false;
+}
+
+static bool
 uda_attribute_p (const char *name)
 {
   tree ident = get_identifier (name);
@@ -304,12 +319,7 @@ uda_attribute_p (const char *name)
     if (get_identifier (p.name) == ident)
       return true;
 
-  for (auto scoped_attributes : targetm.attribute_table)
-    for (const attribute_spec &p : scoped_attributes->attributes)
-      if (get_identifier (p.name) == ident)
-	return true;
-
-  return false;
+  return target_uda_attribute_p (name);
 }
 
 /* [attribute/uda]
@@ -1594,17 +1604,48 @@ d_handle_gpu_attribute (tree *node, tree name, tree, int,
       return NULL_TREE;
     }
 
+  const bool gpu_only = name == get_identifier ("gpu_only");
+  const bool gpu_kernel = name == get_identifier ("gpu_kernel");
+
+  if (gpu_kernel && !VOID_TYPE_P (TREE_TYPE (TREE_TYPE (*node))))
+    {
+      error ("%qE attribute requires a void return type", name);
+      *no_add_attrs = true;
+      return NULL_TREE;
+    }
+
   if (!lookup_attribute ("omp declare target", DECL_ATTRIBUTES (*node)))
     DECL_ATTRIBUTES (*node)
       = tree_cons (get_identifier ("omp declare target"), NULL_TREE,
 		   DECL_ATTRIBUTES (*node));
 
-  if (name == get_identifier ("gpu_only")
+  if ((gpu_only || gpu_kernel)
       && !lookup_attribute ("omp declare target nohost",
 			    DECL_ATTRIBUTES (*node)))
     DECL_ATTRIBUTES (*node)
       = tree_cons (get_identifier ("omp declare target nohost"), NULL_TREE,
 		   DECL_ATTRIBUTES (*node));
+
+  if (gpu_kernel)
+    {
+      /* Direct GPU compilers already know their native kernel spelling.
+	 Keep the D surface target-independent and translate only here.  */
+      const char *native_kernel = NULL;
+
+      if (target_uda_attribute_p ("kernel"))
+	native_kernel = "kernel";
+      else if (target_uda_attribute_p ("amdgpu_hsa_kernel"))
+	native_kernel = "amdgpu_hsa_kernel";
+
+      if (native_kernel
+	  && !lookup_attribute (native_kernel, DECL_ATTRIBUTES (*node)))
+	DECL_ATTRIBUTES (*node)
+	  = tree_cons (get_identifier (native_kernel), NULL_TREE,
+		       DECL_ATTRIBUTES (*node));
+
+      /* A launchable device entry must survive as a visible symbol.  */
+      TREE_PUBLIC (*node) = 1;
+    }
 
   /* A GPU declaration is externally reachable device code even if ordinary
      host-side reachability analysis sees no call to it.  */
