@@ -56,7 +56,7 @@ jobs:
             --disable-libquadmath \
             --disable-libssp \
             --disable-libvtv
-          make -j2 all-gcc
+          make -j"$(nproc)" all-gcc
           make install-gcc
 
       - name: Compile D through the GPU offload attributes
@@ -146,7 +146,7 @@ jobs:
             --disable-libquadmath \
             --disable-libssp \
             --disable-libvtv
-          make -j2 all-gcc
+          make -j"$(nproc)" all-gcc
           make install-gcc
 
       - name: Emit a PTX kernel from D
