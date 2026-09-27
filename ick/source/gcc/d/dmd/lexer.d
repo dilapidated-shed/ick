@@ -1198,6 +1198,54 @@ class Lexer
                     {
                         c = decodeUTF();
 
+                        // Icky D keeps its mathematical surface in source.  Reuse
+                        // existing D tokens where the operation is already the same;
+                        // Token.ptr still records the literal UTF-8 spelling.
+                        switch (c)
+                        {
+                        case 'λ':
+                        case 'ƒ':
+                            p++;
+                            t.value = TOK.function_;
+                            return;
+                        case '→':
+                            p++;
+                            t.value = TOK.goesTo;
+                            return;
+                        case '←':
+                            p++;
+                            t.value = TOK.assign;
+                            return;
+                        case '≠':
+                            p++;
+                            t.value = TOK.notEqual;
+                            return;
+                        case '≟':
+                            p++;
+                            t.value = TOK.equal;
+                            return;
+                        case '²':
+                        case '³':
+                            p++;
+                            t.value = TOK.pow;
+                            return;
+                        case '−': // U+2212 MINUS SIGN
+                        case '–': // U+2013 EN DASH, accepted Icky D minus spelling
+                            p++;
+                            t.value = TOK.min;
+                            return;
+                        case '×':
+                            p++;
+                            t.value = TOK.mul;
+                            return;
+                        case '÷':
+                            p++;
+                            t.value = TOK.div;
+                            return;
+                        default:
+                            break;
+                        }
+
                         // Check for start of an identifier
                         if (charLookup.isStart(c))
                         {
