@@ -67,14 +67,14 @@ jobs:
             \( -name gdc -o -name '*-gdc' \) | head -n 1)
           test -n "$gdc"
           "$gdc" --version
-          cat > /tmp/ick-gdc-baseline.d <<'EOF'
+          cat > /tmp/ick_gdc_baseline.d <<'EOF'
           extern(C) int ick_gdc_baseline(int x)
           {
               return x + 1;
           }
           EOF
-          "$gdc" -fno-druntime -nostdinc -c /tmp/ick-gdc-baseline.d -o /tmp/ick-gdc-baseline.o
-          test -s /tmp/ick-gdc-baseline.o
+          "$gdc" -fno-druntime -nostdinc -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
+          test -s /tmp/ick_gdc_baseline.o
 
       - name: Record baseline boundary
         shell: bash
