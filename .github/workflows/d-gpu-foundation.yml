@@ -1,0 +1,96 @@
+name: D GPU foundation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gdc-offload-seam:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          submodules: true
+
+      - name: Materialize ICK source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sh ick/materialize.sh gcc source
+
+      - name: Install GDC build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gdc flex bison texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev
+
+      - name: Build native ICK with D enabled
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir build stage
+          cd build
+          ../source/configure \
+            --prefix="$GITHUB_WORKSPACE/stage" \
+            --enable-languages=c,d \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-libatomic \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv
+          make -j2 all-gcc
+          make install-gcc
+
+      - name: Compile D through the GPU offload attributes
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          gdc=$(find "$GITHUB_WORKSPACE/stage/bin" -maxdepth 1 -type f \
+            \( -name gdc -o -name '*-gdc' \) | head -n 1)
+          test -n "$gdc"
+
+          mkdir -p /tmp/ick-d-gpu
+          cd /tmp/ick-d-gpu
+
+          "$gdc" \
+            -fopenmp \
+            -fdump-tree-gimple \
+            -I"$GITHUB_WORKSPACE/qualification/d-gpu" \
+            -c "$GITHUB_WORKSPACE/qualification/d-gpu/probe.d" \
+            -o probe.o
+
+          dump=$(find . -maxdepth 1 -type f -name '*gimple*' | head -n 1)
+          test -n "$dump"
+
+          grep -q 'omp declare target' "$dump"
+          grep -q 'omp declare target nohost' "$dump"
+
+      - name: Record qualification boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: ICK materialized with the imported GDC frontend.
+
+          PASS: native ICK/GDC compiled D source carrying the new GPU attributes.
+
+          PASS: GIMPLE contains GCC's internal `omp declare target` and
+          `omp declare target nohost` attributes.
+
+          SKIP: this receipt does not yet build an NVPTX/AMDGCN offload compiler,
+          emit a device image, or launch on physical GPU hardware.
+          EOF
