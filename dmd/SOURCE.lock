@@ -1,0 +1,16 @@
+# Standalone Digital Mars DMD import provenance
+upstream_repository=https://github.com/dlang/dmd.git
+upstream_tag=v2.113.0
+upstream_commit=74917954b53f7f35b13e61b4438c7253834929ed
+upstream_compiler_src_dmd_tree=609b890e7cfc65474e5fdebd001c580e174cd22b
+destination=dmd/compiler/src/dmd
+imported_compiler_files=329
+imported_compiler_bytes=12948048
+build_metadata=compiler/src/README.md,compiler/src/bootstrap.sh,compiler/src/build.d,compiler/src/osmodel.mak
+license_file=LICENSE.txt
+version_file=VERSION
+runtime=not_imported
+runtime_note=druntime_and_phobos_are_outside_this_compiler_snapshot
+upstream_tests=not_imported
+spec=not_imported
+upstream_ci=not_imported
