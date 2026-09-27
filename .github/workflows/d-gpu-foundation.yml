@@ -79,6 +79,7 @@ jobs:
 
           grep -q 'omp declare target' "$dump"
           grep -q 'omp declare target nohost' "$dump"
+          grep -q 'gpu_kernel' "$dump"
 
       - name: Record qualification boundary
         shell: bash
@@ -89,8 +90,93 @@ jobs:
           PASS: native ICK/GDC compiled D source carrying the new GPU attributes.
 
           PASS: GIMPLE contains GCC's internal `omp declare target` and
-          `omp declare target nohost` attributes.
+          `omp declare target nohost` attributes, including the D-facing
+          `gpu_kernel` marker.
 
-          SKIP: this receipt does not yet build an NVPTX/AMDGCN offload compiler,
-          emit a device image, or launch on physical GPU hardware.
+          SKIP: this host-side receipt does not launch on physical GPU hardware.
+          EOF
+
+  nvptx-device-artifact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          submodules: true
+
+      - name: Materialize ICK source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sh ick/materialize.sh gcc source
+
+      - name: Install NVPTX D compiler build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gdc flex bison texinfo nvptx-tools \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev
+
+      - name: Build nvptx-none ICK with D enabled
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir build-nvptx stage-nvptx
+          cd build-nvptx
+          ../source/configure \
+            --target=nvptx-none \
+            --prefix="$GITHUB_WORKSPACE/stage-nvptx" \
+            --enable-languages=c,d \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-threads \
+            --without-headers \
+            --disable-libatomic \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv
+          make -j2 all-gcc
+          make install-gcc
+
+      - name: Emit a PTX kernel from D
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          gdc="$GITHUB_WORKSPACE/stage-nvptx/bin/nvptx-none-gdc"
+          test -x "$gdc"
+
+          "$gdc" \
+            -S -O2 \
+            -fno-druntime \
+            -nostdinc \
+            -I"$GITHUB_WORKSPACE/qualification/d-gpu" \
+            "$GITHUB_WORKSPACE/qualification/d-gpu/nvptx-kernel.d" \
+            -o /tmp/ick-gpu-kernel.ptx
+
+          grep -Eq '^[[:space:]]*\.visible[[:space:]]+\.entry[[:space:]]+ick_gpu_probe' \
+            /tmp/ick-gpu-kernel.ptx
+          grep -q 'ld\.param' /tmp/ick-gpu-kernel.ptx
+          grep -q 'st\.global' /tmp/ick-gpu-kernel.ptx
+
+      - name: Record device artifact receipt
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: ICK/GDC was built directly for `nvptx-none`.
+
+          PASS: D `@attribute("gpu_kernel")` became a visible PTX `.entry`.
+
+          PASS: emitted PTX contains parameter loads and a global-memory store.
+
+          SKIP: this receipt proves device artifact generation, not CUDA-driver
+          loading or physical execution.
           EOF
