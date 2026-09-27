@@ -1,0 +1,97 @@
+name: DMD baseline
+
+on:
+  push:
+    branches:
+      - dmd
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-baseline.yml'
+  pull_request:
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-baseline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Detect loaded snapshot
+        id: source
+        shell: bash
+        run: |
+          if test -f dmd/SOURCE.lock; then
+            echo 'loaded=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'loaded=false' >> "$GITHUB_OUTPUT"
+            echo 'DMD snapshot not loaded yet; baseline build skipped.'
+          fi
+
+      - name: Verify provenance boundary
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          . dmd/SOURCE.lock
+          test "$upstream_repository" = https://github.com/dlang/dmd.git
+          test "$upstream_tag" = v2.113.0
+          test "$upstream_commit" = 74917954b53f7f35b13e61b4438c7253834929ed
+          test "$upstream_compiler_src_dmd_tree" = 609b890e7cfc65474e5fdebd001c580e174cd22b
+          test "$(find dmd/compiler/src/dmd -type f | wc -l | tr -d ' ')" = 329
+          test -x dmd/compiler/src/build.d
+          test -x dmd/compiler/src/bootstrap.sh
+          test ! -e dmd/druntime
+          test ! -e dmd/compiler/test
+
+      - name: Install host compiler
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc
+          command -v ldmd2
+          c++ --version
+          ldmd2 --version
+
+      - name: Build standalone DMD
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          test -x "$dmd_bin"
+          "$dmd_bin" --version
+
+          cat > /tmp/dmd-baseline-smoke.d <<'EOF'
+          module dmd_baseline_smoke;
+          extern(C) int add(int a, int b) { return a + b; }
+          EOF
+          "$dmd_bin" -betterC -c /tmp/dmd-baseline-smoke.d -of=/tmp/dmd-baseline-smoke.o
+          test -s /tmp/dmd-baseline-smoke.o
+          file /tmp/dmd-baseline-smoke.o
+
+      - name: Record boundary
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: pinned standalone DMD source built from the owned Mars snapshot.
+
+          PASS: the resulting compiler started and produced a BetterC object.
+
+          OUT OF SCOPE: druntime, Phobos, upstream tests, and Icky D Unicode syntax.
+          EOF
