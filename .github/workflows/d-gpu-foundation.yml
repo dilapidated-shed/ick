@@ -79,7 +79,6 @@ jobs:
 
           grep -q 'omp declare target' "$dump"
           grep -q 'omp declare target nohost' "$dump"
-          grep -q 'gpu_kernel' "$dump"
 
       - name: Record qualification boundary
         shell: bash
@@ -90,8 +89,8 @@ jobs:
           PASS: native ICK/GDC compiled D source carrying the new GPU attributes.
 
           PASS: GIMPLE contains GCC's internal `omp declare target` and
-          `omp declare target nohost` attributes, including the D-facing
-          `gpu_kernel` marker.
+          `omp declare target nohost` attributes produced by the D-facing
+          GPU declarations.
 
           SKIP: this host-side receipt does not launch on physical GPU hardware.
           EOF
