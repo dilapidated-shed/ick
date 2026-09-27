@@ -9,6 +9,7 @@ bae0c71f56075b442e2e36e9a8913ae608b67d0d4d7e5536d7b396d0ca567053  ick/source/gcc
 59af45cc272bf94fae95cacf9dcaaac2b2202fc00cfafe6f84d813cfc5707f21  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-layout.c
 74bd07610e4b9cd18602009d7b0a100468c4109f41f81f2ca2f3b466f8e97f77  ick/source/gcc/testsuite/gcc.dg/ick-complex-round.c
 d1e988fa9ed46cf58cf62e4038bba477e593a7fdb8a11416ed9ac0d509e26f38  ick/source/gcc/testsuite/gdc.dg/ick-gpu-offload-attrs.d
+f80eb3e4d4fab94b7c270be5bd49ffa7c6a1299ffb50a30390c69720cf2d5617  ick/source/gcc/testsuite/gdc.dg/icky-unicode-syntax.d
 aa8dfca47b4ccc4e207bc984706de74b26bf84de20e0ee0e71a18532ef375f2a  ick/source/gcc/tree-complex.cc
 23f7aa6a9a92d81594a1d497c0e0e023b1890e42c588a82c7deac8a72a5bddf2  ick/source/gcc/tree-ssa-sccvn.cc
 08a10054b4dcf6e897e19717ac1cf8ed6ef45b5a7b41c1de3877b9eca6954e5d  ick/source/gcc/tree-streamer-in.cc
