@@ -65,7 +65,9 @@ jobs:
           module dmd_load_smoke;
           extern(C) int add(int a, int b) { return a + b; }
           EOF
-          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\\/object\\.d$/ { sub("/object.d$", ""); print; exit }')\n          test -f "$runtime_import/object.d"\n          "$dmd_bin" -betterC -c -I"$runtime_import" /tmp/dmd-load-smoke.d -of=/tmp/dmd-load-smoke.o
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\\/object\\.d$/ { sub("/object.d$", ""); print; exit }')
+          test -f "$runtime_import/object.d"
+          "$dmd_bin" -betterC -c -I"$runtime_import" /tmp/dmd-load-smoke.d -of=/tmp/dmd-load-smoke.o
           test -s /tmp/dmd-load-smoke.o
 
       - name: Commit owned source to dmd
@@ -77,6 +79,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add dmd/compiler dmd/LICENSE.txt dmd/VERSION dmd/SOURCE.lock
-          git diff --cached --check
           git commit -m 'Load standalone DMD v2.113.0 baseline'
           git push origin HEAD:dmd

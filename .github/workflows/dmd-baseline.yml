@@ -80,7 +80,9 @@ jobs:
           module dmd_baseline_smoke;
           extern(C) int add(int a, int b) { return a + b; }
           EOF
-          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\\/object\\.d$/ { sub("/object.d$", ""); print; exit }')\n          test -f "$runtime_import/object.d"\n          "$dmd_bin" -betterC -c -I"$runtime_import" /tmp/dmd-baseline-smoke.d -of=/tmp/dmd-baseline-smoke.o
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\\/object\\.d$/ { sub("/object.d$", ""); print; exit }')
+          test -f "$runtime_import/object.d"
+          "$dmd_bin" -betterC -c -I"$runtime_import" /tmp/dmd-baseline-smoke.d -of=/tmp/dmd-baseline-smoke.o
           test -s /tmp/dmd-baseline-smoke.o
           file /tmp/dmd-baseline-smoke.o
 
