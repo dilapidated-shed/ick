@@ -1,6 +1,6 @@
 # D → GPU prior art
 
-Status: initial research pass, 2026-09-27.
+Status: ongoing research, 2026-09-27.
 
 This note collects prior art for compiling D source into GPU device code and
 identifies compiler seams that may be useful to ICK. It is deliberately a
@@ -326,3 +326,16 @@ GCC/GDC:
 - https://gcc.gnu.org/onlinedocs/gccint/Misc.html
 - https://gcc.gnu.org/onlinedocs/gccint/Target-Structure.html
 - https://gcc.gnu.org/onlinedocs/libgomp/nvptx.html
+
+
+## Expanded research ledger
+
+The broader historical and current-source sweep is recorded separately so this
+file can remain the architectural summary:
+
+- [Expanded D GPU research ledger](d-gpu-expanded-research.md)
+
+That ledger includes pre-DCompute SPIR discussion, CLWrap, the 2016 compiler
+prototype, direct LDC NVPTX/AMDGCN targeting, generated GPU intrinsics,
+2025-2026 DCompute activity, current Vulkan and Metal work, the closed DirectX
+experiment, concrete applications, near-misses, and the deeper GDC/GCC search.
