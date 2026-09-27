@@ -20,7 +20,8 @@ cd dmd/compiler/src
 
 The repository qualification uses `ldmd2` as the host-DMD-compatible driver.
 The baseline gate also compiles one `-betterC` object so code generation is
-exercised without importing the D runtime.
+exercised. It uses the host toolchain's installed declaration import path for
+`object.d`; druntime is not copied into this repository.
 
 This loading step does not add Icky D Unicode syntax.  That remains the next
 front-end change on the `dmd` branch (issue #12).

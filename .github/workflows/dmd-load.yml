@@ -65,7 +65,7 @@ jobs:
           module dmd_load_smoke;
           extern(C) int add(int a, int b) { return a + b; }
           EOF
-          "$dmd_bin" -betterC -c /tmp/dmd-load-smoke.d -of=/tmp/dmd-load-smoke.o
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\\/object\\.d$/ { sub("/object.d$", ""); print; exit }')\n          test -f "$runtime_import/object.d"\n          "$dmd_bin" -betterC -c -I"$runtime_import" /tmp/dmd-load-smoke.d -of=/tmp/dmd-load-smoke.o
           test -s /tmp/dmd-load-smoke.o
 
       - name: Commit owned source to dmd
