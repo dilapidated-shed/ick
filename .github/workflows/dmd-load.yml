@@ -57,7 +57,7 @@ jobs:
           set -euxo pipefail
           cd dmd/compiler/src
           ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
-          dmd_bin=$(find ../generated -type f -name dmd -perm -u+x -print -quit)
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
           test -n "$dmd_bin"
           "$dmd_bin" --version
 
@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          rm -rf dmd/compiler/generated
+          rm -rf dmd/generated
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add dmd/compiler dmd/LICENSE.txt dmd/VERSION dmd/SOURCE.lock
