@@ -57,7 +57,9 @@ jobs:
             --disable-libssp \
             --disable-libvtv
           make -j"$(nproc)" all-gcc
+          make -j"$(nproc)" all-target-libphobos
           make install-gcc
+          make install-target-libphobos
 
       - name: Compile plain D with the imported frontend
         shell: bash
@@ -68,13 +70,14 @@ jobs:
           test -n "$gdc"
           "$gdc" --version
           cat > /tmp/ick_gdc_baseline.d <<'EOF'
-          extern(C) int ick_gdc_baseline(int x)
+          int main()
           {
-              return x + 1;
+              return 0;
           }
           EOF
-          "$gdc" -fno-druntime -nostdinc -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
-          test -s /tmp/ick_gdc_baseline.o
+          "$gdc" /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline
+          test -x /tmp/ick_gdc_baseline
+          /tmp/ick_gdc_baseline
 
       - name: Record baseline boundary
         shell: bash
@@ -84,7 +87,9 @@ jobs:
 
           PASS: native ICK/GCC built with `--enable-languages=c,d` and installed a GDC driver.
 
-          PASS: that GDC compiled ordinary D source to an object without druntime.
+          PASS: pinned GCC libphobos/druntime built and installed with that compiler.
 
-          This gate is intentionally before Icky D Unicode syntax. It validates the compiler frontend only; libphobos/druntime remains a separate runtime import.
+          PASS: that GDC compiled, linked, and ran an ordinary D program.
+
+          This gate is intentionally before Icky D Unicode syntax. The D frontend is owned in the ICK overlay; unchanged libphobos/druntime source remains pinned in the ordinary GCC reference.
           EOF
