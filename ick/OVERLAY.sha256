@@ -2,13 +2,14 @@ f3040ceab2d00ed41e8c5a82fbc9cdd80e857fefc15049d80957db46ec9708f4  ick/source/gcc
 589500efe5456273cb241201dce6443c3667a345904bf461c755e0a4ca8f2941  ick/source/gcc/builtins.def
 eb5224f958342e3f90ea592e46bb6a1df25a40ec15e46a9c8c573191bbd51148  ick/source/gcc/c-family/c-common.def
 6dc742c49353a996188e0112c0f9ae68cc2f2d084b68c496c09316ed9df86450  ick/source/gcc/c/c-typeck.cc
-f76342d40f06e328c4ec0753811adb538e106ac03683c5bebe913f6be7cdc69e  ick/source/gcc/d/d-attribs.cc
+24a8e623148bfc5d19a4fa1deffb4e87421c0d628b1e8cd75baef3c53c59ee5a  ick/source/gcc/d/d-attribs.cc
 83247d67c48e8587f6b762bf932e88f2b0c3bd356142afed5254dee9005eb874  ick/source/gcc/fold-const.cc
 85b6a87aebfa02b41f80bb86278effefc109432fb8a730f5d3c94557a3d8484e  ick/source/gcc/ipa-icf.cc
 bae0c71f56075b442e2e36e9a8913ae608b67d0d4d7e5536d7b396d0ca567053  ick/source/gcc/testsuite/gcc.dg/ick-complex-object-byte-fold.c
 59af45cc272bf94fae95cacf9dcaaac2b2202fc00cfafe6f84d813cfc5707f21  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-layout.c
 74bd07610e4b9cd18602009d7b0a100468c4109f41f81f2ca2f3b466f8e97f77  ick/source/gcc/testsuite/gcc.dg/ick-complex-round.c
-d1e988fa9ed46cf58cf62e4038bba477e593a7fdb8a11416ed9ac0d509e26f38  ick/source/gcc/testsuite/gdc.dg/ick-gpu-offload-attrs.d
+b98f1b4b8e2c873deae31b601fc7cbde9a77e797145b116fb3ad01985d28d491  ick/source/gcc/testsuite/gdc.dg/ick-gpu-kernel-reject.d
+0401d9d6c8f44805f2416326e925b8432e7ad92a24dd8c0f25c3b467f4eebc9b  ick/source/gcc/testsuite/gdc.dg/ick-gpu-offload-attrs.d
 f80eb3e4d4fab94b7c270be5bd49ffa7c6a1299ffb50a30390c69720cf2d5617  ick/source/gcc/testsuite/gdc.dg/icky-unicode-syntax.d
 aa8dfca47b4ccc4e207bc984706de74b26bf84de20e0ee0e71a18532ef375f2a  ick/source/gcc/tree-complex.cc
 23f7aa6a9a92d81594a1d497c0e0e023b1890e42c588a82c7deac8a72a5bddf2  ick/source/gcc/tree-ssa-sccvn.cc
