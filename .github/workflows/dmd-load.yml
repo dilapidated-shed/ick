@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euxo pipefail
           cd dmd/compiler/src
-          ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
           dmd_bin=$(find ../generated -type f -name dmd -perm -u+x -print -quit)
           test -n "$dmd_bin"
           "$dmd_bin" --version
