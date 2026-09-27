@@ -83,6 +83,7 @@ static tree d_handle_visibility_attribute (tree *, tree, tree, int, bool *);
 static tree d_handle_no_sanitize_attribute (tree *, tree, tree, int, bool *);
 static tree d_handle_no_split_stack_attribute (tree *, tree, tree, int, bool *);
 static tree d_handle_simd_attribute (tree *, tree, tree, int, bool *);
+static tree d_handle_gpu_attribute (tree *, tree, tree, int, bool *);
 
 /* Helper to define attribute exclusions.  */
 #define ATTR_EXCL(name, function, type, variable)	\
@@ -241,6 +242,10 @@ static const attribute_spec d_langhook_gnu_attributes[] =
 	     d_handle_register_attribute, NULL),
   ATTR_SPEC ("restrict", 0, 0, true, false, false, false,
 	     d_handle_restrict_attribute, NULL),
+  ATTR_SPEC ("gpu", 0, 0, true, false, false, false,
+	     d_handle_gpu_attribute, NULL),
+  ATTR_SPEC ("gpu_only", 0, 0, true, false, false, false,
+	     d_handle_gpu_attribute, NULL),
   ATTR_SPEC ("simd", 0, 1, true,  false, false, false,
 	     d_handle_simd_attribute, NULL),
   ATTR_SPEC ("used", 0, 0, true, false, false, false,
@@ -1570,6 +1575,41 @@ d_handle_simd_attribute (tree *node, tree name, tree args, int,
   DECL_ATTRIBUTES (*node) =
     tree_cons (omp_attr, build_tree_list (NULL_TREE, omp_flags),
 	       DECL_ATTRIBUTES (*node));
+
+  return NULL_TREE;
+}
+
+/* Handle ICK GPU attributes.  These are a D-facing spelling for GCC's
+   existing offload declaration attributes; the generic OpenMP offload
+   discovery pass consumes the internal attributes later.  */
+
+static tree
+d_handle_gpu_attribute (tree *node, tree name, tree, int,
+			bool *no_add_attrs)
+{
+  if (TREE_CODE (*node) != FUNCTION_DECL)
+    {
+      warning (OPT_Wattributes, "%qE attribute ignored", name);
+      *no_add_attrs = true;
+      return NULL_TREE;
+    }
+
+  if (!lookup_attribute ("omp declare target", DECL_ATTRIBUTES (*node)))
+    DECL_ATTRIBUTES (*node)
+      = tree_cons (get_identifier ("omp declare target"), NULL_TREE,
+		   DECL_ATTRIBUTES (*node));
+
+  if (name == get_identifier ("gpu_only")
+      && !lookup_attribute ("omp declare target nohost",
+			    DECL_ATTRIBUTES (*node)))
+    DECL_ATTRIBUTES (*node)
+      = tree_cons (get_identifier ("omp declare target nohost"), NULL_TREE,
+		   DECL_ATTRIBUTES (*node));
+
+  /* A GPU declaration is externally reachable device code even if ordinary
+     host-side reachability analysis sees no call to it.  */
+  TREE_USED (*node) = 1;
+  DECL_PRESERVE_P (*node) = 1;
 
   return NULL_TREE;
 }
