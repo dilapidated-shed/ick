@@ -15,10 +15,15 @@ int deviceOnly(int value)
     return value + 1;
 }
 
+@attribute("gpu_kernel")
+extern(C) void launchEntry(int* value)
+{
+    *value += 1;
+}
+
 @attribute("gpu") int notAFunction; // { dg-warning ".gpu. attribute ignored" }
 
-// The D-facing attributes must reach GCC's existing offload vocabulary.
-// gpu contributes one "omp declare target"; gpu_only contributes
-// "omp declare target" plus "omp declare target nohost".
-// { dg-final { scan-tree-dump-times "omp declare target nohost" 1 "gimple" } }
-// { dg-final { scan-tree-dump-times "omp declare target" 3 "gimple" } }
+// gpu contributes one "omp declare target".
+// gpu_only and gpu_kernel each also contribute "... nohost".
+// { dg-final { scan-tree-dump-times "omp declare target nohost" 2 "gimple" } }
+// { dg-final { scan-tree-dump-times "omp declare target" 5 "gimple" } }
