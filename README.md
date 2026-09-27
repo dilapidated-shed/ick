@@ -22,6 +22,7 @@ See:
 - [`docs/android-release-gate.md`](docs/android-release-gate.md) for the Android/F-Droid compiler qualification matrix.
 - [`docs/imprecise-types.md`](docs/imprecise-types.md) for the five low-precision numeric types.
 - [`docs/circle96.md`](docs/circle96.md) for finite Circle96 machine geometry.
+- [`docs/d-gpu-prior-art.md`](docs/d-gpu-prior-art.md) for D-to-GPU compiler prior art and open design questions.
 
 The current four-ABI workflow proves the focused compiler/object/link boundary
 for every public Android NDK ABI. It does not yet prove Android runtime
