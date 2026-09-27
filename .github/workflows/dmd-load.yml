@@ -65,7 +65,7 @@ jobs:
           module dmd_load_smoke;
           extern(C) int add(int a, int b) { return a + b; }
           EOF
-          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\\/object\\.d$/ { sub("/object.d$", ""); print; exit }')
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
           test -f "$runtime_import/object.d"
           "$dmd_bin" -betterC -c -I"$runtime_import" /tmp/dmd-load-smoke.d -of=/tmp/dmd-load-smoke.o
           test -s /tmp/dmd-load-smoke.o
