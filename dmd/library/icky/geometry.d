@@ -146,6 +146,7 @@ struct UnitQuaternion
 {
     nothrow @nogc:
     private float[4] values = [1.0f, 0.0f, 0.0f, 0.0f];
+    @disable this(float[4] unchecked);
 
     static bool try_from_components(float real_component, float i, float j, float k,
                                     ref UnitQuaternion output)
@@ -221,6 +222,7 @@ struct ApproxUnitQuaternion(Component = Float16) if (compact_component!Component
         else return Component.from_code(cast(ubyte)0x0c);
     }
     private Component[4] rounded = [one(), Component.init, Component.init, Component.init];
+    @disable this(Component[4] unchecked);
     static ApproxUnitQuaternion from_unit(UnitQuaternion input)
     {
         ApproxUnitQuaternion result;
@@ -260,6 +262,7 @@ struct Direction(Frame = Unframed)
 {
     nothrow @nogc:
     private float[3] values = [1.0f, 0.0f, 0.0f];
+    @disable this(float[3] unchecked);
     static bool try_from_components(float x, float y, float z, ref Direction output)
     {
         float[3] normalized;
@@ -300,6 +303,7 @@ struct SpatialRotation(Source = Unframed, Destination = Unframed)
 {
     nothrow @nogc:
     private UnitQuaternion orientation;
+    @disable this(UnitQuaternion unchecked);
     static SpatialRotation from_unit(UnitQuaternion value)
     {
         SpatialRotation result;
@@ -307,6 +311,12 @@ struct SpatialRotation(Source = Unframed, Destination = Unframed)
         return result;
     }
     UnitQuaternion as_unit() const { return orientation; }
+    float distance(SpatialRotation other) const
+    {
+        return orientation.rotation_distance(other.orientation);
+    }
+    // Component equality on S3 is not equality of rotation actions on SO3.
+    @disable bool opEquals(ref const SpatialRotation other) const;
     SpatialRotation!(Source, Next) then(Next)(SpatialRotation!(Destination, Next) next) const
     {
         return SpatialRotation!(Source, Next).from_unit(next.orientation * orientation);
@@ -350,6 +360,7 @@ struct SmallestThree(Component = Float16) if (compact_component!Component)
     // Conservative S3 chord bound, with an explicit binary32 rounding allowance.
     enum float chord_error_bound = 4.898979486f * component_error + 0.000004f;
     private ubyte[byte_count] payload;
+    @disable this(ubyte[byte_count] unchecked);
 
     private void write_field(uint offset, uint width, uint value)
     {
