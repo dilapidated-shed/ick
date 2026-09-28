@@ -1747,7 +1747,7 @@ private void cdmemsetn(ref CGstate cg, ref CodeBuilder cdb,elem* e,ref regm_t pr
     int is64 = szv == REGSIZE * 2;
     if (is64)
     {
-        imm3 = 3;
+        imm3 = 4;
         opc = 0;
     }
     cdb.gen1(INSTR.addsub_ext(1,op,S,opt,Rc,option,imm3,Rd,Rl));
@@ -1759,14 +1759,16 @@ private void cdmemsetn(ref CGstate cg, ref CodeBuilder cdb,elem* e,ref regm_t pr
     {
         cdb.gen1(INSTR.str_imm_gen_post_index(is64,szv,Rp,Rv));   // STRH Rv,[Rp],#2
     }
+    else if (szv == 2 * REGSIZE)
+    {
+        cdb.gen1(INSTR.ldstpair_post(2,0,0,szv / REGSIZE,Rvhi,Rp,Rv)); // STP Rv,Rvhi,[Rp],#16
+    }
     else
     {
         assert(szv == 4 || szv == 8);
         cdb.gen1(INSTR.str_imm_gen_post_index(is64,szv,Rp,Rv));   // L2: STR  Rv,[Rp],#szv    // *Rp++ = Rv
     }
     code* L2 = cdb.last();
-    if (szv == REGSIZE * 2)
-        cdb.gen1(INSTR.str_imm_gen_post_index(is64,szv,Rp,Rvhi)); // L2: STR  Rvhi,[Rp],#szv  // *Rp++ = Rvhi
     cdb.gen1(INSTR.cmp_subs_addsub_shift(1,Rl,0,0,Rp));           // CMP Rp,Rl
     genBranch(cdb,COND.ne,FL.code,cast(block*)L2);                // b.ne L2
     cdb.append(c1);

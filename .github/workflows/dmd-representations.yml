@@ -6,6 +6,7 @@ on:
       - 'dmd/compiler/**'
       - 'dmd/library/**'
       - 'dmd/qualification/representations/**'
+      - 'dmd/qualification/packed-memory/**'
       - 'ick/include/ick/**'
       - '.github/workflows/dmd-representations.yml'
   workflow_dispatch:
@@ -47,7 +48,7 @@ jobs:
           set -euo pipefail
           ldmd2 -betterC -Idmd/library \
             dmd/library/icky/imprecise.d dmd/library/icky/circle.d \
-            dmd/library/icky/packed.d \
+            dmd/library/icky/packed.d dmd/library/icky/packed_memory.d \
             dmd/qualification/representations/acceptance.d \
             .representation-build/oracle.o -of=.representation-build/host-acceptance
           .representation-build/host-acceptance
@@ -76,11 +77,36 @@ jobs:
             if [ "$mode" = optimized ]; then flags=(-O -inline); fi
             "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
               dmd/library/icky/imprecise.d dmd/library/icky/circle.d \
-              dmd/library/icky/packed.d \
+              dmd/library/icky/packed.d dmd/library/icky/packed_memory.d \
               dmd/qualification/representations/acceptance.d \
               .representation-build/oracle.o -of=".representation-build/dmd-$mode"
             ".representation-build/dmd-$mode"
           done
+
+      - name: Reject invalid packed-memory source shapes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in debug optimized; do
+            flags=()
+            if [ "$mode" = optimized ]; then flags=(-O -inline); fi
+            "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" -c \
+              dmd/library/icky/imprecise.d dmd/library/icky/packed_memory.d \
+              dmd/qualification/packed-memory/negative.d \
+              -of=".representation-build/negative-$mode.o"
+          done
+          echo 'PASS: unsupported formats, operations, raw bytes, const stores, whole-slice casts, and nominal mismatches were rejected.'
+
+      - name: Qualify packed bounds with checks disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$DMD_BIN" -betterC -release -boundscheck=off -I"$RUNTIME_IMPORT" -Idmd/library \
+            dmd/library/icky/imprecise.d dmd/library/icky/packed_memory.d \
+            dmd/qualification/packed-memory/bounds.d \
+            -of=.representation-build/packed-bounds-disabled
+          .representation-build/packed-bounds-disabled
+          echo 'PASS: empty, final, first-invalid, very-large-invalid, and offset-invalid stores rejected without packed writes with bounds/assert checks disabled.'
 
       - name: Preserve packed-memory assembly receipt
         shell: bash
@@ -88,19 +114,61 @@ jobs:
           set -euo pipefail
           cat dmd/qualification/packed-memory/receipt.d \
             > .representation-build/packed-memory-lowering.txt
-          printf '\nDMD compiler trace and -vasm output:\n' \
+          printf '\nsource-commit=%s\ncompiler=%s\ncompiler-version:\n' "$(git rev-parse HEAD)" \
             >> .representation-build/packed-memory-lowering.txt
-          "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library -O -c -vasm \
-            dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
-            dmd/qualification/packed-memory/receipt.d \
-            -of=.representation-build/packed-memory-receipt.o \
-            2>&1 | tee -a .representation-build/packed-memory-lowering.txt
-          objdump -drwC -Mintel .representation-build/packed-memory-receipt.o \
-            > .representation-build/packed-memory-receipt.disassembly
-          ls -l .representation-build/packed-memory-receipt.o \
-            .representation-build/packed-memory-receipt.disassembly
+          "$DMD_BIN" --version >> .representation-build/packed-memory-lowering.txt
+          for mode in debug optimized; do
+            flags=()
+            if [ "$mode" = optimized ]; then flags=(-O -inline); fi
+            printf '\n=== %s path: flags=%s ===\n' "$mode" "${flags[*]:-none}" \
+              >> .representation-build/packed-memory-lowering.txt
+            printf 'target=%s\ncompiler-digest=' "$(uname -m)-$(uname -s)" \
+              >> .representation-build/packed-memory-lowering.txt
+            sha256sum "$DMD_BIN" >> .representation-build/packed-memory-lowering.txt
+            printf 'command=%q ' "$DMD_BIN" -version=PackedMemoryTrace -betterC \
+              -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" -c -vasm \
+              dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
+              dmd/library/icky/packed_memory.d \
+              dmd/qualification/packed-memory/receipt.d \
+              -of=".representation-build/packed-memory-receipt-$mode.o" \
+              >> .representation-build/packed-memory-lowering.txt
+            printf '\n' >> .representation-build/packed-memory-lowering.txt
+            "$DMD_BIN" -version=PackedMemoryTrace -betterC -I"$RUNTIME_IMPORT" -Idmd/library \
+              "${flags[@]}" -c -vasm \
+              dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
+              dmd/library/icky/packed_memory.d \
+              dmd/qualification/packed-memory/receipt.d \
+              -of=".representation-build/packed-memory-receipt-$mode.o" \
+              2>&1 | tee -a .representation-build/packed-memory-lowering.txt \
+              | tee ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "PACKED-IR seam=follower kind=scalar-compute" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "PACKED-IR seam=follower kind=scalar-load" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "PACKED-IR seam=follower kind=checked-scalar-store" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "follower-executed=true" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            objdump -drwC -Mintel \
+              ".representation-build/packed-memory-receipt-$mode.o" \
+              > ".representation-build/packed-memory-receipt-$mode.disassembly"
+            sha256sum ".representation-build/packed-memory-receipt-$mode.o" \
+              ".representation-build/packed-memory-receipt-$mode.disassembly" \
+              >> .representation-build/packed-memory-lowering.txt
+            "$DMD_BIN" -version=PackedMemoryTrace -betterC -I"$RUNTIME_IMPORT" -Idmd/library \
+              "${flags[@]}" \
+              dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
+              dmd/library/icky/packed_memory.d \
+              dmd/qualification/packed-memory/receipt.d \
+              -of=".representation-build/packed-memory-receipt-$mode"
+            ".representation-build/packed-memory-receipt-$mode"
+            echo "execution=$? mode=$mode" >> .representation-build/packed-memory-lowering.txt
+          done
+          ls -l .representation-build/packed-memory-receipt-*.o \
+            .representation-build/packed-memory-receipt-*.disassembly
           cat .representation-build/packed-memory-lowering.txt
-          cat .representation-build/packed-memory-receipt.disassembly
+          cat .representation-build/packed-memory-receipt-debug.disassembly
+          cat .representation-build/packed-memory-receipt-optimized.disassembly
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           PASS: packed-memory receipt compiled and emitted x86-64 assembly and object disassembly.
           Inspect this job's logs for exact source lowering and generated instructions;
@@ -113,8 +181,9 @@ jobs:
           name: packed-memory-receipts-${{ github.run_id }}
           path: |
             .representation-build/packed-memory-lowering.txt
-            .representation-build/packed-memory-receipt.o
-            .representation-build/packed-memory-receipt.disassembly
+            .representation-build/packed-memory-*-trace.txt
+            .representation-build/packed-memory-receipt-*.o
+            .representation-build/packed-memory-receipt-*.disassembly
           retention-days: 90
           if-no-files-found: error
 

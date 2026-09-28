@@ -3,11 +3,14 @@ module representation_acceptance;
 import icky.imprecise;
 import icky.circle;
 import icky.packed;
+import icky.packed_memory;
 
 nothrow @nogc:
 extern(C) uint oracle_decode(uint format, uint code);
 extern(C) uint oracle_encode(uint format, uint bits);
 extern(C) uint oracle_operation(uint format, uint operation, uint left, uint right);
+extern(C) uint oracle_packed_operation(uint left_format, uint right_format,
+                                      uint operation, uint left, uint right);
 extern(C) int oracle_circle(uint operation, int first, int second);
 extern(C) int puts(const char* text);
 
@@ -142,6 +145,114 @@ void check_storage()
     }
 }
 
+void check_packed_operation(string operation, Left, Right)(
+    Left[] left, Right[] right, uint leftFormat, uint rightFormat)
+{
+    foreach (uint leftIndex; 0 .. 256)
+    foreach (uint rightIndex; 0 .. 256)
+    {
+        const leftCode = left[leftIndex].code();
+        const rightCode = right[rightIndex].code();
+        auto result = compute_at!(Float16, operation)(
+            left[], leftIndex, right[], rightIndex);
+        const expected = oracle_packed_operation(
+            leftFormat, rightFormat,
+            operation == "+" ? 0 : operation == "-" ? 1 : operation == "*" ? 2 : 3,
+            leftCode, rightCode);
+        assert(result.code() == expected);
+    }
+}
+
+void check_packed_operation_pairs(Left, Right)(uint leftFormat, uint rightFormat)
+{
+    Left[256] left;
+    Right[256] right;
+    foreach (uint code; 0 .. 256)
+    {
+        left[code] = Left.from_code(cast(typeof(left[code].code()))code);
+        right[code] = Right.from_code(cast(typeof(right[code].code()))code);
+    }
+    check_packed_operation!("+")(left[], right[], leftFormat, rightFormat);
+    check_packed_operation!("-")(left[], right[], leftFormat, rightFormat);
+    check_packed_operation!("*")(left[], right[], leftFormat, rightFormat);
+    check_packed_operation!("/")(left[], right[], leftFormat, rightFormat);
+}
+
+void check_packed_memory_surface()
+{
+    E5M3[256] e5;
+    E3M2[256] e3;
+    foreach (uint code; 0 .. 256)
+    {
+        e5[code] = E5M3.from_code(cast(ubyte)code);
+        e3[code] = E3M2.from_code(cast(ubyte)code);
+        assert(e3[code].code() == (code & 0x3fu));
+
+        auto widened = Float16.from_float(e5[code].to_float());
+        if (code < 248)
+            assert((widened.code() & 0x7c00u) != 0x7c00u);
+        else
+            assert(widened.code() == 0x7c00u);
+    }
+
+    // Every E5M3/E5M3 operation pair, including mixed signed-zero, subnormal,
+    // infinity and NaN cases after the required Float16 operand conversion.
+    check_packed_operation_pairs!(E5M3, E5M3)(4, 4);
+    check_packed_operation_pairs!(E5M3, E3M2)(4, 3);
+    check_packed_operation_pairs!(E3M2, E5M3)(3, 4);
+    check_packed_operation_pairs!(E3M2, E3M2)(3, 3);
+
+    // One coordinate, odd length, nonzero offset, final valid index and the
+    // first and very large invalid indices all use the checked store surface.
+    E5M3[5] sentinels = [E5M3.from_code(17), E5M3.from_code(31),
+                         E5M3.from_code(47), E5M3.from_code(63),
+                         E5M3.from_code(79)];
+    auto odd = sentinels[1 .. 4];
+    assert(try_store_at(odd, 2, Float16.from_float(2.0f)));
+    assert(!try_store_at(odd, 3, Float16.from_float(2.0f)));
+    assert(!try_store_at(odd, size_t.max, Float16.from_float(2.0f)));
+    assert(sentinels[0].code() == 17 && sentinels[4].code() == 79);
+
+    E5M3[1] one;
+    assert(try_store_at(one[], 0, Float16.from_float(1.0f)));
+    E5M3[0] empty;
+    assert(!try_store_at(empty[], 0, Float16.from_float(1.0f)));
+
+    // E5M3's partial encoder preserves the destination on every rejected
+    // result; E3M2 retains its total saturation and NaN mapping.
+    auto saved = one[0].code();
+    assert(!try_store_at(one[], 0, Float16.from_float(-1.0f)));
+    assert(one[0].code() == saved);
+    assert(!try_store_at(one[], 1, Float16.from_float(1.0f)));
+    E3M2[1] e3_destination = [E3M2.from_code(17)];
+    auto saturated = Float16.from_float(1000000.0f);
+    assert(try_store_at(e3_destination[], 0, saturated));
+    assert(e3_destination[0].code() == oracle_encode(3, bits_of(saturated.to_float())));
+    auto nan = Float16.from_float(value_of(0x7fc00000u));
+    assert(try_store_at(e3_destination[], 0, nan));
+    assert(e3_destination[0].code() == 0);
+
+    // Exact aliasing and overlap remain ordinary sequenced D memory effects;
+    // no disjointness is inferred from different slice expressions.
+    E5M3[4] overlap = [E5M3.from_code(1), E5M3.from_code(2),
+                       E5M3.from_code(3), E5M3.from_code(4)];
+    auto first = overlap[0 .. 3];
+    auto second = overlap[1 .. 4];
+    auto before = compute_at!(Float16, "+")(first, 1, second, 1);
+    const expectedBefore = oracle_packed_operation(4, 4, 0,
+                                                   overlap[1].code(), overlap[2].code());
+    assert(before.code() == expectedBefore);
+    assert(try_store_at(second, 0, Float16.from_float(3.0f)));
+    assert(overlap[1].code() == oracle_encode(4,
+        bits_of(Float16.from_float(3.0f).to_float())));
+    assert(overlap[0].code() == 1 && overlap[3].code() == 4);
+
+    // A function address remains an ordinary callable D function.
+    auto multiply = &compute_at!(Float16, "*", E5M3, E5M3);
+    assert(multiply(first, 0, second, 0).code() ==
+           oracle_packed_operation(4, 4, 2, overlap[0].code(), overlap[1].code()));
+}
+
 void check_packed_memory()
 {
     static assert(PackedValue!(E5M3, Float16).sizeof == E5M3.sizeof);
@@ -266,6 +377,7 @@ void check_grid(uint positions)()
 
 extern(C) int main()
 {
+    check_packed_memory_surface();
     check_packed_memory();
     check_format!(Float16, 0, 65536)();
     check_format!(E4M3, 1, 256)();

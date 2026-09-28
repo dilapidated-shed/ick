@@ -29,7 +29,8 @@ enum PackedAction : ubyte
     store,
 }
 
-private Storage packed_read(Storage, Arithmetic, size_t Alignment, uint AliasSet)(
+pragma(inline, false)
+package Storage packed_read(Storage, Arithmetic, size_t Alignment, uint AliasSet)(
     const(ubyte)* base, size_t byteLength, size_t elementIndex, size_t byteStride)
     nothrow @nogc
 {
@@ -39,7 +40,8 @@ private Storage packed_read(Storage, Arithmetic, size_t Alignment, uint AliasSet
     return *cast(const(Storage)*)(base + offset);
 }
 
-private void packed_write(Storage, Arithmetic, size_t Alignment, uint AliasSet)(
+pragma(inline, false)
+package void packed_write(Storage, Arithmetic, size_t Alignment, uint AliasSet)(
     ubyte* base, size_t byteLength, size_t elementIndex, size_t byteStride, Storage value)
     nothrow @nogc
 {
