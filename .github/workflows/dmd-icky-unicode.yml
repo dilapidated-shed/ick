@@ -74,7 +74,7 @@ jobs:
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           PASS: standalone Mars/DMD compiled and ran the Icky D Unicode acceptance program.
 
-          PASS: λ/ƒ, ←, →, ≠, ≟, ²/³, −, ×, and ÷ are accepted at the source boundary.
+          PASS: λ/ƒ, ←, →, ⇒, ≠, ≟, ²/³, −, ×, and ÷ are accepted at the source boundary.
 
           PASS: en dash U+2013 remains distinct and is rejected rather than normalized to mathematical minus U+2212.
           EOF
