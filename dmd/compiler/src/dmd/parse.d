@@ -32,6 +32,23 @@ import dmd.expression;
 
 alias CompileEnv = dmd.lexer.CompileEnv;
 
+/**
+ * True when a token came from the given literal UTF-8 source spelling.
+ * Token kinds may intentionally be shared with ordinary D syntax.
+ */
+private bool tokenSpelling(const Token* token, string spelling) nothrow @nogc
+{
+    if (token.ptr is null)
+        return false;
+
+    foreach (i, c; spelling)
+    {
+        if (token.ptr[i] != c)
+            return false;
+    }
+    return true;
+}
+
 /***********************************************************
  */
 class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
@@ -9059,9 +9076,21 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
         }
         assert(e);
 
-        // ^^ is right associative and has higher precedence than the unary operators
+        // ^^ is right associative and has higher precedence than the unary operators.
+        // Icky D also accepts postfix ² and ³ without rewriting the user's
+        // literal source spelling.
         while (token.value == TOK.pow)
         {
+            if (tokenSpelling(&token, "²") || tokenSpelling(&token, "³"))
+            {
+                const exponentLoc = token.loc;
+                const exponent = tokenSpelling(&token, "²") ? 2 : 3;
+                nextToken();
+                AST.Expression e2 = new AST.IntegerExp(exponentLoc, exponent, AST.Type.tint32);
+                e = new AST.PowExp(exponentLoc, e, e2);
+                continue;
+            }
+
             nextToken();
             AST.Expression e2 = parseUnaryExp();
             e = new AST.PowExp(loc, e, e2);
@@ -9427,6 +9456,17 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
         }
 
         const loc = token.loc;
+
+        // Literal Unicode → is directional assignment outside lambda/result
+        // position: value → target. ASCII => remains ordinary D syntax.
+        if (token.value == TOK.goesTo && tokenSpelling(&token, "→"))
+        {
+            checkRequiredParens();
+            nextToken();
+            auto target = parseAssignExp();
+            return new AST.AssignExp(loc, target, e);
+        }
+
         switch (token.value)
         {
         case TOK.assign:
