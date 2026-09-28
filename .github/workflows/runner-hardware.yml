@@ -86,7 +86,7 @@ jobs:
             lscpu -C 2>&1 || true
             printf 'unknown: physical DIMMs, memory-channel count and speed, host CPU sharing, effective bandwidth, host NUMA topology, available memory-level parallelism\n'
           } > fingerprint/summary.txt
-          find fingerprint -type f -print0 | sort -z | xargs -0 sha256sum > fingerprint/SHA256SUMS
+          find fingerprint -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > fingerprint/SHA256SUMS
           cat fingerprint/provenance.txt fingerprint/summary.txt
       - name: Preserve raw fingerprint
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
