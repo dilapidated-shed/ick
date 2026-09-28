@@ -6612,6 +6612,11 @@ private const(char)* packedExpressionChars(Expression expression)
     return expression ? expression.toChars() : "none";
 }
 
+private const(char)* packedBoolChars(bool value)
+{
+    return value ? "true".ptr : "false".ptr;
+}
+
 private const(char)* packedKindChars(PackedMemoryOperationKind kind)
 {
     final switch (kind)
@@ -6699,9 +6704,9 @@ private void tracePackedMemory(PackedMemoryOperation operation)
                operation.leftAlignment, operation.rightAlignment,
                operation.destinationAlignment,
                operation.knownAlignment, operation.aliasSet, effect,
-               operation.boundedTemporary ? "true" : "false",
-               operation.disjointProven ? "true" : "false",
-               operation.followerExecuted ? "true" : "false");
+               packedBoolChars(operation.boundedTemporary),
+               packedBoolChars(operation.disjointProven),
+               packedBoolChars(operation.followerExecuted));
     }
 }
 
