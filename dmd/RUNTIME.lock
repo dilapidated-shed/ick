@@ -1,0 +1,9 @@
+# Normal-D runtime qualification for the Mars/Icky-DMD line
+dmd_upstream_repository=https://github.com/dlang/dmd.git
+dmd_upstream_tag=v2.113.0
+dmd_upstream_commit=74917954b53f7f35b13e61b4438c7253834929ed
+phobos_upstream_repository=https://github.com/dlang/phobos.git
+phobos_upstream_tag=v2.113.0
+phobos_upstream_commit=7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+source_policy='runtime and standard-library sources are reconstructed from these exact upstream commits during qualification; they are not duplicated into the owned compiler snapshot'
+qualification='build Icky DMD; build matching druntime and Phobos with it; compile and run a normal D program using std.bigint, GC-managed class allocation, exceptions, and std.stdio'

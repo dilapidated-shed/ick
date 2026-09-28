@@ -1,0 +1,136 @@
+name: DMD runtime and Phobos
+
+on:
+  pull_request:
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dmd-runtime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  normal-d:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact Icky DMD source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install bootstrap dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc
+
+      - name: Build Icky DMD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          dmd_bin=$(realpath "$dmd_bin")
+          "$dmd_bin" --version
+          printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.icky-dmd-bin"
+
+      - name: Check out matching druntime source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dlang/dmd
+          ref: 74917954b53f7f35b13e61b4438c7253834929ed
+          path: .runtime-dmd
+          persist-credentials: false
+
+      - name: Check out matching Phobos source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dlang/phobos
+          ref: 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          path: .runtime-phobos
+          persist-credentials: false
+
+      - name: Install Icky DMD into reconstructed toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          mkdir -p .runtime-dmd/generated/linux/release/64
+          cp "$dmd_bin" .runtime-dmd/generated/linux/release/64/dmd
+          chmod +x .runtime-dmd/generated/linux/release/64/dmd
+
+      - name: Build matching druntime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
+          make -C .runtime-dmd/druntime -j"$(nproc)" \
+            MODEL=64 OS=linux BUILD=release SHARED=0 DMD="$dmd_bin"
+          test -f .runtime-dmd/generated/linux/release/64/libdruntime.a
+          test -f .runtime-dmd/druntime/import/object.d
+
+      - name: Build matching Phobos
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
+          make -C .runtime-phobos -j"$(nproc)" \
+            MODEL=64 OS=linux BUILD=release SHARED=0 USE_IMPORTC=1 \
+            DMD_DIR="$GITHUB_WORKSPACE/.runtime-dmd" DMD="$dmd_bin"
+          test -f .runtime-phobos/generated/linux/release/64/libphobos2.a
+
+      - name: Compile and run normal D
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
+          cat > /tmp/icky_normal_d.d <<'EOF'
+          import std.bigint : BigInt;
+          import std.stdio : writeln;
+
+          class Box {
+              BigInt value;
+              this(BigInt value) { this.value = value; }
+          }
+
+          int main() {
+              auto box = new Box(BigInt("123456789012345678901234567890"));
+              try {
+                  throw new Exception("normal-d");
+              } catch (Exception error) {
+                  if (error.msg != "normal-d") return 2;
+              }
+              box.value += 1;
+              writeln(box.value);
+              return box.value == BigInt("123456789012345678901234567891") ? 0 : 3;
+          }
+          EOF
+          "$dmd_bin" -conf= -fPIC \
+            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
+            -I"$GITHUB_WORKSPACE/.runtime-phobos" \
+            /tmp/icky_normal_d.d \
+            "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
+            -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
+            -of=/tmp/icky_normal_d
+          /tmp/icky_normal_d | grep -Fx '123456789012345678901234567891'
+
+      - name: Record runtime boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: Icky DMD built matching v2.113 druntime and Phobos.
+
+          PASS: the resulting normal-D toolchain ran std.bigint, GC-managed class allocation, exceptions, and std.stdio.
+
+          This is the normal-D qualification required by translations such as YSH; the earlier BetterC gate remains the smaller compiler-only boundary.
+          EOF
