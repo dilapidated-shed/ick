@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 64035)
-Total output lines: 7675
-
 /**
  * Converts expressions to Intermediate Representation (IR) for the backend.
  *
@@ -3034,7 +3031,1695 @@ elem* toElem(Expression e, ref IRState irs)
         {
             case EXP.concatenateDcharAssign:
             {
-                Type tb1 = ce.e1…14035 tokens truncated…s casting goes)
+                Type tb1 = ce.e1.type.toBasetype();
+                Type tb2 = ce.e2.type.toBasetype();
+                assert(tb1.ty == Tarray);
+                Type tb1n = tb1.nextOf().toBasetype();
+
+                elem* e1 = toElem(ce.e1, irs);
+                elem* e2 = toElem(ce.e2, irs);
+
+                /* Because e1 is an lvalue, refer to it via a pointer to it in the form
+                * of ev. Put any side effects into re1
+                */
+                elem* re1 = addressElem(e1, ce.e1.type.pointerTo(), false);
+                elem* ev = el_same(re1);
+
+                // Append dchar to char[] or wchar[]
+                assert(tb2.ty == Tdchar &&
+                      (tb1n.ty == Tchar || tb1n.ty == Twchar));
+
+                elem* ep = el_params(e2, el_copytree(ev), null);
+                const rtl = (tb1.nextOf().ty == Tchar)
+                        ? RTLSYM.ARRAYAPPENDCD
+                        : RTLSYM.ARRAYAPPENDWD;
+                e = el_bin(OPcall, TYdarray, el_var(getRtlsym(rtl)), ep);
+                toTraceGC(irs, e, ce.loc);
+
+                /* Generate: (re1, e, *ev)
+                */
+                e = el_combine(re1, e);
+                ev = el_una(OPind, e1.Ety, ev);
+                e = el_combine(e, ev);
+
+                break;
+            }
+
+            case EXP.concatenateAssign:
+            case EXP.concatenateElemAssign:
+            {
+                /* Do this check during code gen rather than semantic because appending is
+                * allowed during CTFE, and we cannot distinguish that in semantic.
+                */
+                if (!irs.params.useGC)
+                {
+                    irs.eSink.error(ce.loc,
+                        "appending to array in `%s` requires the GC which is not available with -betterC",
+                        ce.toChars());
+                    return el_long(TYint, 0);
+                }
+
+                if (auto lowering = ce.lowering)
+                    e = toElem(lowering, irs);
+                else if (ce.op == EXP.concatenateAssign)
+                    assert(0, "This case should have been rewritten to `_d_arrayappendT` in the semantic phase");
+                else
+                    assert(0, "This case should have been rewritten to `_d_arrayappendcTX` in the semantic phase");
+
+                break;
+            }
+
+            default:
+                assert(0);
+        }
+
+        elem_setLoc(e, ce.loc);
+        return e;
+    }
+
+    /***************************************
+     */
+
+    elem* visitDivAssign(DivAssignExp e)
+    {
+        return toElemBinAssign(e, OPdivass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitModAssign(ModAssignExp e)
+    {
+        return toElemBinAssign(e, OPmodass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitMulAssign(MulAssignExp e)
+    {
+        return toElemBinAssign(e, OPmulass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitShlAssign(ShlAssignExp e)
+    {
+        return toElemBinAssign(e, OPshlass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitShrAssign(ShrAssignExp e)
+    {
+        //printf("ShrAssignExp.toElem() %s, %s\n", e.e1.type.toChars(), e.e1.toChars());
+        Type t1 = e.e1.type;
+        if (e.e1.op == EXP.cast_)
+        {
+            /* Use the type before it was integrally promoted to int
+             */
+            CastExp ce = cast(CastExp)e.e1;
+            t1 = ce.e1.type;
+        }
+        return toElemBinAssign(e, t1.isUnsigned() ? OPshrass : OPashrass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitUshrAssign(UshrAssignExp e)
+    {
+        //printf("UShrAssignExp.toElem() %s, %s\n", e.e1.type.toChars(), e.e1.toChars());
+        return toElemBinAssign(e, OPshrass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitAndAssign(AndAssignExp e)
+    {
+        return toElemBinAssign(e, OPandass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitOrAssign(OrAssignExp e)
+    {
+        return toElemBinAssign(e, OPorass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitXorAssign(XorAssignExp e)
+    {
+        return toElemBinAssign(e, OPxorass);
+    }
+
+    /***************************************
+     */
+
+    elem* visitLogical(LogicalExp aae)
+    {
+        tym_t tym = totym(aae.type);
+
+        elem* el = toElem(aae.e1, irs);
+        elem* er = toElemDtor(aae.e2, irs);
+        elem* e = el_bin(aae.op == EXP.andAnd ? OPandand : OPoror,tym,el,er);
+
+        elem_setLoc(e, aae.loc);
+
+        if (irs.params.cov && aae.e2.loc.linnum)
+            e.E2 = el_combine(incUsageElem(irs, aae.e2.loc), e.E2);
+
+        return e;
+    }
+
+    /***************************************
+     */
+
+    elem* visitXor(XorExp e)
+    {
+        return toElemBin(e, OPxor);
+    }
+
+    /***************************************
+     */
+
+    elem* visitAnd(AndExp e)
+    {
+        return toElemBin(e, OPand);
+    }
+
+    /***************************************
+     */
+
+    elem* visitOr(OrExp e)
+    {
+        return toElemBin(e, OPor);
+    }
+
+    /***************************************
+     */
+
+    elem* visitShl(ShlExp e)
+    {
+        return toElemBin(e, OPshl);
+    }
+
+    /***************************************
+     */
+
+    elem* visitShr(ShrExp e)
+    {
+        return toElemBin(e, e.e1.type.isUnsigned() ? OPshr : OPashr);
+    }
+
+    /***************************************
+     */
+
+    elem* visitUshr(UshrExp se)
+    {
+        elem* eleft  = toElem(se.e1, irs);
+        eleft.Ety = touns(eleft.Ety);
+        elem* eright = toElem(se.e2, irs);
+        elem* e = el_bin(OPshr, totym(se.type), eleft, eright);
+        elem_setLoc(e, se.loc);
+        return e;
+    }
+
+    /****************************************
+     */
+
+    elem* visitComma(CommaExp ce)
+    {
+        assert(ce.e1 && ce.e2);
+        elem* eleft  = toElem(ce.e1, irs);
+        elem* eright = toElem(ce.e2, irs);
+        elem* e = el_combine(eleft, eright);
+        if (e)
+            elem_setLoc(e, ce.loc);
+        return e;
+    }
+
+    /***************************************
+     */
+
+    elem* visitCond(CondExp ce)
+    {
+        // condition `__ctfe`/`!__ctfe` is always false/true at runtime, so skip code generation
+        //  for ce.e1/e2. This can also be the result of inlining an `if (__ctfe)` statement
+        auto ctfecond = ce.econd.op == EXP.not ? (cast(NotExp)ce.econd).e1 : ce.econd;
+        if (auto ve = ctfecond.isVarExp())
+            if (ve.var && ve.var.ident == Id.ctfe)
+                return toElem(ctfecond is ce.econd ? ce.e2 : ce.e1, irs);
+
+        elem* ec = toElem(ce.econd, irs);
+
+        elem* eleft = toElem(ce.e1, irs);
+        if (irs.params.cov && ce.e1.loc.linnum)
+            eleft = el_combine(incUsageElem(irs, ce.e1.loc), eleft);
+
+        elem* eright = toElem(ce.e2, irs);
+        if (irs.params.cov && ce.e2.loc.linnum)
+            eright = el_combine(incUsageElem(irs, ce.e2.loc), eright);
+
+        tym_t ty = eleft.Ety;
+        if (tybasic(ty) == TYnoreturn)
+            ty = eright.Ety;
+        if (ce.e1.type.toBasetype().ty == Tvoid ||
+            ce.e2.type.toBasetype().ty == Tvoid)
+            ty = TYvoid;
+
+        elem* e;
+        if (tybasic(eleft.Ety) == TYnoreturn &&
+            tybasic(eright.Ety) != TYnoreturn)
+        {
+            /* ec ? eleft : eright => (ec && eleft),eright
+             */
+            e = el_bin(OPandand, TYvoid, ec, eleft);
+            e = el_combine(e, eright);
+            if (tybasic(ty) == TYstruct)
+                e.ET = Type_toCtype(ce.e2.type);
+        }
+        else if (tybasic(eright.Ety) == TYnoreturn)
+        {
+            /* ec ? eleft : eright => (ec || eright),eleft
+             */
+            e = el_bin(OPoror, TYvoid, ec, eright);
+            e = el_combine(e, eleft);
+            if (tybasic(ty) == TYstruct)
+                e.ET = Type_toCtype(ce.e1.type);
+        }
+        else
+        {
+            e = el_bin(OPcond, ty, ec, el_bin(OPcolon, ty, eleft, eright));
+            if (tybasic(ty) == TYstruct)
+                e.ET = Type_toCtype(ce.e1.type);
+        }
+        elem_setLoc(e, ce.loc);
+        return e;
+    }
+
+    /***************************************
+     */
+
+    elem* visitType(TypeExp e)
+    {
+        //printf("TypeExp.toElem()\n");
+        irs.eSink.error(e.loc, "type `%s` is not an expression", e.toChars());
+        return el_long(TYint, 0);
+    }
+
+    elem* visitScope(ScopeExp e)
+    {
+        irs.eSink.error(e.loc, "`%s` is not an expression", e.sds.toChars());
+        return el_long(TYint, 0);
+    }
+
+    elem* visitDotVar(DotVarExp dve)
+    {
+        // *(&e + offset)
+
+        //printf("[%s] DotVarExp.toElem('%s')\n", dve.loc.toChars(), dve.toChars());
+
+        VarDeclaration v = dve.var.isVarDeclaration();
+        if (!v)
+        {
+            irs.eSink.error(dve.loc, "`%s` is not a field, but a %s", dve.var.toChars(), dve.var.kind());
+            return el_long(TYint, 0);
+        }
+
+        // https://issues.dlang.org/show_bug.cgi?id=12900
+        Type txb = dve.type.toBasetype();
+        Type tyb = v.type.toBasetype();
+        if (auto tv = txb.isTypeVector()) txb = tv.basetype;
+        if (auto tv = tyb.isTypeVector()) tyb = tv.basetype;
+
+        debug if (txb.ty != tyb.ty)
+            printf("[%s] dve = %s, dve.type = %s, v.type = %s\n", dve.loc.toChars(), dve.toChars(), dve.type.toChars(), v.type.toChars());
+
+        assert(txb.ty == tyb.ty);
+
+        // https://issues.dlang.org/show_bug.cgi?id=14730
+        if (v.offset == 0)
+        {
+            FuncDeclaration fd = v.parent.isFuncDeclaration();
+            if (fd && fd.semanticRun < PASS.obj)
+                setClosureVarOffset(fd);
+        }
+
+        elem* e = toElem(dve.e1, irs);
+        Type tb1 = dve.e1.type.toBasetype();
+        tym_t typ = TYnptr;
+        if (tb1.ty != Tclass && tb1.ty != Tpointer)
+        {
+            e = addressElem(e, tb1);
+            typ = tybasic(e.Ety);
+        }
+        else if (irs.nullDerefCheck())
+            applyNullDerefErrorCheck(e, typ, irs, dve.loc);
+
+        const tym = totym(dve.type);
+        auto voffset = v.offset;
+        uint bitfieldarg = 0;
+        auto bf = v.isBitFieldDeclaration();
+        if (bf)
+        {
+            // adjust bit offset for bitfield so the type tym encloses the bitfield
+            const szbits = tysize(tym) * 8;
+            uint memalignsize = target.fieldalign(dve.type);
+            auto bitOffset = bf.bitOffset;
+            if (bitOffset + bf.fieldWidth > szbits)
+            {
+                const advance = bf.bitOffset / (memalignsize * 8);
+                voffset += advance * memalignsize;
+                bitOffset -= advance * memalignsize * 8;
+                assert(bitOffset + bf.fieldWidth <= szbits);
+            }
+            //printf("voffset %u bitOffset %u fieldWidth %u bits %u\n", cast(uint)voffset, bitOffset, bf.fieldWidth, szbits);
+            bitfieldarg = bf.fieldWidth * 256 + bitOffset;
+        }
+
+        auto eoffset = el_long(TYsize_t, voffset);
+        e = el_bin(OPadd, typ, e, objc.getOffset(v, tb1, eoffset));
+        if (v.storage_class & (STC.out_ | STC.ref_))
+            e = el_una(OPind, TYnptr, e);
+        e = el_una(OPind, tym, e);
+        if (bf)
+        {
+            // Insert special bitfield operator
+            auto mos = el_long(TYuint, bitfieldarg);
+            e = el_bin(OPbit, e.Ety, e, mos);
+        }
+        if (tybasic(e.Ety) == TYstruct)
+        {
+            e.ET = Type_toCtype(dve.type);
+        }
+        elem_setLoc(e,dve.loc);
+        return e;
+    }
+
+    elem* visitDelegate(DelegateExp de)
+    {
+        int directcall = 0;
+        //printf("DelegateExp.toElem() '%s'\n", de.toChars());
+
+        if (de.func.semanticRun == PASS.semantic3done)
+        {
+            // Bug 7745 - only include the function if it belongs to this module
+            // ie, it is a member of this module, or is a template instance
+            // (the template declaration could come from any module).
+            Dsymbol owner = de.func.toParent();
+            while (!owner.isTemplateInstance() && owner.toParent())
+                owner = owner.toParent();
+            if (owner.isTemplateInstance() || owner == irs.m )
+            {
+                irs.deferToObj.push(de.func);
+            }
+        }
+
+        elem* eeq = null;
+        elem* ethis;
+        Symbol* sfunc = toSymbol(de.func);
+        elem* ep;
+
+        elem* ethis2 = null;
+        if (de.vthis2)
+        {
+            // avoid using toSymbol directly because vthis2 may be a closure var
+            Expression ve = new VarExp(de.loc, de.vthis2);
+            ve.type = de.vthis2.type;
+            ve = new AddrExp(de.loc, ve);
+            ve.type = de.vthis2.type.pointerTo();
+            ethis2 = toElem(ve, irs);
+
+            if (irs.nullDerefCheck())
+            {
+                // check context pointer
+                applyNullDerefErrorCheck(ethis2, ethis2.Ety, irs, de.loc);
+            }
+        }
+
+        if (de.func.isNested() && !de.func.isThis())
+        {
+            ep = el_ptr(sfunc);
+            if (de.e1.op == EXP.null_)
+                ethis = toElem(de.e1, irs);
+            else
+                ethis = getEthis(de.loc, irs, de.func, de.func.toParentLocal());
+
+            if (ethis2)
+                ethis2 = setEthis2(de.loc, irs, de.func, ethis2, ethis, eeq);
+        }
+        else
+        {
+            ethis = toElem(de.e1, irs);
+            if (de.e1.type.ty != Tclass && de.e1.type.ty != Tpointer)
+                ethis = addressElem(ethis, de.e1.type);
+
+            if (irs.nullDerefCheck())
+                applyNullDerefErrorCheck(ethis, ethis.Ety, irs, de.loc);
+
+            if (ethis2)
+                ethis2 = setEthis2(de.loc, irs, de.func, ethis2, ethis, eeq);
+
+            if (de.e1.op == EXP.super_ || de.e1.op == EXP.dotType)
+                directcall = 1;
+
+            if (!de.func.isThis())
+                irs.eSink.error(de.loc, "delegates are only for non-static functions");
+
+            if (!de.func.isVirtual() ||
+                directcall ||
+                de.func.isFinalFunc())
+            {
+                ep = el_ptr(sfunc);
+            }
+            else
+            {
+                // Get pointer to function out of virtual table
+
+                assert(ethis);
+                ep = el_same(ethis);
+                ep = el_una(OPind, TYnptr, ep);
+                uint vindex = de.func.vtblIndex;
+
+                assert(cast(int)vindex >= 0);
+
+                // Build *(ep + vindex * 4)
+                ep = el_bin(OPadd,TYnptr,ep,el_long(TYsize_t, vindex * irs.target.ptrsize));
+                ep = el_una(OPind,TYnptr,ep);
+            }
+
+            //if (func.tintro)
+            //    func.error(loc, "cannot form delegate due to covariant return type");
+        }
+
+        elem* e;
+        if (ethis2)
+            ethis = ethis2;
+        if (ethis.Eoper == OPcomma)
+        {
+            ethis.E2 = el_pair(TYdelegate, ethis.E2, ep);
+            ethis.Ety = TYdelegate;
+            e = ethis;
+        }
+        else
+            e = el_pair(TYdelegate, ethis, ep);
+        elem_setLoc(e, de.loc);
+        if (eeq)
+            e = el_combine(eeq, e);
+        return e;
+    }
+
+    elem* visitDotType(DotTypeExp dte)
+    {
+        // Just a pass-thru to e1
+        //printf("DotTypeExp.toElem() %s\n", dte.toChars());
+        elem* e = toElem(dte.e1, irs);
+        elem_setLoc(e, dte.loc);
+        return e;
+    }
+
+    elem* visitCall(CallExp ce)
+    {
+        //printf("[%s] CallExp.toElem('%s') %p, %s\n", ce.loc.toChars(), ce.toChars(), ce, ce.type.toChars());
+        return toElemCall(ce, irs);
+    }
+
+    elem* visitAddr(AddrExp ae)
+    {
+        //printf("AddrExp.toElem('%s')\n", ae.toChars());
+        if (auto sle = ae.e1.isStructLiteralExp())
+        {
+            //printf("AddrExp.toElem('%s') %d\n", ae.toChars(), ae);
+            //printf("StructLiteralExp(%p); origin:%p\n", sle, sle.origin);
+            //printf("sle.toSymbol() (%p)\n", sle.toSymbol());
+            if (irs.Cfile)
+            {
+                Symbol* stmp = symbol_genauto(Type_toCtype(sle.sd.type));
+                elem* es = toElemStructLit(sle, irs, EXP.construct, stmp, true);
+                elem* e = addressElem(el_var(stmp), ae.e1.type);
+                e.Ety = totym(ae.type);
+                e = el_bin(OPcomma, e.Ety, es, e);
+                elem_setLoc(e, ae.loc);
+                return e;
+            }
+            elem* e = el_ptr(toSymbol(sle.origin));
+            e.ET = Type_toCtype(ae.type);
+            elem_setLoc(e, ae.loc);
+            return e;
+        }
+        else
+        {
+            elem* e = toElem(ae.e1, irs);
+            e = addressElem(e, ae.e1.type);
+            e.Ety = totym(ae.type);
+            elem_setLoc(e, ae.loc);
+            return e;
+        }
+    }
+
+    elem* visitPtr(PtrExp pe)
+    {
+        //printf("PtrExp.toElem() %s\n", pe.toChars());
+        elem* e = toElem(pe.e1, irs);
+        if (tybasic(e.Ety) == TYnptr &&
+            pe.e1.type.nextOf() &&
+            pe.e1.type.nextOf().isImmutable())
+        {
+            e.Ety = TYimmutPtr;     // pointer to immutable
+        }
+
+        if (irs.nullDerefCheck())
+            applyNullDerefErrorCheck(e, e.Ety, irs, pe.loc);
+
+        e = el_una(OPind,totym(pe.type),e);
+        if (tybasic(e.Ety) == TYstruct)
+        {
+            e.ET = Type_toCtype(pe.type);
+        }
+        elem_setLoc(e, pe.loc);
+        return e;
+    }
+
+    elem* visitDelete(DeleteExp de)
+    {
+        Type tb;
+
+        //printf("DeleteExp.toElem()\n");
+        if (de.e1.op == EXP.index)
+        {
+            IndexExp ae = cast(IndexExp)de.e1;
+            tb = ae.e1.type.toBasetype();
+            assert(tb.ty != Taarray);
+        }
+        //e1.type.print();
+        elem* e = toElem(de.e1, irs);
+        tb = de.e1.type.toBasetype();
+        RTLSYM rtl;
+        switch (tb.ty)
+        {
+            case Tclass:
+                if (de.e1.op == EXP.variable)
+                {
+                    VarExp ve = cast(VarExp)de.e1;
+                    if (ve.var.isVarDeclaration() &&
+                        ve.var.isVarDeclaration().onstack)
+                    {
+                        rtl = RTLSYM.CALLFINALIZER;
+                        if (tb.isClassHandle().isInterfaceDeclaration())
+                            rtl = RTLSYM.CALLINTERFACEFINALIZER;
+                        break;
+                    }
+                }
+                goto default;
+
+            default:
+                assert(0);
+        }
+        e = el_bin(OPcall, TYvoid, el_var(getRtlsym(rtl)), e);
+        toTraceGC(irs, e, de.loc);
+        elem_setLoc(e, de.loc);
+        return e;
+    }
+
+    elem* visitVector(VectorExp ve)
+    {
+        version (none)
+        {
+            printf("VectorExp.toElem()\n");
+            printAST(ve);
+            printf("\tfrom: %s\n", ve.e1.type.toChars());
+            printf("\tto  : %s\n", ve.to.toChars());
+        }
+
+        elem* e;
+        if (ve.e1.op == EXP.arrayLiteral)
+        {
+            e = el_calloc();
+            e.Eoper = OPconst;
+            e.Ety = totym(ve.type);
+
+            foreach (const i; 0 .. ve.dim)
+            {
+                Expression elem = ve.e1.isArrayLiteralExp()[i];
+                const complex = elem.toComplex();
+                const integer = elem.toInteger();
+                switch (elem.type.toBasetype().ty)
+                {
+                    case Tfloat32:
+                        // Must not call toReal directly, to avoid dmd bug 14203 from breaking dmd
+                        e.Vfloat8[i] = cast(float) complex.re;
+                        break;
+
+                    case Tfloat64:
+                        // Must not call toReal directly, to avoid dmd bug 14203 from breaking dmd
+                        e.Vdouble4[i] = cast(double) complex.re;
+                        break;
+
+                    case Tint64:
+                    case Tuns64:
+                        e.Vullong4[i] = integer;
+                        break;
+
+                    case Tint32:
+                    case Tuns32:
+                        e.Vulong8[i] = cast(uint)integer;
+                        break;
+
+                    case Tint16:
+                    case Tuns16:
+                        e.Vushort16[i] = cast(ushort)integer;
+                        break;
+
+                    case Tint8:
+                    case Tuns8:
+                        e.Vuchar32[i] = cast(ubyte)integer;
+                        break;
+
+                    default:
+                        assert(0);
+                }
+            }
+        }
+        else if (ve.type.size() == ve.e1.type.size())
+        {
+            e = toElem(ve.e1, irs);
+            e.Ety = totym(ve.type);  // paint vector type on it
+        }
+        else
+        {
+            // Create vecfill(e1)
+            elem* e1 = toElem(ve.e1, irs);
+            e = el_una(OPvecfill, totym(ve.type), e1);
+        }
+        elem_setLoc(e, ve.loc);
+        return e;
+    }
+
+    elem* visitVectorArray(VectorArrayExp vae)
+    {
+        elem* result;
+        // Generate code for `vec.array`
+        if (auto ve = vae.e1.isVectorExp())
+        {
+            // https://issues.dlang.org/show_bug.cgi?id=19607
+            // When viewing a vector literal as an array, build the underlying array directly.
+            if (ve.e1.op == EXP.arrayLiteral)
+                result = toElem(ve.e1, irs);
+            else
+            {
+                // Generate: stmp[0 .. dim] = e1
+                type* tarray = Type_toCtype(vae.type);
+                Symbol* stmp = symbol_genauto(tarray);
+                result = setArray(ve.e1, el_ptr(stmp), el_long(TYsize_t, tarray.Tdim),
+                                  ve.e1.type, toElem(ve.e1, irs), irs, EXP.blit);
+                result = el_combine(result, el_var(stmp));
+                result.ET = tarray;
+            }
+        }
+        else
+        {
+            // For other vector expressions this just a paint operation.
+            elem* e = toElem(vae.e1, irs);
+            type* tarray = Type_toCtype(vae.type);
+            // Take the address then repaint,
+            // this makes it swap to the right registers
+            e = addressElem(e, vae.e1.type);
+            e = el_una(OPind, tarray.Tty, e);
+            e.ET = tarray;
+            result = e;
+        }
+        result.Ety = totym(vae.type);
+        elem_setLoc(result, vae.loc);
+        return result;
+    }
+
+    elem* visitCast(CastExp ce)
+    {
+        version (none)
+        {
+            printf("CastExp.toElem()\n");
+            ce.print();
+            printf("\tfrom: %s\n", ce.e1.type.toChars());
+            printf("\tto  : %s\n", ce.to.toChars());
+        }
+        // When there is a lowering availabe, use that
+        elem* e = ce.lowering is null ? toElem(ce.e1, irs) : toElem(ce.lowering, irs);
+
+        return toElemCast(ce, e, false, irs);
+    }
+
+    elem* visitArrayLength(ArrayLengthExp ale)
+    {
+        elem* e = toElem(ale.e1, irs);
+        e = el_una((target.isX86_64 || target.isAArch64) ? OP128_64 : OP64_32, totym(ale.type), e);
+        elem_setLoc(e, ale.loc);
+        return e;
+    }
+
+    elem* visitDelegatePtr(DelegatePtrExp dpe)
+    {
+        // *cast(void**)(&dg)
+        elem* e = toElem(dpe.e1, irs);
+        Type tb1 = dpe.e1.type.toBasetype();
+        e = addressElem(e, tb1);
+        e = el_una(OPind, totym(dpe.type), e);
+        elem_setLoc(e, dpe.loc);
+        return e;
+    }
+
+    elem* visitDelegateFuncptr(DelegateFuncptrExp dfpe)
+    {
+        // *cast(void**)(&dg + size_t.sizeof)
+        elem* e = toElem(dfpe.e1, irs);
+        Type tb1 = dfpe.e1.type.toBasetype();
+        e = addressElem(e, tb1);
+        e = el_bin(OPadd, TYnptr, e, el_long(TYsize_t, (target.isX86_64 || target.isAArch64) ? 8 : 4));
+        e = el_una(OPind, totym(dfpe.type), e);
+        elem_setLoc(e, dfpe.loc);
+        return e;
+    }
+
+    elem* visitSlice(SliceExp se)
+    {
+        //printf("SliceExp.toElem() se = %s %s\n", se.type.toChars(), se.toChars());
+        Type tb = se.type.toBasetype();
+        assert(tb.isStaticOrDynamicArray());
+        Type t1 = se.e1.type.toBasetype();
+        elem* e = toElem(se.e1, irs);
+        if (se.lwr)
+        {
+            uint sz = cast(uint)t1.nextOf().size();
+
+            elem* einit = resolveLengthVar(se.lengthVar, &e, t1);
+            if (t1.ty == Tsarray)
+                e = array_toPtr(se.e1.type, e);
+            if (!einit)
+            {
+                einit = e;
+                e = el_same(einit);
+            }
+            // e is a temporary, typed:
+            //  TYdarray if t.ty == Tarray
+            //  TYptr if t.ty == Tsarray or Tpointer
+
+            elem* elwr = toElem(se.lwr, irs);
+            elem* eupr = toElem(se.upr, irs);
+            elem* elwr2 = el_sideeffect(eupr) ? el_copytotmp(elwr) : el_same(elwr);
+            elem* eupr2 = eupr;
+
+            //printf("upperIsInBounds = %d lowerIsLessThanUpper = %d\n", se.upperIsInBounds, se.lowerIsLessThanUpper);
+            if (irs.arrayBoundsCheck())
+            {
+                // Checks (unsigned compares):
+                //  upr <= array.length
+                //  lwr <= upr
+
+                elem* c1 = null;
+                elem* elen;
+                if (!se.upperIsInBounds)
+                {
+                    eupr2 = el_same(eupr);
+                    eupr2.Ety = TYsize_t;  // make sure unsigned comparison
+
+                    if (auto tsa = t1.isTypeSArray())
+                    {
+                        elen = el_long(TYsize_t, tsa.dim.toInteger());
+                    }
+                    else if (t1.ty == Tarray)
+                    {
+                        if (se.lengthVar && !(se.lengthVar.storage_class & STC.const_))
+                            elen = el_var(toSymbol(se.lengthVar));
+                        else
+                        {
+                            elen = e;
+                            e = el_same(elen);
+                            elen = el_una((target.isX86_64 || target.isAArch64) ? OP128_64 : OP64_32, TYsize_t, elen);
+                        }
+                    }
+
+                    c1 = el_bin(OPle, TYint, eupr, elen);
+
+                    if (!se.lowerIsLessThanUpper)
+                    {
+                        c1 = el_bin(OPandand, TYint,
+                            c1, el_bin(OPle, TYint, elwr2, eupr2));
+                        elwr2 = el_copytree(elwr2);
+                        eupr2 = el_copytree(eupr2);
+                    }
+                }
+                else if (!se.lowerIsLessThanUpper)
+                {
+                    eupr2 = el_same(eupr);
+                    eupr2.Ety = TYsize_t;  // make sure unsigned comparison
+
+                    c1 = el_bin(OPle, TYint, elwr2, eupr);
+                    elwr2 = el_copytree(elwr2);
+                }
+
+                if (c1)
+                {
+                    // Construct: (c1 || arrayBoundsError)
+                    // if lowerIsLessThanUpper (e.g. arr[-1..0]), elen is null here
+                    elen = elen ? elen : el_long(TYsize_t, 0);
+                    auto ea = buildArraySliceError(irs, se.loc, el_copytree(elwr2), el_copytree(eupr2), el_copytree(elen));
+                    elem* eb = el_bin(OPoror, TYvoid, c1, ea);
+
+                    elwr = el_combine(elwr, eb);
+                }
+            }
+            if (t1.ty != Tsarray)
+                e = array_toPtr(se.e1.type, e);
+
+            // Create an array reference where:
+            // length is (upr - lwr)
+            // pointer is (ptr + lwr*sz)
+            // Combine as (length pair ptr)
+
+            elem* eofs = el_bin(OPmul, TYsize_t, elwr2, el_long(TYsize_t, sz));
+            elem* eptr = el_bin(OPadd, TYnptr, e, eofs);
+
+            if (tb.ty == Tarray)
+            {
+                elem* elen = el_bin(OPmin, TYsize_t, eupr2, el_copytree(elwr2));
+                e = el_pair(TYdarray, elen, eptr);
+            }
+            else
+            {
+                assert(tb.ty == Tsarray);
+                e = el_una(OPind, totym(se.type), eptr);
+                if (tybasic(e.Ety) == TYstruct)
+                    e.ET = Type_toCtype(se.type);
+            }
+            e = el_combine(elwr, e);
+            e = el_combine(einit, e);
+            //elem_print(e);
+        }
+        else if (t1.ty == Tsarray && tb.ty == Tarray)
+        {
+            e = sarray_toDarray(se.loc, t1, null, e);
+        }
+        else
+        {
+            assert(t1.ty == tb.ty);   // Tarray or Tsarray
+
+            // https://issues.dlang.org/show_bug.cgi?id=14672
+            // If se is in left side operand of element-wise
+            // assignment, the element type can be painted to the base class.
+            int offset;
+            import dmd.typesem : isBaseOf;
+            assert(t1.nextOf().equivalent(tb.nextOf()) ||
+                   tb.nextOf().isBaseOf(t1.nextOf(), &offset) && offset == 0);
+        }
+        elem_setLoc(e, se.loc);
+        return e;
+    }
+
+    elem* visitIndex(IndexExp ie)
+    {
+        elem* e;
+        elem* n1 = toElem(ie.e1, irs);
+        elem* eb = null;
+
+        //printf("IndexExp.toElem() %s\n", ie.toChars());
+        Type t1 = ie.e1.type.toBasetype();
+        if (auto taa = t1.isTypeAArray())
+        {
+            assert(false, "no index lowering for associative array literal");
+        }
+
+        elem* einit = resolveLengthVar(ie.lengthVar, &n1, t1);
+        elem* n2 = toElem(ie.e2, irs);
+
+        if (irs.arrayBoundsCheck() && !ie.indexIsInBounds)
+        {
+            elem* elength;
+
+            if (auto tsa = t1.isTypeSArray())
+            {
+                const length = tsa.dim.toInteger();
+
+                elength = el_long(TYsize_t, length);
+                goto L1;
+            }
+            else if (t1.ty == Tarray)
+            {
+                elength = n1;
+                n1 = el_same(elength);
+                elength = el_una((target.isX86_64 || target.isAArch64) ? OP128_64 : OP64_32, TYsize_t, elength);
+            L1:
+                elem* n2x = n2;
+                n2 = el_same(n2x);
+                n2x = el_bin(OPlt, TYint, n2x, elength);
+
+                // Construct: (n2x || arrayBoundsError)
+                auto ea = buildArrayIndexError(irs, ie.loc, el_copytree(n2), el_copytree(elength));
+                eb = el_bin(OPoror,TYvoid,n2x,ea);
+            }
+        }
+
+        n1 = array_toPtr(t1, n1);
+
+        {
+            elem* escale = el_long(TYsize_t, t1.nextOf().size());
+            n2 = el_bin(OPmul, TYsize_t, n2, escale);
+            e = el_bin(OPadd, TYnptr, n1, n2);
+            e = el_una(OPind, totym(ie.type), e);
+            if (tybasic(e.Ety) == TYstruct || tybasic(e.Ety) == TYarray)
+            {
+                e.Ety = TYstruct;
+                e.ET = Type_toCtype(ie.type);
+            }
+        }
+
+        eb = el_combine(einit, eb);
+        e = el_combine(eb, e);
+        elem_setLoc(e, ie.loc);
+        return e;
+    }
+
+
+    elem* visitTuple(TupleExp te)
+    {
+        //printf("TupleExp.toElem() %s\n", te.toChars());
+        elem* e = null;
+        if (te.e0)
+            e = toElem(te.e0, irs);
+        foreach (el; *te.exps)
+        {
+            elem* ep = toElem(el, irs);
+            e = el_combine(e, ep);
+        }
+        return e;
+    }
+
+    static elem* tree_insert(Elems* args, size_t low, size_t high)
+    {
+        assert(low < high);
+        if (low + 1 == high)
+            return (*args)[low];
+        int mid = cast(int)((low + high) >> 1);
+        return el_param(tree_insert(args, low, mid),
+                        tree_insert(args, mid, high));
+    }
+
+    elem* visitArrayLiteral(ArrayLiteralExp ale)
+    {
+        size_t dim = ale.elements ? ale.elements.length : 0;
+
+        //printf("ArrayLiteralExp.toElem() %s, type = %s\n", ale.toChars(), ale.type.toChars());
+        Type tb = ale.type.toBasetype();
+        if (tb.ty == Tsarray && tb.nextOf().toBasetype().ty == Tvoid)
+        {
+            // Convert void[n] to ubyte[n]
+            tb = Type.tuns8.sarrayOf((cast(TypeSArray)tb).dim.toUInteger());
+        }
+
+        elem* e;
+        if (dim > 0)
+        {
+            if (ale.onstack || tb.ty == Tsarray ||
+                irs.Cfile && tb.ty == Tpointer)
+            {
+                Symbol* stmp = null;
+                e = ExpressionsToStaticArray(irs, ale.loc, ale.elements, &stmp, 0, ale.basis);
+                e = el_combine(e, el_ptr(stmp));
+            }
+            else
+            {
+                /* Instead of passing the initializers on the stack, allocate the
+                * array and assign the members inline.
+                * Avoids the whole variadic arg mess.
+                */
+
+                if (!ale.lowering)
+                {
+                    fprintf(stderr, "Internal Error: array literal %s at %s should have been lowered to a _d_arrayliteralTX template\n",
+                        ale.toChars(), ale.loc.toChars());
+                    assert(0);
+                }
+                e = toElem(ale.lowering, irs);
+
+                Symbol* stmp = symbol_genauto(Type_toCtype(Type.tvoid.pointerTo()));
+                e = el_bin(OPeq, TYnptr, el_var(stmp), e);
+
+                e = el_combine(e, ExpressionsToStaticArray(irs, ale.loc, ale.elements, &stmp, 0, ale.basis));
+
+                e = el_combine(e, el_var(stmp));
+            }
+        }
+        else
+        {
+            e = el_long(TYsize_t, 0);
+        }
+
+        if (tb.ty == Tarray)
+        {
+            e = el_pair(TYdarray, el_long(TYsize_t, dim), e);
+        }
+        else if (tb.ty == Tpointer)
+        {
+        }
+        else
+        {
+            e = el_una(OPind, TYstruct, e);
+            e.ET = Type_toCtype(ale.type);
+        }
+
+        elem_setLoc(e, ale.loc);
+        return e;
+    }
+
+    elem* visitAssocArrayLiteral(AssocArrayLiteralExp aale)
+    {
+        //printf("AssocArrayLiteralExp.toElem() %s\n", aale.toChars());
+        if (aale.lowering)
+            return toElem(aale.lowering, irs);
+
+        assert(false, "no lowering for associative array literal");
+    }
+
+    elem* visitStructLiteral(StructLiteralExp sle)
+    {
+        //printf("[%s] StructLiteralExp.toElem() %s\n", sle.loc.toChars(), sle.toChars());
+        return toElemStructLit(sle, irs, EXP.construct, cast(Symbol*)sle.sym, true);
+    }
+
+    elem* visitObjcClassReference(ObjcClassReferenceExp e)
+    {
+        return objc.toElem(e);
+    }
+
+    /*****************************************************/
+    /*                   CTFE stuff                      */
+    /*****************************************************/
+
+    elem* visitClassReference(ClassReferenceExp e)
+    {
+        //printf("ClassReferenceExp.toElem() %p, value=%p, %s\n", e, e.value, e.toChars());
+        return el_ptr(toSymbol(e));
+    }
+
+    switch (e.op)
+    {
+        default:                return visit(e);
+
+        case EXP.negate:        return visitNeg(e.isNegExp());
+        case EXP.tilde:         return visitCom(e.isComExp());
+        case EXP.not:           return visitNot(e.isNotExp());
+        case EXP.plusPlus:
+        case EXP.minusMinus:    return visitPost(e.isPostExp());
+        case EXP.add:           return visitAdd(e.isAddExp());
+        case EXP.min:           return visitMin(e.isMinExp());
+        case EXP.concatenate:   return visitCat(e.isCatExp());
+        case EXP.mul:           return visitMul(e.isMulExp());
+        case EXP.div:           return visitDiv(e.isDivExp());
+        case EXP.mod:           return visitMod(e.isModExp());
+        case EXP.lessThan:
+        case EXP.lessOrEqual:
+        case EXP.greaterThan:
+        case EXP.greaterOrEqual: return visitCmp(cast(CmpExp) e);
+        case EXP.notEqual:
+        case EXP.equal:         return visitEqual(e.isEqualExp());
+        case EXP.notIdentity:
+        case EXP.identity:      return visitIdentity(e.isIdentityExp());
+        case EXP.in_:           return visitIn(e.isInExp());
+        case EXP.assign:        return visitAssign(e.isAssignExp());
+        case EXP.construct:     return visitConstruct(e.isConstructExp());
+        case EXP.blit:          return visitAssign(e.isBlitExp());
+        case EXP.loweredAssignExp: return visitLoweredAssign(e.isLoweredAssignExp());
+        case EXP.addAssign:     return visitAddAssign(e.isAddAssignExp());
+        case EXP.minAssign:     return visitMinAssign(e.isMinAssignExp());
+        case EXP.concatenateDcharAssign: return visitCatAssign(e.isCatDcharAssignExp());
+        case EXP.concatenateElemAssign:  return visitCatAssign(e.isCatElemAssignExp());
+        case EXP.concatenateAssign:      return visitCatAssign(e.isCatAssignExp());
+        case EXP.divAssign:     return visitDivAssign(e.isDivAssignExp());
+        case EXP.modAssign:     return visitModAssign(e.isModAssignExp());
+        case EXP.mulAssign:     return visitMulAssign(e.isMulAssignExp());
+        case EXP.leftShiftAssign: return visitShlAssign(e.isShlAssignExp());
+        case EXP.rightShiftAssign: return visitShrAssign(e.isShrAssignExp());
+        case EXP.unsignedRightShiftAssign: return visitUshrAssign(e.isUshrAssignExp());
+        case EXP.andAssign:     return visitAndAssign(e.isAndAssignExp());
+        case EXP.orAssign:      return visitOrAssign(e.isOrAssignExp());
+        case EXP.xorAssign:     return visitXorAssign(e.isXorAssignExp());
+        case EXP.andAnd:
+        case EXP.orOr:          return visitLogical(e.isLogicalExp());
+        case EXP.xor:           return visitXor(e.isXorExp());
+        case EXP.and:           return visitAnd(e.isAndExp());
+        case EXP.or:            return visitOr(e.isOrExp());
+        case EXP.leftShift:     return visitShl(e.isShlExp());
+        case EXP.rightShift:    return visitShr(e.isShrExp());
+        case EXP.unsignedRightShift: return visitUshr(e.isUshrExp());
+        case EXP.address:       return visitAddr(e.isAddrExp());
+        case EXP.variable:      return visitSymbol(e.isVarExp());
+        case EXP.symbolOffset:  return visitSymbol(e.isSymOffExp());
+        case EXP.int64:         return visitInteger(e.isIntegerExp());
+        case EXP.float64:       return visitReal(e.isRealExp());
+        case EXP.complex80:     return visitComplex(e.isComplexExp());
+        case EXP.this_:         return visitThis(e.isThisExp());
+        case EXP.super_:        return visitThis(e.isSuperExp());
+        case EXP.null_:         return visitNull(e.isNullExp());
+        case EXP.string_:       return visitString(e.isStringExp());
+        case EXP.arrayLiteral:  return visitArrayLiteral(e.isArrayLiteralExp());
+        case EXP.assocArrayLiteral:     return visitAssocArrayLiteral(e.isAssocArrayLiteralExp());
+        case EXP.structLiteral: return visitStructLiteral(e.isStructLiteralExp());
+        case EXP.type:          return visitType(e.isTypeExp());
+        case EXP.scope_:        return visitScope(e.isScopeExp());
+        case EXP.new_:          return visitNew(e.isNewExp());
+        case EXP.tuple:         return visitTuple(e.isTupleExp());
+        case EXP.function_:     return visitFunc(e.isFuncExp());
+        case EXP.declaration:   return visitDeclaration(e.isDeclarationExp());
+        case EXP.typeid_:       return visitTypeid(e.isTypeidExp());
+        case EXP.halt:          return visitHalt(e.isHaltExp());
+        case EXP.comma:         return visitComma(e.isCommaExp());
+        case EXP.assert_:       return visitAssert(e.isAssertExp());
+        case EXP.throw_:        return visitThrow(e.isThrowExp());
+        case EXP.dotVariable:   return visitDotVar(e.isDotVarExp());
+        case EXP.delegate_:     return visitDelegate(e.isDelegateExp());
+        case EXP.dotType:       return visitDotType(e.isDotTypeExp());
+        case EXP.call:          return visitCall(e.isCallExp());
+        case EXP.star:          return visitPtr(e.isPtrExp());
+        case EXP.delete_:       return visitDelete(e.isDeleteExp());
+        case EXP.cast_:         return visitCast(e.isCastExp());
+        case EXP.vector:        return visitVector(e.isVectorExp());
+        case EXP.vectorArray:   return visitVectorArray(e.isVectorArrayExp());
+        case EXP.slice:         return visitSlice(e.isSliceExp());
+        case EXP.arrayLength:   return visitArrayLength(e.isArrayLengthExp());
+        case EXP.delegatePointer:       return visitDelegatePtr(e.isDelegatePtrExp());
+        case EXP.delegateFunctionPointer:       return visitDelegateFuncptr(e.isDelegateFuncptrExp());
+        case EXP.index:         return visitIndex(e.isIndexExp());
+        case EXP.remove:        return visitRemove(e.isRemoveExp());
+        case EXP.question:      return visitCond(e.isCondExp());
+        case EXP.objcClassReference:    return visitObjcClassReference(e.isObjcClassReferenceExp());
+        case EXP.classReference:        return visitClassReference(e.isClassReferenceExp());
+    }
+}
+
+/*******************************************
+ * Convert Expression to elem, emplacing the value
+ * into a given storage.
+ * Params:
+ *      e = Expression to convert
+ *      ehidden = lvalue element to place the value in these forms:
+ *          (OPvar TYnptr), which is a pointer to the storage
+ *          (OPvar TYsarray/TYstruct), which is the target symbol
+ *          (OPind TYsarray/TYstruct), which is the target location
+ *      irs = context
+ * Returns:
+ *      generated elem tree
+ */
+elem* toElemRVO(Expression e, elem* ehidden, ref IRState irs)
+{
+    assert(e.type.toBasetype().ty == Tstruct || e.type.toBasetype().ty == Tsarray);
+
+    elem* doCommaRVO(CommaExp ce)
+    {
+        assert(ce.e1 && ce.e2);
+        elem* eleft  = toElem(ce.e1, irs);
+        elem* eright = toElemRVO(ce.e2, ehidden, irs);
+        elem* e = el_combine(eleft, eright);
+        if (e)
+            elem_setLoc(e, ce.loc);
+        return e;
+    }
+
+    elem* doCondRVO(CondExp ce)
+    {
+        // Mirror `__ctfe`/`!__ctfe` handling logic in `toElem()`
+        auto ctfecond = ce.econd.op == EXP.not ? (cast(NotExp)ce.econd).e1 : ce.econd;
+        if (auto ve = ctfecond.isVarExp())
+            if (ve.var && ve.var.ident == Id.ctfe)
+                return toElemRVO(ctfecond is ce.econd ? ce.e2 : ce.e1, ehidden, irs);
+
+        elem* ec = toElem(ce.econd, irs);
+
+        elem* eleft = toElemRVO(ce.e1, ehidden, irs);
+        if (irs.params.cov && ce.e1.loc.linnum)
+            eleft = el_combine(incUsageElem(irs, ce.e1.loc), eleft);
+
+        elem* eright = toElemRVO(ce.e2, el_copytree(ehidden), irs);
+        if (irs.params.cov && ce.e2.loc.linnum)
+            eright = el_combine(incUsageElem(irs, ce.e2.loc), eright);
+
+        tym_t ty = eleft.Ety;
+        if (tybasic(ty) == TYnoreturn)
+            ty = eright.Ety;
+
+        elem* e = el_bin(OPcond, ty, ec, el_bin(OPcolon, ty, eleft, eright));
+        if (tybasic(eleft.Ety) == TYnoreturn)
+            e.ET = eright.ET;
+        else
+            e.ET = eleft.ET;
+
+        elem_setLoc(e, ce.loc);
+        return e;
+    }
+
+    elem* doCallRVO(CallExp ce)
+    {
+        return toElemCall(ce, irs, ehidden);
+    }
+
+    elem* doStructLiteralRVO(StructLiteralExp sle)
+    {
+        if (ehidden.Eoper == OPvar && ehidden.Voffset == 0)
+            return toElemStructLit(sle, irs, EXP.construct, ehidden.Vsym, true);
+
+        // Generate (tmp=&ehidden, *tmp=struct)
+        if (tybasic(ehidden.Ety) != TYnptr)
+            ehidden = addressElem(ehidden, sle.sd.type.toBasetype());
+        Symbol* stmp = symbol_genauto(TYnptr);
+        elem* e1 = el_bin(OPeq, TYnptr, el_var(stmp), ehidden);
+        elem* es = toElemStructLit(sle, irs, EXP.construct, stmp, true);
+        e1 = el_combine(e1, es);
+        elem_setLoc(e1, sle.loc);
+        return e1;
+    }
+
+    // Please keep in sync with dmd.expressionsem.canElideCopy()
+    switch (e.op)
+    {
+        case EXP.comma:         return doCommaRVO(e.isCommaExp());
+        case EXP.question:      return doCondRVO(e.isCondExp());
+        case EXP.call:          return doCallRVO(e.isCallExp());
+        case EXP.structLiteral: return doStructLiteralRVO(e.isStructLiteralExp());
+        default:                assert(0);
+    }
+}
+
+private:
+
+/**************************************
+ * Mirrors logic in Dsymbol_canThrow().
+ */
+elem* Dsymbol_toElem(Dsymbol s, ref IRState irs)
+{
+    //printf("Dsymbol_toElem() %s\n", s.toChars());
+    elem* e = null;
+
+    void symbolDg(Dsymbol s)
+    {
+        e = el_combine(e, Dsymbol_toElem(s, irs));
+    }
+
+    if (auto vd = s.isVarDeclaration())
+    {
+        s = s.toAlias();
+        if (s != vd)
+            return Dsymbol_toElem(s, irs);
+        if (vd.storage_class & STC.manifest)
+            return null;
+        if (vd.isStatic() || vd.storage_class & (STC.extern_ | STC.tls | STC.gshared))
+            toObjFile(vd, false);
+        else
+        {
+            Symbol* sp = toSymbol(s);
+            symbol_add(sp);
+            //printf("\tadding symbol '%s'\n", sp.Sident);
+            if (vd._init)
+            {
+                if (auto ie = vd._init.isExpInitializer())
+                    e = toElem(ie.exp, irs);
+            }
+
+            /* Mark the point of construction of a variable that needs to be destructed.
+             */
+            if (vd.needsScopeDtor())
+            {
+                elem* edtor = toElem(vd.edtor, irs);
+                elem* ed = null;
+                if (irs.isNothrow())
+                {
+                    ed = edtor;
+                }
+                else
+                {
+                    // Construct special elems to deal with exceptions
+                    e = el_ctor_dtor(e, edtor, ed);
+                }
+
+                // ed needs to be inserted into the code later
+                irs.varsInScope.push(ed);
+            }
+        }
+    }
+    else if (auto cd = s.isClassDeclaration())
+    {
+        irs.deferToObj.push(s);
+    }
+    else if (auto sd = s.isStructDeclaration())
+    {
+        irs.deferToObj.push(sd);
+    }
+    else if (auto fd = s.isFuncDeclaration())
+    {
+        //printf("function %s\n", fd.toChars());
+        irs.deferToObj.push(fd);
+    }
+    else if (auto ad = s.isAttribDeclaration())
+    {
+        ad.include(null).foreachDsymbol(&symbolDg);
+    }
+    else if (auto tm = s.isTemplateMixin())
+    {
+        //printf("%s\n", tm.toChars());
+        tm.members.foreachDsymbol(&symbolDg);
+    }
+    else if (auto td = s.isTupleDeclaration())
+    {
+        td.foreachVar(&symbolDg);
+    }
+    else if (auto ed = s.isEnumDeclaration())
+    {
+        irs.deferToObj.push(ed);
+    }
+    else if (auto ti = s.isTemplateInstance())
+    {
+        irs.deferToObj.push(ti);
+    }
+    return e;
+}
+
+/*************************************************
+ * Allocate a static array, and initialize its members with elems[].
+ * Return the initialization expression, and the symbol for the static array in *psym.
+ */
+elem* ElemsToStaticArray(Loc loc, Type telem, Elems* elems, Symbol **psym)
+{
+    // Create a static array of type telem[dim]
+    const dim = elems.length;
+    assert(dim);
+
+    Type tsarray = telem.sarrayOf(dim);
+    const szelem = telem.size();
+    .type* te = Type_toCtype(telem);   // stmp[] element type
+
+    Symbol* stmp = symbol_genauto(Type_toCtype(tsarray));
+    *psym = stmp;
+
+    elem* e = null;
+    foreach (i, ep; *elems)
+    {
+        /* Generate: *(&stmp + i * szelem) = element[i]
+         */
+        elem* ev = el_ptr(stmp);
+        ev = el_bin(OPadd, TYnptr, ev, el_long(TYsize_t, i * szelem));
+        ev = el_una(OPind, te.Tty, ev);
+        elem* eeq = elAssign(ev, ep, null, te);
+        e = el_combine(e, eeq);
+    }
+    return e;
+}
+
+/*************************************************
+ * Allocate a static array, and initialize its members with
+ * exps[].
+ * Return the initialization expression, and the symbol for the static array in *psym.
+ */
+elem* ExpressionsToStaticArray(ref IRState irs, Loc loc, Expressions* exps, Symbol **psym, size_t offset = 0, Expression basis = null)
+{
+    // Create a static array of type telem[dim]
+    const dim = exps.length;
+    assert(dim);
+
+    Type telem = ((*exps)[0] ? (*exps)[0] : basis).type;
+    const szelem = telem.size();
+    .type* te = Type_toCtype(telem);   // stmp[] element type
+
+    if (!*psym)
+    {
+        Type tsarray2 = telem.sarrayOf(dim);
+        *psym = symbol_genauto(Type_toCtype(tsarray2));
+        offset = 0;
+    }
+    Symbol* stmp = *psym;
+
+    elem* e = null;
+    for (size_t i = 0; i < dim; )
+    {
+        Expression el = (*exps)[i];
+        if (!el)
+            el = basis;
+        if (el.op == EXP.arrayLiteral &&
+            el.type.toBasetype().ty == Tsarray)
+        {
+            ArrayLiteralExp ale = cast(ArrayLiteralExp)el;
+            if (ale.elements && ale.elements.length)
+            {
+                elem* ex = ExpressionsToStaticArray(irs,
+                    ale.loc, ale.elements, &stmp, cast(uint)(offset + i * szelem), ale.basis);
+                e = el_combine(e, ex);
+            }
+            i++;
+            continue;
+        }
+
+        size_t j = i + 1;
+        if (el.isConst() || el.op == EXP.null_)
+        {
+            // If the trivial elements are same values, do memcpy.
+            while (j < dim)
+            {
+                Expression en = (*exps)[j];
+                if (!en)
+                    en = basis;
+                if (!el.isIdentical(en))
+                    break;
+                j++;
+            }
+        }
+
+        /* Generate: *(&stmp + i * szelem) = element[i]
+         */
+        elem* ep = toElem(el, irs);
+        elem* ev = tybasic(stmp.Stype.Tty) == TYnptr ? el_var(stmp) : el_ptr(stmp);
+        ev = el_bin(OPadd, TYnptr, ev, el_long(TYsize_t, offset + i * szelem));
+
+        elem* eeq;
+        if (j == i + 1)
+        {
+            ev = el_una(OPind, te.Tty, ev);
+            eeq = elAssign(ev, ep, null, te);
+        }
+        else
+        {
+            elem* edim = el_long(TYsize_t, j - i);
+            eeq = setArray(el, ev, edim, telem, ep, irs, EXP.blit);
+        }
+        e = el_combine(e, eeq);
+        i = j;
+    }
+    return e;
+}
+
+/***************************************************
+ */
+elem* toElemCast(CastExp ce, elem* e, bool isLvalue, ref IRState irs)
+{
+    tym_t ftym;
+    tym_t ttym;
+    OPER eop;
+
+    Type tfrom = ce.e1.type.toBasetype();
+    Type t = ce.to.toBasetype();         // skip over typedef's
+
+    TY fty;
+    TY tty;
+    if (t.equals(tfrom) ||
+        t.equals(Type.tvoid)) // https://issues.dlang.org/show_bug.cgi?id=18573
+                              // Remember to pop value left on FPU stack
+        return e;
+
+    fty = tfrom.ty;
+    tty = t.ty;
+    //printf("fty = %d\n", fty);
+
+    static elem* Lret(CastExp ce, elem* e)
+    {
+        // Adjust for any type paints
+        Type t = ce.type.toBasetype();
+        e.Ety = totym(t);
+        if (tyaggregate(e.Ety))
+            e.ET = Type_toCtype(t);
+
+        elem_setLoc(e, ce.loc);
+        return e;
+    }
+
+    static elem* Lpaint(CastExp ce, elem* e, tym_t ttym)
+    {
+        e.Ety = ttym;
+        return Lret(ce, e);
+    }
+
+    static elem* Lzero(CastExp ce, elem* e, tym_t ttym)
+    {
+        e = el_bin(OPcomma, ttym, e, el_long(ttym, 0));
+        return Lret(ce, e);
+    }
+
+    static elem* Leop(CastExp ce, elem* e, OPER eop, tym_t ttym)
+    {
+        e = el_una(eop, ttym, e);
+        return Lret(ce, e);
+    }
+
+    if (tty == Tpointer && fty == Tarray)
+    {
+        if (e.Eoper == OPvar)
+        {
+            // e1 . *(&e1 + 4)
+            e = el_una(OPaddr, TYnptr, e);
+            e = el_bin(OPadd, TYnptr, e, el_long(TYsize_t, tysize(TYnptr)));
+            e = el_una(OPind,totym(t),e);
+        }
+        else
+        {
+            // e1 . (uint)(e1 >> 32)
+            if (target.isX86_64 || target.isAArch64)
+            {
+                e = el_bin(OPshr, TYucent, e, el_long(TYint, 64));
+                e = el_una(OP128_64, totym(t), e);
+            }
+            else
+            {
+                e = el_bin(OPshr, TYullong, e, el_long(TYint, 32));
+                e = el_una(OP64_32, totym(t), e);
+            }
+        }
+        return Lret(ce, e);
+    }
+
+    if (tty == Tpointer && fty == Tsarray)
+    {
+        // e1 . &e1
+        e = el_una(OPaddr, TYnptr, e);
+        return Lret(ce, e);
+    }
+
+    // Convert from static array to dynamic array
+    if (tty == Tarray && fty == Tsarray)
+    {
+        e = sarray_toDarray(ce.loc, tfrom, t, e);
+        return Lret(ce, e);
+    }
+
+    // Convert from dynamic array to dynamic array
+    if (tty == Tarray && fty == Tarray)
+    {
+        uint fsize = cast(uint)tfrom.nextOf().size();
+        uint tsize = cast(uint)t.nextOf().size();
+
+        if (fsize != tsize)
+        {   // Array element sizes do not match, so we must adjust the dimensions
+            if (tsize != 0 && fsize % tsize == 0)
+            {
+                // Set array dimension to (length * (fsize / tsize))
+                // Generate pair(e.length * (fsize/tsize), es.ptr)
+
+                elem* es = el_same(e);
+
+                elem* eptr = el_una(OPmsw, TYnptr, es);
+                elem* elen = el_una(target.isX86_64 || target.isAArch64 ? OP128_64 : OP64_32, TYsize_t, e);
+                elem* elen2 = el_bin(OPmul, TYsize_t, elen, el_long(TYsize_t, fsize / tsize));
+                e = el_pair(totym(ce.type), elen2, eptr);
+            }
+            else
+            {
+                assert(false, "This case should have been rewritten to `__ArrayCast` in the semantic phase");
+            }
+        }
+        return Lret(ce, e);
+    }
+
+    // Casting between class/interface may require a runtime check
+    if (fty == Tclass && tty == Tclass)
+    {
+        ClassDeclaration cdfrom = tfrom.isClassHandle();
+        ClassDeclaration cdto   = t.isClassHandle();
+
+        int offset;
+        if (cdto.isBaseOf(cdfrom, &offset))
+        {
+            /* The offset from cdfrom => cdto is known at compile time.
+             * Cases:
+             *  - class => base class (upcast)
+             *  - class => base interface (upcast)
+             */
+
+            //printf("offset = %d\n", offset);
+            if (offset == ClassDeclaration.OFFSET_FWDREF)
+            {
+                assert(0, "unexpected forward reference");
+            }
+            else if (offset)
+            {
+                /* Rewrite cast as (e ? e + offset : null)
+                 */
+                if (ce.e1.op == EXP.this_)
+                {
+                    // Assume 'this' is never null, so skip null check
+                    e = el_bin(OPadd, TYnptr, e, el_long(TYsize_t, offset));
+                }
+                else
+                {
+                    elem* etmp = el_same(e);
+                    elem* ex = el_bin(OPadd, TYnptr, etmp, el_long(TYsize_t, offset));
+                    ex = el_bin(OPcolon, TYnptr, ex, el_long(TYnptr, 0));
+                    e = el_bin(OPcond, TYnptr, e, ex);
+                }
+            }
+            else
+            {
+                // Casting from derived class to base class is a no-op
+            }
+        }
+        else if (cdfrom.classKind == cdto.classKind)
+        {
+            /* Casting from a non-D linkage class/interface to a unrelated class/interface
+             * is always a 'paint' operation (for dmd, other backends might use RTTI
+             * of other languages)
+             */
+            return Lret(ce, e);                  // no-op
+        }
+        else
+        {
+            assert(ce.lowering, "This case should have been rewritten to `_d_cast` in the semantic phase");
+        }
+        return Lret(ce, e);
+    }
+
+    if (fty == Tvector && tty == Tsarray)
+    {
+        if (tfrom.size() == t.size())
+        {
+            if (e.Eoper != OPvar && e.Eoper != OPind)
+            {
+                // can't perform array ops on it unless it's in memory
+                e = addressElem(e, tfrom);
+                e = el_una(OPind, TYarray, e);
+                e.ET = Type_toCtype(t);
+            }
+            return Lret(ce, e);
+        }
+    }
+
+    ftym = tybasic(e.Ety);
+    ttym = tybasic(totym(t));
+    if (ftym == ttym)
+        return Lret(ce, e);
+
+    // OSX AArch64 long doubles are 64 bits
+    bool RealIsDouble = target.os == Target.os.OSX && target.isAArch64;
+
+    /* Reduce combinatorial explosion by rewriting the 'to' and 'from' types to a
+     * generic equivalent (as far as casting goes)
      */
     switch (tty)
     {
