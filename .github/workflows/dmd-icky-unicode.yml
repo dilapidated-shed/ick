@@ -50,9 +50,11 @@ jobs:
           set -euxo pipefail
           dmd_bin=$(cat "$GITHUB_WORKSPACE/.dmd-bin")
           runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
-          phobos_import=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\/std\/math\.d$/ { sub(/\/std\/math\.d$/, ""); print; exit }')
+          phobos_module=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\/std\/math(\/package)?\.(d|di)$/ { print; exit }')
           test -f "$runtime_import/object.d"
-          test -f "$phobos_import/std/math.d"
+          test -n "$phobos_module"
+          test -f "$phobos_module"
+          phobos_import="${phobos_module%%/std/math*}"
           "$dmd_bin" -betterC -I"$runtime_import" -I"$phobos_import" \
             "$GITHUB_WORKSPACE/dmd/qualification/icky_unicode.d" -of=/tmp/icky_unicode
           test -x /tmp/icky_unicode
