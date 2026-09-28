@@ -1,0 +1,101 @@
+name: GDC Icky D Unicode
+
+on:
+  pull_request:
+    paths:
+      - 'ick/source/gcc/d/dmd/lexer.d'
+      - 'ick/source/gcc/d/dmd/parse.d'
+      - 'ick/OVERLAY.sha256'
+      - 'qualification/gdc_icky_unicode.d'
+      - 'qualification/gdc_en_dash_rejected.d'
+      - '.github/workflows/gdc-icky-unicode.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unicode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          submodules: true
+
+      - name: Materialize pinned ICK and GDC source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sh ick/materialize.sh gcc source
+
+      - name: Install GDC build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gdc flex bison texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev
+
+      - name: Build native ICK with D enabled
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir build stage
+          cd build
+          ../source/configure \
+            --prefix="$GITHUB_WORKSPACE/stage" \
+            --enable-languages=c,d \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-libatomic \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv
+          make -j"$(nproc)" all-gcc
+          make install-gcc
+
+      - name: Compile Icky D Unicode source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gdc=$(find "$GITHUB_WORKSPACE/stage/bin" -maxdepth 1 -type f \
+            \( -name gdc -o -name '*-gdc' \) | head -n 1)
+          test -n "$gdc"
+          "$gdc" --version
+          "$gdc" -c "$GITHUB_WORKSPACE/qualification/gdc_icky_unicode.d" \
+            -o /tmp/gdc_icky_unicode.o
+          test -s /tmp/gdc_icky_unicode.o
+
+      - name: Prove en dash is not mathematical minus
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gdc=$(find "$GITHUB_WORKSPACE/stage/bin" -maxdepth 1 -type f \
+            \( -name gdc -o -name '*-gdc' \) | head -n 1)
+          test -n "$gdc"
+          if "$gdc" -c "$GITHUB_WORKSPACE/qualification/gdc_en_dash_rejected.d" \
+            -o /tmp/gdc_en_dash_rejected.o > /tmp/gdc_en_dash.log 2>&1; then
+            echo 'en dash unexpectedly compiled as an operator' >&2
+            exit 1
+          fi
+          cat /tmp/gdc_en_dash.log
+          grep -F 'en dash U+2013 is distinct from mathematical minus U+2212' /tmp/gdc_en_dash.log
+
+      - name: Record qualification
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: the GDC frontend compiled the Icky D Unicode acceptance source to an object.
+
+          PASS: λ/ƒ, ←, →, ≠, ≟, ²/³, −, ×, and ÷ are accepted at the source boundary.
+
+          PASS: en dash U+2013 remains distinct and is rejected rather than normalized to mathematical minus U+2212.
+          EOF
