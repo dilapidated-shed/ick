@@ -1,4 +1,4 @@
-name: DMD compact representations
+name: DMD value representations
 
 on:
   pull_request:
@@ -33,13 +33,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential ldc binutils
 
-      - name: Build the independent C oracle
+      - name: Build the independent C oracles
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .representation-build
           cc -std=c11 -O0 -ffp-contract=off -fno-fast-math -Iick/include \
             -c dmd/qualification/representations/oracle.c -o .representation-build/oracle.o
+          cc -std=c11 -O0 -ffp-contract=off -fno-fast-math \
+            -c dmd/qualification/representations/geometry_oracle.c -o .representation-build/geometry-oracle.o
 
       - name: Check the D source with the host compiler
         shell: bash
@@ -50,6 +52,11 @@ jobs:
             dmd/qualification/representations/acceptance.d \
             .representation-build/oracle.o -of=.representation-build/host-acceptance
           .representation-build/host-acceptance
+          ldmd2 -betterC -Idmd/library \
+            dmd/library/icky/imprecise.d dmd/library/icky/geometry.d dmd/library/icky/projective.d \
+            dmd/qualification/representations/geometry_acceptance.d \
+            .representation-build/geometry-oracle.o -L-lm -of=.representation-build/host-geometry
+          .representation-build/host-geometry
 
       - name: Build Icky DMD from the PR source
         shell: bash
@@ -73,24 +80,40 @@ jobs:
           for mode in debug optimized; do
             flags=()
             if [ "$mode" = optimized ]; then flags=(-O -inline); fi
+            geometry_object=".representation-build/geometry-$mode.o"
+            "$DMD_BIN" -betterC -c -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
+              dmd/library/icky/imprecise.d dmd/library/icky/geometry.d dmd/library/icky/projective.d \
+              dmd/qualification/representations/geometry_acceptance.d \
+              -of="$geometry_object"
+            if nm -u "$geometry_object" | awk '{ print $NF }' | grep -Eq '^_memset'; then
+              nm -u "$geometry_object"
+              exit 1
+            fi
             "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
               dmd/library/icky/imprecise.d dmd/library/icky/circle.d \
               dmd/qualification/representations/acceptance.d \
               .representation-build/oracle.o -of=".representation-build/dmd-$mode"
             ".representation-build/dmd-$mode"
+            "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
+              dmd/library/icky/imprecise.d dmd/library/icky/geometry.d dmd/library/icky/projective.d \
+              dmd/qualification/representations/geometry_acceptance.d \
+              .representation-build/geometry-oracle.o -L-lm -of=".representation-build/geometry-$mode"
+            ".representation-build/geometry-$mode"
           done
 
       - name: Record exact qualification scope
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: rebuilt Icky DMD compiles and executes the compact D representations.
-          PASS: debug and optimized output agree with the existing C oracle.
-          PASS: scalar payloads, midpoint neighbours, domain rejection and requantization.
-          PASS: Circle96 oracle and finite geometry laws at 96/192/240/360/720 positions.
-          PASS: invalid arithmetic and mixed categories fail source type checking.
+          PASS: rebuilt Icky DMD compiles and executes scalar and geometric D values.
+          PASS: unoptimized and optimized output; assertions remain enabled.
+          PASS: scalar C oracle, all five circle grids and forbidden-operation type checks.
+          PASS: Hamilton algebra, normalization, typed rotation composition, independent C matrix action.
+          PASS: geometry objects contain no unresolved druntime array-initialization helper.
+          PASS: 131072 quaternion samples per compact format; packing, reconstruction and error bounds.
+          PASS: projective rescaling/phase, CP0/CP1/CP2/CP4, charts and invalid-input rejection.
 
-          This proves native D value-type support on the host. It does not prove
-          new primitive compiler types, representation-aware backend IR, geometric
-          codecs for quaternions/SO(n)/S²/CPⁿ, or Android execution.
+          Host execution only. This does not prove new primitive compiler types,
+          representation-aware backend IR, the existing octahedral S2 codec,
+          specialized CP2 packing, general SO(n), or Android execution.
           EOF
