@@ -54,6 +54,10 @@ private void near(float got, float expected, float tolerance = 0.000003f)
 {
     assert(got == got && fabsf(got - expected) <= tolerance);
 }
+private void assert_four_equal(float[4] left, float[4] right)
+{
+    foreach (index; 0 .. 4) assert(left[index] == right[index]);
+}
 private void check_unit(UnitQuaternion value)
 {
     float squared = 0.0f;
@@ -96,10 +100,10 @@ void normalization_and_frames()
     check_unit(unit(from_bits(1), from_bits(1), 0.0f, 0.0f));
     auto sentinel = value;
     assert(!UnitQuaternion.try_from_components(0.0f, 0.0f, 0.0f, 0.0f, sentinel));
-    assert(sentinel.components() == value.components());
+    assert_four_equal(sentinel.components(), value.components());
     assert(!UnitQuaternion.try_from_components(float.infinity, 1.0f, 0.0f, 0.0f, sentinel));
     assert(!UnitQuaternion.try_from_components(float.nan, 1.0f, 0.0f, 0.0f, sentinel));
-    assert(sentinel.components() == value.components());
+    assert_four_equal(sentinel.components(), value.components());
 
     auto q = HH32.from_components(1.0f, 2.0f, 3.0f, 4.0f);
     HH32 inverse;
