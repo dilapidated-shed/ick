@@ -6716,13 +6716,13 @@ private PackedMemoryArithmetic packedArithmetic(FuncDeclaration fd)
         auto stringExpression = expression ? expression.isStringExp() : null;
         if (!stringExpression || stringExpression.sz != 1)
             continue;
-        if (stringExpression.len == 1 && stringExpression.string[0] == '+')
+        if (stringExpression.len == 1 && stringExpression.getCodeUnit(0) == '+')
             return PackedMemoryArithmetic.add;
-        if (stringExpression.len == 1 && stringExpression.string[0] == '-')
+        if (stringExpression.len == 1 && stringExpression.getCodeUnit(0) == '-')
             return PackedMemoryArithmetic.subtract;
-        if (stringExpression.len == 1 && stringExpression.string[0] == '*')
+        if (stringExpression.len == 1 && stringExpression.getCodeUnit(0) == '*')
             return PackedMemoryArithmetic.multiply;
-        if (stringExpression.len == 1 && stringExpression.string[0] == '/')
+        if (stringExpression.len == 1 && stringExpression.getCodeUnit(0) == '/')
             return PackedMemoryArithmetic.divide;
     }
     return PackedMemoryArithmetic.none;
