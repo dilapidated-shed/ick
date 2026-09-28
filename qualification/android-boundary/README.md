@@ -44,5 +44,13 @@ pretending every CPU has a 16 KiB runtime: `arm64-v8a` and `x86_64` require
 states that 16 KiB page-size devices are 64-bit and that there are no plans to
 change the page size for the 32-bit ABIs.
 
-The Actions artifact is short-lived qualification output.  A consumer should
-use an immutable release archive and verify its published SHA-256 checksum.
+The `armeabi-v7a` qualification job also builds `ick-armv7-android-test`: an
+API 21 PIE whose checked function body is compiled by ICK as ARMv7 Thumb-2 and
+whose small process entry point is linked by the pinned Android NDK.  CI checks
+the ELF and ARM attributes but does not claim runtime success.  Physical
+execution on an ARMv7 Android device supplies that receipt.
+
+The Actions artifact is short-lived qualification output.  It contains the
+runtime executable plus `SHA256SUMS` in a tar archive so executable permission
+survives artifact transport.  A durable consumer should use an immutable
+release archive and verify its published SHA-256 checksum.
