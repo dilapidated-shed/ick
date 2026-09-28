@@ -40,6 +40,7 @@ jobs:
           dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
           test -n "$dmd_bin"
           test -x "$dmd_bin"
+          dmd_bin=$(realpath "$dmd_bin")
           "$dmd_bin" --version
           printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.dmd-bin"
 
