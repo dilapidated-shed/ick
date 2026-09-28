@@ -6311,6 +6311,31 @@ elem* setArray(Expression exp, elem* eptr, elem* edim, Type tb, elem* evalue, re
     const sz = cast(uint)tb.size();
     Type tb2 = tb;
 
+    elem* inlineSet()
+    {
+        assert(edim.Eoper == OPconst);
+        const dim = el_tolong(edim);
+        el_free(edim);
+
+        elem* destination = el_copytotmp(eptr);
+        elem* value = el_copytotmp(evalue);
+        elem* e = el_combine(eptr, evalue);
+        type* tx = Type_toCtype(tb);
+        foreach (index; 0 .. dim)
+        {
+            elem* address = el_copytree(destination);
+            if (index)
+                address = el_bin(OPadd, TYnptr, address,
+                                 el_long(TYsize_t, index * sz));
+            elem* target = el_una(OPind, tx.Tty, address);
+            target.ET = tx;
+            elem* assignment = elAssign(target, el_copytree(value), tb, tx);
+            e = el_combine(e, assignment);
+        }
+        el_free(value);
+        return el_combine(e, destination);
+    }
+
 Lagain:
     RTLSYM r;
     switch (tb2.ty)
@@ -6408,6 +6433,9 @@ Lagain:
 
             if (r == RTLSYM.MEMSETN)
             {
+                if (irs.params.betterC && edim.Eoper == OPconst)
+                    return inlineSet();
+
                 // void* _memsetn(void* p, void* value, int dim, int sizelem)
                 evalue = addressElem(evalue, tb);
                 elem* esz = el_long(TYsize_t, sz);
@@ -6423,6 +6451,39 @@ Lagain:
         r = RTLSYM.MEMSET8;
         edim = el_bin(OPmul, TYsize_t, edim, el_long(TYsize_t, sz));
     }
+
+    /* The floating-point and wide-value array-set helpers live in druntime.
+     * BetterC still has to implement language-mandated scalar replication,
+     * including the NaN default initializer for floating-point elements.
+     * Reinterpret the value as an integer of the same width and use the
+     * backend's repeated-store intrinsic.  This preserves the exact object
+     * representation; it is not a numeric conversion and does not turn
+     * floating-point initialization into a zero fill.
+     */
+    if (irs.params.betterC &&
+        r != RTLSYM.MEMSET8 && r != RTLSYM.MEMSET16 &&
+        r != RTLSYM.MEMSET32 && r != RTLSYM.MEMSET64 &&
+        r != RTLSYM.MEMSETN)
+    {
+        tym_t tym;
+        switch (sz)
+        {
+            case 2:  tym = TYushort; break;
+            case 4:  tym = TYulong;  break;
+            case 8:  tym = TYullong; break;
+            case 16: tym = TYucent;  break;
+            default:
+                if (edim.Eoper == OPconst)
+                    return inlineSet();
+                goto Lruntime;
+        }
+        evalue = addressElem(evalue, tb);
+        evalue = el_una(OPind, tym, evalue);
+        elem* e = el_param(edim, evalue);
+        return el_bin(OPmemset, TYnptr, eptr, e);
+    }
+
+Lruntime:
 
     if (irs.target.os == Target.OS.Windows && (irs.target.isX86_64 || irs.target.isAArch64) && sz > registerSize)
     {
