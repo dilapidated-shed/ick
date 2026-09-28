@@ -61,7 +61,7 @@ struct Rotation(uint positions) if (positions >= 2 && positions <= 65536 && posi
     {
         if (code >= positions) return false;
         output.payload = cast(CodeStorage!positions)code;
-        return result;
+        return true;
     }
     uint code() const nothrow @nogc { return payload; }
 }
