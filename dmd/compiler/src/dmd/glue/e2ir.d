@@ -6669,7 +6669,7 @@ private const(char)* packedStageChars(uint stageMask)
     return "complete-packed-operation";
 }
 
-private void tracePackedMemory(in PackedMemoryOperation operation)
+private void tracePackedMemory(PackedMemoryOperation operation)
 {
     version (PackedMemoryTrace)
     {
