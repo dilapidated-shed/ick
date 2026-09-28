@@ -160,7 +160,7 @@ void check_packed_memory()
     fflush(null);
     foreach (size_t code; 0 .. 256)
     {
-        if (code == 0) { puts("TRACE: first packed load"); fflush(null); }
+        if ((code & 15u) == 0) { puts("TRACE: packed load checkpoint"); fflush(null); }
         PackedValue!(E5M3, Float16) stored;
         assert(view.try_load(code, stored));
         if (code == 0) { puts("TRACE: first packed load complete"); fflush(null); }
