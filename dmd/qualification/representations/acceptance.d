@@ -3,12 +3,12 @@ module representation_acceptance;
 import icky.imprecise;
 import icky.circle;
 
-extern(C) nothrow @nogc:
-uint oracle_decode(uint format, uint code);
-uint oracle_encode(uint format, uint bits);
-uint oracle_operation(uint format, uint operation, uint left, uint right);
-int oracle_circle(uint operation, int first, int second);
-int puts(const char* text);
+nothrow @nogc:
+extern(C) uint oracle_decode(uint format, uint code);
+extern(C) uint oracle_encode(uint format, uint bits);
+extern(C) uint oracle_operation(uint format, uint operation, uint left, uint right);
+extern(C) int oracle_circle(uint operation, int first, int second);
+extern(C) int puts(const char* text);
 
 private union FloatBits { float value; uint bits; }
 private uint bits_of(float value)
@@ -31,12 +31,32 @@ static assert(!__traits(compiles, E4M3.init + E5M2.init));
 static assert(!__traits(compiles, Circle96.init + Circle96.init));
 static assert(!__traits(compiles, rotate(Rotation192.init, Circle96.init)));
 static assert(!__traits(compiles, Circle96.init.payload));
+static assert(!__traits(compiles, Circle96(255)));
 static assert(!__traits(compiles, E5M3.init.payload));
 
 void check_encoding(T, uint format)(uint bits)
 {
     auto got = T.from_float(value_of(bits));
     assert(got.code() == oracle_encode(format, bits));
+}
+
+void check_operations(T, uint format)(uint left, uint right)
+{
+    alias Code = typeof(T.init.code());
+    auto a = T.from_code(cast(Code)left);
+    auto b = T.from_code(cast(Code)right);
+    // NaN propagation signs/payloads are not part of the representation ABI.
+    if ((bits_of(a.to_float()) & 0x7fffffffu) >= 0x7f800000u ||
+        (bits_of(b.to_float()) & 0x7fffffffu) >= 0x7f800000u) return;
+    T[4] results = [a + b, a - b, a * b, a / b];
+    foreach (uint operation; 0 .. 4)
+    {
+        uint expected = oracle_operation(format, operation, left, right);
+        uint got = results[operation].code();
+        if (nan_bits(oracle_decode(format, expected)))
+            assert(nan_bits(bits_of(results[operation].to_float())));
+        else assert(got == expected);
+    }
 }
 
 void check_format(T, uint format, uint count)()
@@ -59,25 +79,16 @@ void check_format(T, uint format, uint count)()
                         0x7f7fffffu, 0xff7fffffu, 0x7f800000u, 0xff800000u,
                         0x7fc00000u, 0xffc00000u, 0x7f800001u])
         check_encoding!(T, format)(bits);
-
-    // Keep operations on finite operands so NaN sign/payload propagation,
-    // which the contract does not specify, is not mistaken for an ABI rule.
     foreach (uint left; 0 .. (count < 256 ? count : 256))
     foreach (uint right; 0 .. (count < 256 ? count : 256))
+        check_operations!(T, format)(left, right);
+    static if (format == 0)
     {
-        auto a = T.from_code(cast(Code)left);
-        auto b = T.from_code(cast(Code)right);
-        if ((bits_of(a.to_float()) & 0x7fffffffu) >= 0x7f800000u ||
-            (bits_of(b.to_float()) & 0x7fffffffu) >= 0x7f800000u) continue;
-        auto results = [a + b, a - b, a * b, a / b];
-        foreach (uint operation; 0 .. 4)
-        {
-            uint expected = oracle_operation(format, operation, left, right);
-            uint got = results[operation].code();
-            if (nan_bits(oracle_decode(format, expected)))
-                assert(nan_bits(bits_of(results[operation].to_float())));
-            else assert(got == expected);
-        }
+        foreach (uint left; [0u, 0x8000u, 1u, 0x3c00u, 0x4000u, 0x7bffu,
+                            0x0400u, 0x3555u, 0x8001u, 0xfbffu])
+        foreach (uint right; [0u, 0x8000u, 1u, 0x3c00u, 0x4000u, 0x7bffu,
+                             0x0400u, 0x3555u, 0x8001u, 0xfbffu])
+            check_operations!(T, format)(left, right);
     }
 }
 
@@ -89,7 +100,8 @@ void check_midpoints(T, uint format, uint last_code)()
         float lower = T.from_code(cast(Code)code).to_float();
         float upper = T.from_code(cast(Code)(code + 1)).to_float();
         uint middle = bits_of(lower + (upper - lower) * 0.5f);
-        foreach (uint candidate; [middle - 1u, middle, middle + 1u])
+        uint[3] candidates = [middle - 1u, middle, middle + 1u];
+        foreach (uint candidate; candidates)
         {
             check_encoding!(T, format)(candidate);
             check_encoding!(T, format)(candidate | 0x80000000u);
@@ -137,6 +149,12 @@ void check_grid(uint positions)()
     alias Offset = Tangent!positions;
     auto saved = Point.from_ticks(17);
     assert(!Point.try_from_code(positions, saved) && saved.code() == 17);
+    auto saved_turn = Turn.from_ticks(17);
+    assert(!Turn.try_from_code(positions, saved_turn) && saved_turn.code() == 17);
+    assert(Turn.try_from_code(positions - 1, saved_turn) && saved_turn.code() == positions - 1);
+    auto saved_mirror = Mirror.from_ticks(17);
+    assert(!Mirror.try_from_code(positions, saved_mirror) && saved_mirror.code() == 17);
+    assert(Mirror.try_from_code(positions - 1, saved_mirror) && saved_mirror.code() == positions - 1);
     assert(Point.from_ticks(-1).code() == positions - 1);
     assert(Point.from_ticks(cast(long)positions * 17 + 3).code() == 3);
     Offset offset;
@@ -171,7 +189,7 @@ void check_grid(uint positions)()
     }
 }
 
-int main()
+extern(C) int main()
 {
     check_format!(Float16, 0, 65536)();
     check_format!(E4M3, 1, 256)();
