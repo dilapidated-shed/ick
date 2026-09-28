@@ -47,6 +47,7 @@ jobs:
           set -euo pipefail
           ldmd2 -betterC -Idmd/library \
             dmd/library/icky/imprecise.d dmd/library/icky/circle.d \
+            dmd/library/icky/packed.d \
             dmd/qualification/representations/acceptance.d \
             .representation-build/oracle.o -of=.representation-build/host-acceptance
           .representation-build/host-acceptance
@@ -56,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dmd/compiler/src
-          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)" DFLAGS="-version=PackedMemoryTrace"
           dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
           test -n "$dmd_bin"
           dmd_bin=$(realpath "$dmd_bin")
@@ -75,10 +76,48 @@ jobs:
             if [ "$mode" = optimized ]; then flags=(-O -inline); fi
             "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
               dmd/library/icky/imprecise.d dmd/library/icky/circle.d \
+              dmd/library/icky/packed.d \
               dmd/qualification/representations/acceptance.d \
               .representation-build/oracle.o -of=".representation-build/dmd-$mode"
             ".representation-build/dmd-$mode"
           done
+
+      - name: Preserve packed-memory assembly receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library -O -inline -S \
+            dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
+            dmd/qualification/packed-memory/receipt.d \
+            -of=.representation-build/packed-memory-receipt \
+            2>&1 | tee .representation-build/packed-memory-lowering.txt
+          "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library -O -inline -c \
+            dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
+            dmd/qualification/packed-memory/receipt.d \
+            -of=.representation-build/packed-memory-receipt.o
+          objdump -drwC -Mintel .representation-build/packed-memory-receipt.o \
+            > .representation-build/packed-memory-receipt.disassembly
+          ls -l .representation-build/packed-memory-receipt.s \
+            .representation-build/packed-memory-receipt.disassembly
+          cat .representation-build/packed-memory-receipt.s
+          cat .representation-build/packed-memory-receipt.disassembly
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: packed-memory receipt compiled and emitted x86-64 assembly and object disassembly.
+          Inspect this job's logs for exact source lowering and generated instructions;
+          no optimization claim is made.
+          EOF
+
+      - name: Upload packed-memory compiler receipts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: packed-memory-receipts-${{ github.run_id }}
+          path: |
+            .representation-build/packed-memory-lowering.txt
+            .representation-build/packed-memory-receipt.s
+            .representation-build/packed-memory-receipt.o
+            .representation-build/packed-memory-receipt.disassembly
+          retention-days: 90
+          if-no-files-found: error
 
       - name: Record exact qualification scope
         shell: bash

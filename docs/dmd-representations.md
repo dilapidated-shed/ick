@@ -51,6 +51,53 @@ E5M3 accepts binary32 inputs with no sign bit and exponent fields 112 through
 and NaNs are rejected. Its code zero represents a positive bin midpoint,
 **not numeric zero**; that also describes `E5M3.init`.
 
+## Packed memory access
+
+`icky.packed` adds a scalar, byte-strided view and a typed `PackedValue!(S, A)`:
+`S` names the stored representation and `A` names the arithmetic representation.
+For E5M3, `PackedValue!(E5M3, Float16).sizeof == 1`; decoding constructs one
+Float16 value at the point the caller requests arithmetic. Each successful
+load reads one stored element. Stores encode one arithmetic value and leave
+memory unchanged when the E5M3 input falls outside its defined domain.
+
+```d
+auto packed = PackedView!(E5M3, Float16, 1, alias_group)(bytes, byteLength, 1);
+PackedValue!(E5M3, Float16) value;
+if (packed.try_load(index, value)) {
+    auto result = value.decode() * Float16.from_float(2.0f);
+    packed.try_store(index, result);
+}
+```
+
+The view carries its base, byte length, byte stride, caller-known alignment,
+and optional alias-set label. The alias label does not assert disjointness.
+Read/write effects and ordinary source ordering are recorded in
+`PackedOperation!(S, A)`. Alignment records the caller-known guarantee; an
+alias-set label is optional analysis information and does not assert
+disjointness. Storage size, the decode/encode methods, and E5M3's partial input
+domain define the value semantics. Target properties such as ISA, SIMD width, cache descriptions,
+prefetch distance, runner model, and fetch behavior do not enter the D API.
+
+Inside DMD, `dmd.packedmemory.PackedMemoryOperation` carries the operation,
+source/storage/arithmetic/destination types, storage size, base, bounds, index,
+storage alignment, byte stride, known address alignment, alias set, conversion
+policy, effect and order.
+`dmd.glue.e2ir.lowerPackedMemory` consumes that record. Its conservative
+follower emits an ordinary one-element load or store, after which existing
+DMD lowering handles the local conversions and arithmetic. The compiler has a
+versioned `PackedMemoryTrace` receipt line for the record, so those facts stay
+visible without becoming hardware properties or needing recovery from the
+lowered expression tree.
+
+This first surface performs scalar conservative lowering through ordinary D
+pointer loads/stores and the existing `icky.imprecise` conversions. It does not
+provide a target-specific follower yet. The view has no arithmetic array and
+does not widen a range as a side effect of a load. The qualification receipt
+source at `dmd/qualification/packed-memory/receipt.d` is compiled to x86-64
+assembly and object disassembly by the representations workflow; inspect those
+artifacts to see the code emitted by its exact DMD build. No optimality claim
+is made.
+
 ## Finite geometry
 
 `Circle!n`, `Rotation!n`, `Reflection!n` and `Tangent!n` are separate categories.
@@ -89,7 +136,10 @@ unoptimized and optimized DMD output against the original C implementation.
 It includes all 65536 binary16 payloads, every byte code for the smaller
 formats, midpoint neighbours, randomized binary32 inputs, domain rejection,
 requantization, invalid-operation type checks, the Circle96 C oracle and
-finite-geometry laws for all five named grids.
+finite-geometry laws for all five named grids. Packed-memory qualification
+checks every E5M3 byte through a stride-two view, decode/encode round trips,
+F16 multiply followed by narrowing/store, bounds and domain failure, and
+alignment/alias/effect facts.
 
 The acceptance source uses `-betterC`, static storage and `@nogc`; the C oracle
 is linked only into the test executable. The workflow result, not the presence

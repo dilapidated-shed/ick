@@ -2,6 +2,7 @@ module representation_acceptance;
 
 import icky.imprecise;
 import icky.circle;
+import icky.packed;
 
 nothrow @nogc:
 extern(C) uint oracle_decode(uint format, uint code);
@@ -141,6 +142,71 @@ void check_storage()
     }
 }
 
+void check_packed_memory()
+{
+    static assert(PackedValue!(E5M3, Float16).sizeof == E5M3.sizeof);
+    static assert(PackedView!(E5M3, Float16, 1, 7).known_alignment == 1);
+    static assert(PackedView!(E5M3, Float16, 1, 7).alias_set == 7);
+
+    ubyte[512] bytes;
+    foreach (size_t code; 0 .. 256)
+        bytes[code * 2] = cast(ubyte)code;
+
+    auto view = PackedView!(E5M3, Float16, 1, 7)(bytes.ptr, bytes.length, 2);
+    foreach (size_t code; 0 .. 256)
+    {
+        PackedValue!(E5M3, Float16) stored;
+        assert(view.try_load(code, stored));
+        assert(stored.stored.code() == code);
+        auto widened = stored.decode();
+        assert(bits_of(widened.to_float()) == oracle_decode(4, cast(uint)code));
+        E5M3 encoded;
+        assert(PackedValue!(E5M3, Float16).try_encode(widened, encoded));
+        assert(encoded.code() == code);
+        assert(view.try_store(code, widened));
+        assert(bytes[code * 2] == code);
+    }
+
+    // Failed bounds checks and failed E5M3-domain encodes preserve storage.
+    PackedValue!(E5M3, Float16) unchanged = { E5M3.from_code(91) };
+    assert(!view.try_load(256, unchanged));
+    assert(unchanged.stored.code() == 91);
+    assert(!view.try_store(256, Float16.from_float(1.0f)));
+    assert(!view.try_store(0, Float16.from_float(-1.0f)));
+    assert(!view.try_store(0, Float16.from_float(0.0f)));
+    assert(!view.try_store(0, Float16.from_float(-0.0f)));
+    assert(!view.try_store(0, Float16.from_float(1.0e-7f)));
+    assert(!view.try_store(0, Float16.from_float(value_of(0x7f800000u))));
+    assert(!view.try_store(0, Float16.from_float(value_of(0x7fc00000u))));
+    assert(bytes[0] == 0);
+
+    // Ordinary unit-stride access uses the same scalar operation at each index.
+    auto unit = PackedView!(E5M3, Float16, 1, 0)(bytes.ptr, bytes.length, 1);
+    auto arithmetic = Float16.from_float(2.0f) * Float16.from_float(1.5f);
+    assert(unit.try_store(5, arithmetic));
+    assert(bytes[5] == oracle_encode(4, bits_of(arithmetic.to_float())));
+    PackedValue!(E5M3, Float16) product;
+    assert(unit.try_load(5, product));
+    assert(product.stored.code() == bytes[5]);
+    assert(bits_of(product.decode().to_float()) == oracle_decode(4, bytes[5]));
+    assert(oracle_decode(4, 0) != 0x00000000u); // code zero is an unsigned midpoint, not IEEE zero
+    assert(!unit.try_load(size_t.max, product));
+
+    auto loadFacts = view.load_operation(3);
+    assert(loadFacts.action == PackedAction.load &&
+           loadFacts.effect == PackedEffect.read &&
+           loadFacts.ordering == PackedOrdering.ordinary &&
+           loadFacts.byteStride == 2 && loadFacts.knownAlignment == 1 &&
+           loadFacts.aliasSet == 7 && loadFacts.elementIndex == 3);
+    auto storeFacts = view.store_operation(3);
+    assert(storeFacts.action == PackedAction.store &&
+           storeFacts.effect == PackedEffect.write &&
+           storeFacts.byteStride == 2 && storeFacts.aliasSet == 7);
+
+    puts("PASS: packed scalar load, local F16 widening, arithmetic, narrowing and store");
+    puts("PASS: all 256 E5M3 encodings, non-unit stride, bounds, layout and memory facts");
+}
+
 void check_grid(uint positions)()
 {
     alias Point = Circle!positions;
@@ -203,6 +269,7 @@ extern(C) int main()
         check_encoding!(Float16, 0)(bits);
     check_storage();
     puts("PASS: all scalar payloads, boundary quantization and arithmetic against the C oracle");
+    check_packed_memory();
     check_grid!96();
     check_grid!192();
     check_grid!240();
