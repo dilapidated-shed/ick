@@ -70,7 +70,7 @@ jobs:
             \( -name gdc -o -name '*-gdc' \) | head -n 1)
           test -n "$gdc"
           "$gdc" --version
-          "$gdc" -c "$GITHUB_WORKSPACE/qualification/gdc_icky_unicode.d" \
+          "$gdc" -fno-druntime -c "$GITHUB_WORKSPACE/qualification/gdc_icky_unicode.d" \
             -o /tmp/gdc_icky_unicode.o
           test -s /tmp/gdc_icky_unicode.o
 
@@ -81,7 +81,7 @@ jobs:
           gdc=$(find "$GITHUB_WORKSPACE/stage/bin" -maxdepth 1 -type f \
             \( -name gdc -o -name '*-gdc' \) | head -n 1)
           test -n "$gdc"
-          if "$gdc" -c "$GITHUB_WORKSPACE/qualification/gdc_en_dash_rejected.d" \
+          if "$gdc" -fno-druntime -c "$GITHUB_WORKSPACE/qualification/gdc_en_dash_rejected.d" \
             -o /tmp/gdc_en_dash_rejected.o > /tmp/gdc_en_dash.log 2>&1; then
             echo 'en dash unexpectedly compiled as an operator' >&2
             exit 1
