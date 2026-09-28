@@ -68,9 +68,12 @@ separate provisioned offering and are outside this first target.
 - `fingerprints/<run-id>-<attempt>-<sample>/`: one committed raw artifact
   extracted from each job, plus a normalized account. Never replace raw data
   with summaries. `provenance.txt` identifies the job and its source SHA.
-- `references.tsv`: source ledger with URL, revision/date, retrieval date,
-  reason for retention and link-only disposition. Vendor manuals remain at
-  upstream URLs; no enormous or unclearly licensed PDF is copied here.
+- `references.tsv`: provenance ledger with publisher URLs, download URLs,
+  revision/date, retrieval date, byte size, SHA-256, reason, and acquisition
+  disposition.
+- `references/README.md`: short source-linked section locators grouped by
+  publisher. Full downloaded pages, manuals, and source archives stay in the
+  ignored local `references/.staging/` directory; no vendor manual is committed.
 - `research-map.md`: current evidence status and the bounded next job.
 
 Workflow artifacts expire after 90 days. Commit the relevant original files
@@ -85,4 +88,9 @@ descriptor is not proof of physical ownership or effective cache capacity.
 A `-march=native` report describes compiler-visible features, not measured
 vector instruction throughput. `/proc/self/numa_maps` reflects this process,
 not host NUMA wiring. No kernel or DIMM claims are inferred from a marketing
-processor name.
+processor name. Vendor specifications describe processors; they do not
+establish the VM's physical memory channels, cache ownership, or achievable
+bandwidth. The Intel Xeon Platinum 8573C guest name remains qualified unless
+an authoritative exact-SKU source confirms it. The AMD document 70574 link
+currently resolves to a different publication; its failed acquisition and
+the exact mismatch are recorded in the reference index without substitution.
