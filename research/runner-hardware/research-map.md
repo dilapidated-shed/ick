@@ -8,9 +8,9 @@ probe artifacts. A guest report never becomes a GitHub guarantee.
 | --- | --- | --- |
 | VM label, x64, four allocated CPUs, 16 GB RAM, 14 GB SSD | KNOWN FROM DOCUMENTATION | GitHub runner reference; applies to this public repository. |
 | Ubuntu 24.04 label and VM-per-job model | KNOWN FROM DOCUMENTATION | GitHub reference; exact image revision/kernel remain run-specific. |
-| Exact CPU vendor/model/family and exposed flags | CURRENTLY UNKNOWN | Collect `cpuinfo`, `lscpu`, compiler target reports for independent jobs. |
-| Guest-visible CPU and cache topology, line size and sharing masks | CURRENTLY UNKNOWN | Collect sysfs and `lscpu`; reported descriptors may be virtualized. |
-| Guest page size, huge page settings, NUMA nodes | CURRENTLY UNKNOWN | Collect `getconf`, sysfs and process NUMA map; distinguish node presentation from real host topology. |
+| CPU vendor/model/family and exposed flags | OBSERVED ON RUNNER | One AMD EPYC 7763, two Intel Xeon Platinum 8573C in corrected run 36399380725; GCC reports `znver3` and `sapphirerapids` respectively. Exact physical host identity remains unknown. |
+| Guest-visible CPU and cache topology, line size and sharing masks | OBSERVED ON RUNNER | Both guest families report 4 logical CPUs/2 cores, 64-byte lines; AMD 32 MiB and Intel 260 MiB L3 descriptor. Cache ownership/capacity under contention is unknown. |
+| Guest page size, huge page settings, NUMA nodes | OBSERVED ON RUNNER | 4096-byte base pages, zero preallocated huge pages and one guest node in three samples; host NUMA wiring unknown. |
 | Physical DIMMs, channel count/width, clock and controller configuration | PROBABLY NOT OBSERVABLE ON GITHUB-HOSTED RUNNER | No promise in runner docs; a model's nominal channel specification does not identify guest allocation. |
 | Effective sustained streaming throughput for large working sets | REQUIRES MEASUREMENT | Controlled later benchmark, allocation-specific fingerprint and noise/repetition. |
 | Useful fetch grouping and cache-line utilization with packed dimensions | REQUIRES MEASUREMENT | Need layouts/access traces and working-set sweep, no chosen fetch width here. |
@@ -22,9 +22,8 @@ probe artifacts. A guest report never becomes a GitHub guarantee.
 
 ## Next bounded Sol research job
 
-After at least three independent runner artifacts are committed, identify
-each observed CPU family and select its matching vendor optimization
-references. Define one tiny D/Icky D streaming kernel family with fixed
+Use the committed AMD and Intel fingerprints and their matching vendor
+optimization references; keep those families separate when analyzing results. Define one tiny D/Icky D streaming kernel family with fixed
 semantic output and explicit data layouts; inspect DMD and LDC machine code
 before comparing throughput. Vary working-set size and access concurrency
 with repeated allocations and preserve raw timings under the cited
@@ -33,3 +32,9 @@ load issue, and external memory limits; record confounding scheduling and
 virtualization effects. Keep E5M3 storage semantics separate from the
 question of arithmetic widening. Do not choose a winning fetch or vector
 width until the evidence supports one.
+
+The first uncorrected run 36399154517 saw three AMD guests, but its checksum
+receipt included itself and failed self-verification. Its log remains on GitHub;
+the committed raw corpus uses the corrected run 36399380725, whose listed
+file digests passed after extraction. CPU variation across the two runs
+establishes that assuming a single fixed host family would be wrong.
