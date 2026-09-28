@@ -389,6 +389,54 @@ jobs:
             test "$((align))" -ge ${{ matrix.required_load_alignment }}
           done
 
+      - name: Build physical ARMv7 Android runtime artifact
+        if: matrix.abi == 'armeabi-v7a'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ick="$GITHUB_WORKSPACE/stage/bin/arm-linux-gnueabi-gcc"
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          ndk="$sdk_root/ndk/$ANDROID_NDK_VERSION"
+          llvm_bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          ndk_cc="$llvm_bin/armv7a-linux-androideabi21-clang"
+
+          "$ick" -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp \
+            -std=c11 -O2 -fPIE -ffreestanding -nostdinc \
+            -c qualification/android-boundary/armv7-runtime-ick.c \
+            -o /tmp/ick-armv7-runtime.o
+
+          "$ndk_cc" -std=c11 -O2 -fPIE \
+            qualification/android-boundary/armv7-runtime-main.c \
+            /tmp/ick-armv7-runtime.o \
+            -o /tmp/ick-armv7-android-test
+
+          "$llvm_bin/llvm-readelf" -h /tmp/ick-armv7-android-test | tee /tmp/armv7-runtime.elf
+          grep -q 'Class:.*ELF32' /tmp/armv7-runtime.elf
+          grep -q 'Machine:.*ARM' /tmp/armv7-runtime.elf
+          "$llvm_bin/llvm-readelf" -A /tmp/ick-armv7-runtime.o | tee /tmp/armv7-runtime.attributes
+          grep -q 'Tag_CPU_arch: v7' /tmp/armv7-runtime.attributes
+          grep -q 'Tag_THUMB_ISA_use: Thumb-2' /tmp/armv7-runtime.attributes
+
+          chmod 0755 /tmp/ick-armv7-android-test
+          mkdir -p /tmp/ick-armv7-artifact
+          cp /tmp/ick-armv7-android-test /tmp/ick-armv7-artifact/
+          (
+            cd /tmp/ick-armv7-artifact
+            sha256sum ick-armv7-android-test > SHA256SUMS
+          )
+          tar -C /tmp/ick-armv7-artifact -cf /tmp/ick-armv7-android-test.tar \
+            ick-armv7-android-test SHA256SUMS
+
+      - name: Upload physical ARMv7 Android runtime artifact
+        if: matrix.abi == 'armeabi-v7a'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ick-armv7-android-test
+          path: /tmp/ick-armv7-android-test.tar
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
       - name: Record qualification boundary
         shell: bash
         run: |
