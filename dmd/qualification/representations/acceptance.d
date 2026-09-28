@@ -165,19 +165,21 @@ void check_packed_memory()
         assert(view.try_load(code, stored));
         if (code == 0) { puts("TRACE: first packed load complete"); fflush(null); }
         assert(stored.stored.code() == code);
-        if (code == 0) { puts("TRACE: first packed code read"); fflush(null); }
+        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed code read"); fflush(null); }
         auto widened = stored.decode();
-        if (code == 0) { puts("TRACE: first packed decode complete"); fflush(null); }
+        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed decode complete"); fflush(null); }
         assert(bits_of(widened.to_float()) == oracle_decode(4, cast(uint)code));
-        if (code == 0) { puts("TRACE: first packed decode verified"); fflush(null); }
+        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed decode verified"); fflush(null); }
         E5M3 encoded;
         assert(PackedValue!(E5M3, Float16).try_encode(widened, encoded));
-        if (code == 0) { puts("TRACE: first packed encode complete"); fflush(null); }
+        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed encode complete"); fflush(null); }
         assert(encoded.code() == code);
         assert(view.try_store(code, widened));
-        if (code == 0) { puts("TRACE: first packed store complete"); fflush(null); }
+        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed store complete"); fflush(null); }
         assert(bytes[code * 2] == code);
     }
+    puts("TRACE: packed exhaustive loop complete");
+    fflush(null);
 
     // Failed bounds checks and failed E5M3-domain encodes preserve storage.
     PackedValue!(E5M3, Float16) unchanged = { E5M3.from_code(91) };
@@ -191,6 +193,8 @@ void check_packed_memory()
     assert(!view.try_store(0, Float16.from_float(value_of(0x7f800000u))));
     assert(!view.try_store(0, Float16.from_float(value_of(0x7fc00000u))));
     assert(bytes[0] == 0);
+    puts("TRACE: packed failures complete");
+    fflush(null);
 
     // Ordinary unit-stride access uses the same scalar operation at each index.
     auto unit = PackedView!(E5M3, Float16, 1, 0)(bytes.ptr, bytes.length, 1);
