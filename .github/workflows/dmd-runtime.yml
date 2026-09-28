@@ -115,7 +115,7 @@ jobs:
               return box.value == BigInt("123456789012345678901234567891") ? 0 : 3;
           }
           EOF
-          "$dmd_bin" -conf= \
+          "$dmd_bin" -conf= -fPIC \
             -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
             -I"$GITHUB_WORKSPACE/.runtime-phobos" \
             /tmp/icky_normal_d.d \
