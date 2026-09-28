@@ -122,7 +122,8 @@ void normalization_and_frames()
     assert_four_equal(sentinel.components(), value.components());
 
     auto q = HH32.from_components(1.0f, 2.0f, 3.0f, 4.0f);
-    HH32 inverse = q;
+    HH32 inverse;
+    assert_four_equal(inverse.components(), [0.0f, 0.0f, 0.0f, 0.0f]);
     assert(q.try_inverse(inverse));
     auto product = (q * inverse).components();
     near(product[0], 1.0f);
@@ -131,7 +132,8 @@ void normalization_and_frames()
     assert(!HH32.init.try_inverse(inverse));
     assert_four_equal(inverse.components(), saved_inverse.components());
 
-    Direction!Phone x = Direction!Phone.init;
+    Direction!Phone x;
+    assert_three_equal(x.components(), [1.0f, 0.0f, 0.0f]);
     assert(Direction!Phone.try_from_components(1.0f, 0.0f, 0.0f, x));
     auto z_turn = SpatialRotation!(Phone, Room).from_unit(unit(1.0f, 0.0f, 0.0f, 1.0f));
     auto x_turn = SpatialRotation!(Room, Camera).from_unit(unit(1.0f, 1.0f, 0.0f, 0.0f));
@@ -143,9 +145,10 @@ void normalization_and_frames()
     near(z.distance(x_turn.apply(z_turn.apply(x))), 0.0f);
     near(combined.inverse().apply(z).distance(x), 0.0f);
 
-    S2 direction = S2.init;
+    S2 direction;
+    assert_three_equal(direction.components(), [1.0f, 0.0f, 0.0f]);
     assert(S2.try_from_components(float.max, -float.max, float.max, direction));
-    S2 decoded = S2.init;
+    S2 decoded;
     assert(S2.try_from_pure_quaternion(direction.as_pure_quaternion(), decoded));
     near(direction.distance(decoded), 0.0f);
     auto saved_direction = decoded;
@@ -159,13 +162,13 @@ void normalization_and_frames()
     {
         auto rotation = unit(next_component(state), next_component(state),
                              next_component(state), next_component(state));
-        S2 input = S2.init;
+        S2 input;
         assert(S2.try_from_components(next_component(state), next_component(state),
                                      next_component(state), input));
         auto got = SO3.from_unit(rotation).apply(input).components();
         auto qparts = rotation.components();
         auto point = input.components();
-        float[3] expected = void;
+        float[3] expected;
         geometry_oracle_rotate(qparts.ptr, point.ptr, expected.ptr);
         foreach (index; 0 .. 3) near(got[index], expected[index], 0.000004f);
     }
@@ -185,7 +188,7 @@ void packed_quaternions(Component)()
     foreach (part; identity.code()) assert(part == 0);
     foreach (uint index; 0 .. 4)
     {
-        float[4] axis = [0.0f, 0.0f, 0.0f, 0.0f];
+        float[4] axis = 0.0f;
         axis[index] = -1.0f;
         auto value = unit(axis[0], axis[1], axis[2], axis[3]);
         auto packed = Packed.from_unit(value);

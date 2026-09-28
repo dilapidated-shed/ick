@@ -80,6 +80,15 @@ jobs:
           for mode in debug optimized; do
             flags=()
             if [ "$mode" = optimized ]; then flags=(-O -inline); fi
+            geometry_object=".representation-build/geometry-$mode.o"
+            "$DMD_BIN" -betterC -c -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
+              dmd/library/icky/imprecise.d dmd/library/icky/geometry.d dmd/library/icky/projective.d \
+              dmd/qualification/representations/geometry_acceptance.d \
+              -of="$geometry_object"
+            if nm -u "$geometry_object" | awk '{ print $NF }' | grep -Eq '^_memset'; then
+              nm -u "$geometry_object"
+              exit 1
+            fi
             "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
               dmd/library/icky/imprecise.d dmd/library/icky/circle.d \
               dmd/qualification/representations/acceptance.d \
@@ -100,6 +109,7 @@ jobs:
           PASS: unoptimized and optimized output; assertions remain enabled.
           PASS: scalar C oracle, all five circle grids and forbidden-operation type checks.
           PASS: Hamilton algebra, normalization, typed rotation composition, independent C matrix action.
+          PASS: geometry objects contain no unresolved druntime array-initialization helper.
           PASS: 131072 quaternion samples per compact format; packing, reconstruction and error bounds.
           PASS: projective rescaling/phase, CP0/CP1/CP2/CP4, charts and invalid-input rejection.
 
