@@ -1,0 +1,79 @@
+name: DMD Icky D Unicode
+
+on:
+  pull_request:
+    paths:
+      - 'dmd/compiler/src/dmd/lexer.d'
+      - 'dmd/compiler/src/dmd/parse.d'
+      - 'dmd/qualification/**'
+      - '.github/workflows/dmd-icky-unicode.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unicode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install host compiler
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc
+          command -v ldmd2
+
+      - name: Build standalone DMD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          test -x "$dmd_bin"
+          "$dmd_bin" --version
+          printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.dmd-bin"
+
+      - name: Compile and run Icky D surface
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat "$GITHUB_WORKSPACE/.dmd-bin")
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          test -f "$runtime_import/object.d"
+          "$dmd_bin" -betterC -I"$runtime_import"             "$GITHUB_WORKSPACE/dmd/qualification/icky_unicode.d"             -of=/tmp/icky_unicode
+          test -x /tmp/icky_unicode
+          /tmp/icky_unicode
+
+      - name: Prove en dash is not mathematical minus
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat "$GITHUB_WORKSPACE/.dmd-bin")
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          if "$dmd_bin" -betterC -c -I"$runtime_import"             "$GITHUB_WORKSPACE/dmd/qualification/en_dash_rejected.d"             -of=/tmp/en_dash_rejected.o > /tmp/en_dash.log 2>&1; then
+            echo 'en dash unexpectedly compiled as an operator' >&2
+            exit 1
+          fi
+          cat /tmp/en_dash.log
+          grep -F 'en dash U+2013 is distinct from mathematical minus U+2212' /tmp/en_dash.log
+
+      - name: Record qualification
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: standalone Mars/DMD compiled and ran the Icky D Unicode acceptance program.
+
+          PASS: λ/ƒ, ←, →, ≠, ≟, ²/³, −, ×, and ÷ are accepted at the source boundary.
+
+          PASS: en dash U+2013 remains distinct and is rejected rather than normalized to mathematical minus U+2212.
+          EOF
