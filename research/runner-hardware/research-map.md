@@ -1,8 +1,8 @@
 # Hardware knowledge map — 2026-09-28
 
 Statuses describe the **standard public `ubuntu-24.04` x64 GitHub VM**,
-not an owned physical server. Reclassify guest rows after committing actual
-probe artifacts. A guest report never becomes a GitHub guarantee.
+not an owned physical server. Guest rows use committed corrected probe artifacts. A guest report never
+becomes a GitHub guarantee.
 
 | Topic | Current class | Basis and next question |
 | --- | --- | --- |
@@ -23,7 +23,8 @@ probe artifacts. A guest report never becomes a GitHub guarantee.
 ## Next bounded Sol research job
 
 Use the committed AMD and Intel fingerprints and their matching vendor
-optimization references; keep those families separate when analyzing results. Define one tiny D/Icky D streaming kernel family with fixed
+optimization references; keep those families separate when analyzing results. Define one
+tiny D/Icky D streaming kernel family with fixed
 semantic output and explicit data layouts; inspect DMD and LDC machine code
 before comparing throughput. Vary working-set size and access concurrency
 with repeated allocations and preserve raw timings under the cited
