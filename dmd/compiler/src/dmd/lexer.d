@@ -1198,6 +1198,59 @@ class Lexer
                     {
                         c = decodeUTF();
 
+                        // Icky D keeps mathematical operators as literal UTF-8
+                        // source spellings. Token.ptr remains pointed at the
+                        // original bytes so the parser can distinguish glyphs
+                        // that intentionally share an ordinary D token kind.
+                        switch (c)
+                        {
+                        case 'λ':
+                        case 'ƒ':
+                            p++;
+                            t.value = TOK.function_;
+                            return;
+                        case '→':
+                            p++;
+                            t.value = TOK.goesTo;
+                            return;
+                        case '←':
+                            p++;
+                            t.value = TOK.assign;
+                            return;
+                        case '≠':
+                            p++;
+                            t.value = TOK.notEqual;
+                            return;
+                        case '≟':
+                            p++;
+                            t.value = TOK.equal;
+                            return;
+                        case '²':
+                        case '³':
+                            p++;
+                            t.value = TOK.pow;
+                            return;
+                        case '−': // U+2212 MINUS SIGN
+                            p++;
+                            t.value = TOK.min;
+                            return;
+                        case '–': // U+2013 EN DASH is deliberately not minus
+                            p++;
+                            error(t.loc, "en dash U+2013 is distinct from mathematical minus U+2212");
+                            t.value = TOK.error;
+                            return;
+                        case '×':
+                            p++;
+                            t.value = TOK.mul;
+                            return;
+                        case '÷':
+                            p++;
+                            t.value = TOK.div;
+                            return;
+                        default:
+                            break;
+                        }
+
                         // Check for start of an identifier
                         if (charLookup.isStart(c))
                         {
