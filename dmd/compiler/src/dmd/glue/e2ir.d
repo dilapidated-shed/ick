@@ -6610,9 +6610,10 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
 private elem* capturePackedOperand(Expression expression, ref elem* prefix, ref IRState irs)
 {
     elem* value = toElem(expression, irs);
-    Symbol* temporary = symbol_genauto(type_fake(value.Ety));
+    const isStruct = tybasic(value.Ety) == TYstruct;
+    Symbol* temporary = symbol_genauto(isStruct ? Type_toCtype(expression.type) : type_fake(value.Ety));
     elem* assignment;
-    if (tybasic(value.Ety) == TYstruct)
+    if (isStruct)
         assignment = elAssign(el_var(temporary), value, expression.type,
                               Type_toCtype(expression.type));
     else
