@@ -26,6 +26,7 @@ private uint normalize(uint positions)(long ticks)
 struct Circle(uint positions) if (positions >= 2 && positions <= 65536 && positions % 2 == 0)
 {
     private CodeStorage!positions payload;
+    private this(CodeStorage!positions raw) nothrow @nogc { payload = raw; }
     static Circle from_ticks(long ticks) nothrow @nogc
     {
         Circle result;
@@ -39,15 +40,17 @@ struct Circle(uint positions) if (positions >= 2 && positions <= 65536 && positi
         return true;
     }
     uint code() const nothrow @nogc { return payload; }
-    uint third_sector() const nothrow @nogc if (positions % 3 == 0)
-    { return payload / (positions / 3); }
-    uint position_within_third() const nothrow @nogc if (positions % 3 == 0)
-    { return payload % (positions / 3); }
+    static if (positions % 3 == 0)
+    {
+        uint third_sector() const nothrow @nogc { return payload / (positions / 3); }
+        uint position_within_third() const nothrow @nogc { return payload % (positions / 3); }
+    }
 }
 
 struct Rotation(uint positions) if (positions >= 2 && positions <= 65536 && positions % 2 == 0)
 {
     private CodeStorage!positions payload;
+    private this(CodeStorage!positions raw) nothrow @nogc { payload = raw; }
     static Rotation from_ticks(long ticks) nothrow @nogc
     {
         Rotation result;
@@ -58,7 +61,7 @@ struct Rotation(uint positions) if (positions >= 2 && positions <= 65536 && posi
     {
         if (code >= positions) return false;
         output.payload = cast(CodeStorage!positions)code;
-        return true;
+        return result;
     }
     uint code() const nothrow @nogc { return payload; }
 }
@@ -66,6 +69,7 @@ struct Rotation(uint positions) if (positions >= 2 && positions <= 65536 && posi
 struct Reflection(uint positions) if (positions >= 2 && positions <= 65536 && positions % 2 == 0)
 {
     private CodeStorage!positions payload;
+    private this(CodeStorage!positions raw) nothrow @nogc { payload = raw; }
     static Reflection from_ticks(long ticks) nothrow @nogc
     {
         Reflection result;
@@ -84,6 +88,7 @@ struct Reflection(uint positions) if (positions >= 2 && positions <= 65536 && po
 struct Tangent(uint positions) if (positions >= 2 && positions <= 65536 && positions % 2 == 0)
 {
     private TickStorage!positions payload;
+    private this(TickStorage!positions raw) nothrow @nogc { payload = raw; }
     static bool try_from_ticks(int ticks, ref Tangent output) nothrow @nogc
     {
         int half = cast(int)(positions / 2);
@@ -110,8 +115,8 @@ Tangent!positions local_displacement(uint positions)(Circle!positions to, Circle
 {
     int displacement = cast(int)to.code() - cast(int)from.code();
     int half = cast(int)(positions / 2);
-    if (displacement >= half) displacement -= positions;
-    if (displacement < -half) displacement += positions;
+    if (displacement >= half) displacement -= cast(int)positions;
+    if (displacement < -half) displacement += cast(int)positions;
     Tangent!positions result;
     result.payload = cast(TickStorage!positions)displacement;
     return result;
