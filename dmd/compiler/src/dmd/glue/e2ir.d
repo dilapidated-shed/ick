@@ -6565,10 +6565,10 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
         return PackedMemoryOperation.init;
     }
 
-    Type storageType = RootObject.isType((*ti.tiargs)[0]);
-    Type arithmeticType = RootObject.isType((*ti.tiargs)[1]);
-    Expression alignmentExp = RootObject.isExpression((*ti.tiargs)[2]);
-    Expression aliasExp = RootObject.isExpression((*ti.tiargs)[3]);
+    Type storageType = cast(Type)(*ti.tiargs)[0];
+    Type arithmeticType = cast(Type)(*ti.tiargs)[1];
+    Expression alignmentExp = cast(Expression)(*ti.tiargs)[2];
+    Expression aliasExp = cast(Expression)(*ti.tiargs)[3];
     if (!storageType || !arithmeticType || !alignmentExp || !aliasExp)
     {
         irs.eSink.error(ce.loc, "invalid representation or memory facts for `icky.packed`");

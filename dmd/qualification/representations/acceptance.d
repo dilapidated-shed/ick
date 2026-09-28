@@ -152,12 +152,18 @@ void check_packed_memory()
     ubyte[512] bytes;
     foreach (size_t code; 0 .. 256)
         bytes[code * 2] = cast(ubyte)code;
+    puts("TRACE: packed bytes initialized");
+    fflush(null);
 
     auto view = PackedView!(E5M3, Float16, 1, 7)(bytes.ptr, bytes.length, 2);
+    puts("TRACE: packed view initialized");
+    fflush(null);
     foreach (size_t code; 0 .. 256)
     {
+        if (code == 0) { puts("TRACE: first packed load"); fflush(null); }
         PackedValue!(E5M3, Float16) stored;
         assert(view.try_load(code, stored));
+        if (code == 0) { puts("TRACE: first packed load complete"); fflush(null); }
         assert(stored.stored.code() == code);
         auto widened = stored.decode();
         assert(bits_of(widened.to_float()) == oracle_decode(4, cast(uint)code));
