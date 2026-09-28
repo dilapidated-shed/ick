@@ -165,7 +165,7 @@ void normalization_and_frames()
         auto got = SO3.from_unit(rotation).apply(input).components();
         auto qparts = rotation.components();
         auto point = input.components();
-        float[3] expected;
+        float[3] expected = void;
         geometry_oracle_rotate(qparts.ptr, point.ptr, expected.ptr);
         foreach (index; 0 .. 3) near(got[index], expected[index], 0.000004f);
     }
@@ -185,7 +185,7 @@ void packed_quaternions(Component)()
     foreach (part; identity.code()) assert(part == 0);
     foreach (uint index; 0 .. 4)
     {
-        float[4] axis = 0.0f;
+        float[4] axis = [0.0f, 0.0f, 0.0f, 0.0f];
         axis[index] = -1.0f;
         auto value = unit(axis[0], axis[1], axis[2], axis[3]);
         auto packed = Packed.from_unit(value);
