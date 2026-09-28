@@ -48,7 +48,7 @@ jobs:
           test "$upstream_tag" = v2.113.0
           test "$upstream_commit" = 74917954b53f7f35b13e61b4438c7253834929ed
           test "$upstream_compiler_src_dmd_tree" = 609b890e7cfc65474e5fdebd001c580e174cd22b
-          test "$(find dmd/compiler/src/dmd -type f | wc -l | tr -d ' ')" = 329
+          test "$(find dmd/compiler/src/dmd -type f | wc -l | tr -d ' ')" = 330
           test -x dmd/compiler/src/build.d
           test -x dmd/compiler/src/bootstrap.sh
           test ! -e dmd/druntime
