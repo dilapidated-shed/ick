@@ -165,12 +165,17 @@ void check_packed_memory()
         assert(view.try_load(code, stored));
         if (code == 0) { puts("TRACE: first packed load complete"); fflush(null); }
         assert(stored.stored.code() == code);
+        if (code == 0) { puts("TRACE: first packed code read"); fflush(null); }
         auto widened = stored.decode();
+        if (code == 0) { puts("TRACE: first packed decode complete"); fflush(null); }
         assert(bits_of(widened.to_float()) == oracle_decode(4, cast(uint)code));
+        if (code == 0) { puts("TRACE: first packed decode verified"); fflush(null); }
         E5M3 encoded;
         assert(PackedValue!(E5M3, Float16).try_encode(widened, encoded));
+        if (code == 0) { puts("TRACE: first packed encode complete"); fflush(null); }
         assert(encoded.code() == code);
         assert(view.try_store(code, widened));
+        if (code == 0) { puts("TRACE: first packed store complete"); fflush(null); }
         assert(bytes[code * 2] == code);
     }
 
