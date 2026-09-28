@@ -96,6 +96,21 @@ public void generateCodeAndWrite(Module[] modules, const(char)*[] libmodules,
                           bool writeLibrary, bool obj, bool oneobj, bool multiobj,
                           bool verbose)
 {
+    if (target.isAndroid && target.isAArch64)
+    {
+        import dmd.glue.armleaf : validate_aarch64_leaves;
+        if (!validate_aarch64_leaves(modules)) return;
+    }
+    if (target.isThumb2)
+    {
+        import dmd.glue.thumb : generate_thumb_objects;
+        if (writeLibrary || multiobj || libmodules.length || (oneobj && modules.length > 1))
+            error(Loc.initial, "Thumb-2 bring-up does not support libraries, split objects, or combined multi-module objects");
+        else if (obj)
+            generate_thumb_objects(modules);
+        return;
+    }
+
     auto eSink = global.errorSink;
 
     Library library = null;

@@ -99,6 +99,8 @@ void backend_init(const ref Param params, const ref DMDparams driverParams, cons
         cast(ErrorCallbackBackend) &errorBackend,
     );
 
+    config.android = target.isAndroid;
+
     out_config_debug(
         driverParams.debugb,
         driverParams.debugc,

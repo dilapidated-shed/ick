@@ -87,6 +87,9 @@ struct Triple
     private const(char)[] source;
     CPU               cpu;
     bool              isX86_64;
+    bool              isAArch64;
+    bool              isThumb2;
+    bool              isAndroid;
     bool              isLP64;
     Target.OS         os;
     ubyte             osMajor;
@@ -132,6 +135,10 @@ struct Triple
             cppenv = parseCPPEnv(_cppenv);
         else if (this.os == Target.OS.Windows)
             cppenv = TargetCPP.Runtime.Microsoft;
+        if (triple.length)
+            unknown(triple, "trailing target components");
+        if ((isThumb2 || isAArch64) && (os != Target.OS.linux || !isAndroid))
+            unknown(_triple.toDString(), "ARM target (this bring-up accepts Android Linux only)");
     }
     private extern(D):
 
@@ -154,6 +161,17 @@ struct Triple
             return true;
         }
 
+        if (arch == "armv7a" || arch == "thumbv7a")
+        {
+            isThumb2 = true;
+            return;
+        }
+        if (arch == "aarch64")
+        {
+            isAArch64 = true;
+            isLP64 = true;
+            return;
+        }
         if (matches("x86_64"))
             isX86_64 = true;
         else if (matches("x86"))
@@ -279,6 +297,21 @@ struct Triple
 
     TargetC.Runtime parseCEnv(const(char)[] cenv)
     {
+        import std.algorithm.searching : startsWith;
+        const prefix = cenv.startsWith("androideabi") ? "androideabi" :
+                       cenv.startsWith("android") ? "android" : "";
+        if (prefix.length)
+        {
+            auto suffix = cenv[prefix.length .. $];
+            const hadVersion = suffix.length != 0;
+            bool overflow;
+            const api = parseNumber(suffix, overflow);
+            if (suffix.length || overflow || (hadVersion && api < 21) ||
+                (prefix == "androideabi" ? !isThumb2 : !isAArch64))
+                unknown(cenv, "Android environment/architecture (minimum API 21)");
+            isAndroid = true;
+            return TargetC.Runtime.Bionic;
+        }
         with (TargetC.Runtime) switch (cenv)
         {
             case "musl":         return Musl;
@@ -334,7 +367,10 @@ void setTriple(ref Target target, const ref Triple triple) @safe
 {
     target.cpu     = triple.cpu;
     target.isX86_64 = triple.isX86_64;
-    target.isX86    = !target.isX86_64;
+    target.isAArch64 = triple.isAArch64;
+    target.isThumb2 = triple.isThumb2;
+    target.isAndroid = triple.isAndroid;
+    target.isX86    = !target.isX86_64 && !target.isAArch64 && !target.isThumb2;
     target.isLP64  = triple.isLP64;
     target.os      = triple.os;
     target.osMajor = triple.osMajor;

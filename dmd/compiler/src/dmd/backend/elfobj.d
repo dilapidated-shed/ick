@@ -1226,7 +1226,7 @@ void ElfObj_term(const(char)[] objfilename)
     {
         case EX_LINUX:
         case EX_LINUX64:
-            ELFOSABI = ELFOSABI_LINUX;
+            ELFOSABI = config.android ? ELFOSABI_SYSV : ELFOSABI_LINUX;
             break;
 
         case EX_FREEBSD:

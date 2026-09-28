@@ -1567,7 +1567,7 @@ auto sourceFiles()
     }
     DmdSources dmd = {
         glue: fileArray(env["D"], "
-            dmsc.d iasm/dmdx86.d iasm/dmdaarch64.d glue/package.d glue/e2ir.d glue/objc.d
+            dmsc.d iasm/dmdx86.d iasm/dmdaarch64.d glue/package.d glue/armleaf.d glue/thumb.d glue/e2ir.d glue/objc.d
             glue/s2ir.d glue/tocsym.d glue/toctype.d glue/tocvdebug.d glue/todt.d glue/toir.d glue/toobj.d
         "),
         driver: fileArray(env["D"], "dinifile.d dmdparams.d lib/package.d lib/elf.d lib/mach.d lib/mscoff.d
@@ -1644,7 +1644,7 @@ auto sourceFiles()
             machobj.d elfobj.d mscoffobj.d
             x86/nteh.d x86/cgreg.d x86/cg87.d x86/cgxmm.d x86/disasm86.d
             x86/cgcod.d x86/cod1.d x86/cod2.d x86/cod3.d x86/cod4.d x86/cod5.d
-            arm/disasmarm.d arm/instr.d arm/cod1.d arm/cod2.d arm/cod3.d arm/cod4.d
+            thumb.d arm/disasmarm.d arm/instr.d arm/cod1.d arm/cod2.d arm/cod3.d arm/cod4.d
         "),
     };
 

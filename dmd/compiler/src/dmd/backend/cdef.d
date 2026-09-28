@@ -546,6 +546,7 @@ struct Config
     short memmodel;             // 0:S,X,N,F, 1:M, 2:C, 3:L, 4:V
     objfmt_t objfmt;            // target object format
     exefmt_t exe;               // target operating system
+    bool android;               // Android/Bionic, rather than GNU/Linux ABI
 
     config_flags_t  flags;
     config_flags2_t flags2;

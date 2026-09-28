@@ -225,10 +225,19 @@ void addPredefinedGlobalIdentifiers(const ref Target tgt)
         }
     }
 
+    if (tgt.isAndroid)
+        predef("Android");
+
     addCRuntimePredefinedGlobalIdent(tgt.c);
     addCppRuntimePredefinedGlobalIdent(tgt.cpp);
 
-    if (tgt.isAArch64)
+    if (tgt.isThumb2)
+    {
+        predef("ARM");
+        predef("ARM_Thumb");
+        predef("ARM_SoftFP");
+    }
+    else if (tgt.isAArch64)
     {
         VersionCondition.addPredefinedGlobalIdent("AArch64");
     }
@@ -372,6 +381,8 @@ extern (C++) struct Target
     const(char)[] architectureName;
     CPU cpu;                // CPU instruction set to target
     bool isAArch64;         // generate 64 bit Arm code
+    bool isThumb2;          // experimental ARMv7-A Thumb-2 leaf backend
+    bool isAndroid;         // Linux kernel with the Android/Bionic ABI
     bool isX86_64;          // generate 64 bit code for x86_64; true by default for 64 bit dmd
     bool isX86;             // generate 32 bit Intel x86 code
     bool isLP64;            // pointers are 64 bits
@@ -430,8 +441,8 @@ extern (C++) struct Target
     {
         // isX86_64 and cpu are initialized in parseCommandLine
         //printf("isX86_64 %d isAArch64 %d\n", isX86_64, isAArch64);
-        isX86 = !isX86_64 && !isAArch64;
-        assert(isX86 + isX86_64 + isAArch64 == 1); // there can be only one
+        isX86 = !isX86_64 && !isAArch64 && !isThumb2;
+        assert(isX86 + isX86_64 + isAArch64 + isThumb2 == 1); // there can be only one
 
         this.params = &params;
 
@@ -500,6 +511,13 @@ extern (C++) struct Target
             realalignsize = 8;
         }
 
+        if (isAndroid && isThumb2)
+        {
+            realsize = 8;
+            realpad = 0;
+            realalignsize = 8;
+        }
+
         c.initialize(params, this);
         cpp.initialize(params, this);
         objc.initialize(params, this);
@@ -510,6 +528,8 @@ extern (C++) struct Target
             architectureName = "X86";
         else if (isAArch64)
             architectureName = "AArch64";
+        else if (isThumb2)
+            architectureName = "ARM_Thumb";
         else
             assert(0);
 
@@ -989,6 +1009,11 @@ extern (C++) struct Target
     extern (C++) TypeTuple toArgTypes(Type t)
     {
         import dmd.argtypes_sysv_x64 : toArgTypes_sysv_x64;
+        // The Thumb leaf ABI is checked in its lowerer. Imported declarations
+        // still need semantic analysis, but aggregate ABI classification is not
+        // implemented for this target yet (null explicitly means unsupported).
+        if (isThumb2)
+            return null;
         if (isX86_64)
         {
             // no argTypes for Win64 yet
@@ -1488,9 +1513,11 @@ struct TargetC
         else
             wchar_tsize = 4;
 
-        if (os == Target.OS.Windows)
+        if (target.isAndroid)
+            runtime = Runtime.Bionic;
+        else if (os == Target.OS.Windows && runtime == Runtime.Unspecified)
             runtime = Runtime.Microsoft;
-        else if (os == Target.OS.linux)
+        else if (os == Target.OS.linux && runtime == Runtime.Unspecified)
         {
             // Note: This is overridden later by `-target=<triple>` if supplied.
             // For now, choose the sensible default.
@@ -1576,7 +1603,9 @@ struct TargetCPP
         else
             assert(0);
         exceptions = (os & Target.OS.Posix) != 0;
-        if (os == Target.OS.Windows)
+        if (target.isAndroid)
+            runtime = Runtime.LLVM;
+        else if (os == Target.OS.Windows)
             runtime = Runtime.Microsoft;
         else if (os & (Target.OS.linux | Target.OS.DragonFlyBSD))
             runtime = Runtime.GNU;

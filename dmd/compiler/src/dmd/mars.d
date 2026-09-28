@@ -311,6 +311,11 @@ const(char)[] parse_arch_arg(Strings* args, const(char)[] arch)
     {
         const arg = p.toDString;
 
+        if (arg.startsWith("-target=armv7a-") || arg.startsWith("-target=thumbv7a-"))
+        { arch = "32"; continue; }
+        if (arg == "-arm" || arg.startsWith("-target=aarch64-"))
+        { arch = "64"; continue; }
+
         switch (arg)
         {
             case "-m32":
@@ -981,24 +986,28 @@ bool parseCommandLine(const ref Strings arguments, const size_t argc, out Param 
         }
         else if (arg == "-arm") // https://dlang.org/dmd.html#switch-arm
         {
+            target.isThumb2 = false;
             target.isAArch64 = true;
             target.isX86    = false;
             target.isX86_64 = false;
         }
         else if (arg == "-m32") // https://dlang.org/dmd.html#switch-m32
         {
+            target.isThumb2 = false;
             target.isAArch64 = false;
             target.isX86    = true;
             target.isX86_64 = false;
         }
         else if (arg == "-m64") // https://dlang.org/dmd.html#switch-m64
         {
+            target.isThumb2 = false;
             target.isAArch64 = false;
             target.isX86    = false;
             target.isX86_64 = true;
         }
         else if (arg == "-m32mscoff") // https://dlang.org/dmd.html#switch-m32mscoff
         {
+            target.isThumb2 = false;
             target.isAArch64 = false;
             target.isX86    = true;
             target.isX86_64 = false;
@@ -1107,7 +1116,7 @@ bool parseCommandLine(const ref Strings arguments, const size_t argc, out Param 
                 error("unknown error style '%.*s', must be 'digitalmars', 'gnu', or 'sarif'", cast(int) style.length, style.ptr);
             }
         }
-        else if (startsWith(p + 1, "target"))
+        else if (startsWith(p + 1, "target="))
         {
             enum len = "-target=".length;
             const triple = Triple(p + len);
