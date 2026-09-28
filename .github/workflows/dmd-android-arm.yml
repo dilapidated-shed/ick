@@ -1,0 +1,63 @@
+name: DMD Android ARM bring-up
+
+on:
+  push:
+    branches: [dmd-android-arm-backends]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dmd-android-arm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  owned-compiler:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Preserve source under test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p build/arm-receipts
+          git rev-parse HEAD > build/arm-receipts/source-sha.txt
+          git archive --format=tar.gz HEAD > build/arm-receipts/owned-source.tar.gz
+      - name: Upload exact source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dmd-arm-source-${{ github.sha }}
+          path: build/arm-receipts/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Install host build and ARM execution dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc qemu-user binutils-arm-linux-gnueabi binutils-aarch64-linux-gnu clang lld
+      - name: Build owned Icky DMD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -x "$dmd_bin"
+          "$dmd_bin" --version
+          mkdir -p ../../../build/arm-host
+          cp "$dmd_bin" ../../../build/arm-host/icky-dmd
+          ldd "$dmd_bin" > ../../../build/arm-host/linkage.txt
+      - name: Upload compiler under test
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dmd-arm-host-${{ github.sha }}
+          path: build/arm-host/
+          if-no-files-found: error
+          retention-days: 7
