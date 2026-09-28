@@ -86,20 +86,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library -O -inline -S \
+          "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library -O -inline -c -vasm \
             dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
             dmd/qualification/packed-memory/receipt.d \
-            -of=.representation-build/packed-memory-receipt \
+            -of=.representation-build/packed-memory-receipt.o \
             2>&1 | tee .representation-build/packed-memory-lowering.txt
-          "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library -O -inline -c \
-            dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
-            dmd/qualification/packed-memory/receipt.d \
-            -of=.representation-build/packed-memory-receipt.o
           objdump -drwC -Mintel .representation-build/packed-memory-receipt.o \
             > .representation-build/packed-memory-receipt.disassembly
-          ls -l .representation-build/packed-memory-receipt.s \
+          ls -l .representation-build/packed-memory-receipt.o \
             .representation-build/packed-memory-receipt.disassembly
-          cat .representation-build/packed-memory-receipt.s
+          cat .representation-build/packed-memory-lowering.txt
           cat .representation-build/packed-memory-receipt.disassembly
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           PASS: packed-memory receipt compiled and emitted x86-64 assembly and object disassembly.
@@ -113,7 +109,6 @@ jobs:
           name: packed-memory-receipts-${{ github.run_id }}
           path: |
             .representation-build/packed-memory-lowering.txt
-            .representation-build/packed-memory-receipt.s
             .representation-build/packed-memory-receipt.o
             .representation-build/packed-memory-receipt.disassembly
           retention-days: 90

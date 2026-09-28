@@ -95,9 +95,10 @@ This first surface performs scalar conservative lowering through ordinary D
 pointer loads/stores and the existing `icky.imprecise` conversions. It does not
 provide a target-specific follower yet. The view has no arithmetic array and
 does not widen a range as a side effect of a load. The qualification receipt
-source at `dmd/qualification/packed-memory/receipt.d` is compiled to x86-64
-assembly and object disassembly by the representations workflow; inspect those
-artifacts to see the code emitted by its exact DMD build. No optimality claim
+source at `dmd/qualification/packed-memory/receipt.d` is compiled with DMD's
+`-vasm` output and to an object whose x86-64 instructions are disassembled by
+`objdump`; inspect those artifacts to see the code emitted by its exact DMD
+build. No optimality claim
 is made.
 
 ## Finite geometry
