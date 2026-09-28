@@ -86,11 +86,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library -O -inline -c -vasm \
+          cat dmd/qualification/packed-memory/receipt.d \
+            > .representation-build/packed-memory-lowering.txt
+          printf '\nDMD compiler trace and -vasm output:\n' \
+            >> .representation-build/packed-memory-lowering.txt
+          "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library -O -c -vasm \
             dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
             dmd/qualification/packed-memory/receipt.d \
             -of=.representation-build/packed-memory-receipt.o \
-            2>&1 | tee .representation-build/packed-memory-lowering.txt
+            2>&1 | tee -a .representation-build/packed-memory-lowering.txt
           objdump -drwC -Mintel .representation-build/packed-memory-receipt.o \
             > .representation-build/packed-memory-receipt.disassembly
           ls -l .representation-build/packed-memory-receipt.o \
