@@ -73,7 +73,7 @@ jobs:
               return 42;
           }
           EOF
-          "$gdc" -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
+          "$gdc" -fno-druntime -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
           test -s /tmp/ick_gdc_baseline.o
 
       - name: Record baseline boundary
