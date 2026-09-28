@@ -1571,8 +1571,19 @@ class Lexer
                 }
                 else if (*p & 0x80)
                 {
+                    const utfStart = p;
                     u = decodeUTF();
                     p++;
+
+                    // Superscript ² and ³ are postfix operators in Icky D.
+                    // Unicode also permits them as identifier continuations,
+                    // so stop before consuming them and let the next token
+                    // scan recognize the postfix operator.
+                    if (u == '²' || u == '³')
+                    {
+                        p = utfStart;
+                        break IdentLoop;
+                    }
                 }
                 else if (Ccompile && *p == '\\')
                 {
