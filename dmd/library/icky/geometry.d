@@ -24,7 +24,7 @@ package bool normalize_components(size_t count)(float[count] input,
         if (fabsf(value) > largest) largest = fabsf(value);
     }
     if (largest == 0.0f) return false;
-    float[count] scaled;
+    float[count] scaled = void;
     float squared_length = 0.0f;
     foreach (index; 0 .. count)
     {
@@ -62,7 +62,7 @@ struct Quaternion(Component = Float16)
     if (is(Component == float) || compact_component!Component)
 {
     nothrow @nogc:
-    static if (is(Component == float)) private float[4] values = 0.0f;
+    static if (is(Component == float)) private float[4] values;
     else private Component[4] values;
 
     static Quaternion from_components(float real_component, float i, float j, float k)
@@ -74,7 +74,7 @@ struct Quaternion(Component = Float16)
     }
     float[4] components() const
     {
-        float[4] result;
+        float[4] result = void;
         foreach (index; 0 .. 4) result[index] = load_component!Component(values[index]);
         return result;
     }
@@ -151,7 +151,7 @@ struct UnitQuaternion
     static bool try_from_components(float real_component, float i, float j, float k,
                                     ref UnitQuaternion output)
     {
-        float[4] normalized;
+        float[4] normalized = void;
         if (!normalize_components!4([real_component, i, j, k], normalized)) return false;
         UnitQuaternion candidate;
         candidate.values = normalized;
@@ -265,7 +265,7 @@ struct Direction(Frame = Unframed)
     @disable this(float[3] unchecked);
     static bool try_from_components(float x, float y, float z, ref Direction output)
     {
-        float[3] normalized;
+        float[3] normalized = void;
         if (!normalize_components!3([x, y, z], normalized)) return false;
         Direction candidate;
         candidate.values = normalized;
@@ -409,7 +409,7 @@ struct SmallestThree(Component = Float16) if (compact_component!Component)
     {
         static if (used_bits % 8 != 0)
             if ((payload[byte_count - 1] >> (used_bits % 8)) != 0) return false;
-        float[4] value = 0.0f;
+        float[4] value = [0.0f, 0.0f, 0.0f, 0.0f];
         uint omitted = omitted_index();
         uint offset = 2;
         float retained_squared = 0.0f;
