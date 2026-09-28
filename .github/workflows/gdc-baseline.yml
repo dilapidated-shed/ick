@@ -14,7 +14,7 @@ concurrency:
 jobs:
   native-gdc:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Check out exact branch head
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -28,6 +28,8 @@ jobs:
         run: |
           set -euxo pipefail
           sh ick/materialize.sh gcc source
+          test -d source/libphobos/libdruntime
+          test -d source/libphobos/src
 
       - name: Install GDC build dependencies
         shell: bash
@@ -38,7 +40,7 @@ jobs:
             build-essential gdc flex bison texinfo \
             libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev
 
-      - name: Build native ICK with D enabled
+      - name: Build native ICK with druntime and Phobos
         shell: bash
         run: |
           set -euxo pipefail
@@ -47,17 +49,18 @@ jobs:
           ../source/configure \
             --prefix="$GITHUB_WORKSPACE/stage" \
             --enable-languages=c,d \
+            --enable-libphobos \
+            --with-libphobos-druntime-only=no \
             --disable-bootstrap \
             --disable-multilib \
             --disable-nls \
             --disable-shared \
-            --disable-libatomic \
             --disable-libgomp \
             --disable-libquadmath \
             --disable-libssp \
             --disable-libvtv
-          make -j"$(nproc)" all-gcc
-          make install-gcc
+          make -j"$(nproc)" all-gcc all-target-libphobos
+          make install-gcc install-target-libgcc install-target-libphobos
 
       - name: Compile plain D with the imported frontend
         shell: bash
@@ -76,17 +79,63 @@ jobs:
           "$gdc" -fno-druntime -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
           test -s /tmp/ick_gdc_baseline.o
 
-      - name: Record baseline boundary
+      - name: Compile and run normal D with druntime and Phobos
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gdc=$(find "$GITHUB_WORKSPACE/stage/bin" -maxdepth 1 -type f \
+            \( -name gdc -o -name '*-gdc' \) | head -n 1)
+          test -n "$gdc"
+          find "$GITHUB_WORKSPACE/stage" -type f \
+            \( -name 'libgphobos.a' -o -name 'libgdruntime.a' -o -name 'object.d' -o -name 'bigint.d' \) \
+            -print
+
+          cat > /tmp/ick_gdc_normal.d <<'EOF'
+          import std.bigint : BigInt;
+          import std.stdio : writeln;
+
+          class Box
+          {
+              BigInt value;
+              this(BigInt value)
+              {
+                  this.value = value;
+              }
+          }
+
+          int main()
+          {
+              auto box = new Box(BigInt("123456789012345678901234567890"));
+              try
+              {
+                  throw new Exception("normal-d");
+              }
+              catch (Exception error)
+              {
+                  if (error.msg != "normal-d")
+                      return 2;
+              }
+
+              box.value += 1;
+              writeln(box.value);
+              return box.value == BigInt("123456789012345678901234567891") ? 0 : 3;
+          }
+          EOF
+
+          "$gdc" /tmp/ick_gdc_normal.d -o /tmp/ick_gdc_normal
+          /tmp/ick_gdc_normal | grep -Fx '123456789012345678901234567891'
+
+      - name: Record full-stack boundary
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: the pinned GCC source materialized with the complete imported GDC frontend and target hooks.
+          PASS: the pinned GCC source materialized with the complete imported GDC frontend, libphobos/libdruntime, and Phobos source.
 
-          PASS: native ICK/GCC built with `--enable-languages=c,d` and installed a GDC driver.
+          PASS: native ICK/GCC built with `--enable-languages=c,d`, built and installed libphobos, and installed the GDC driver.
 
-          PASS: that GDC compiled an ordinary D translation unit to an object without requiring druntime/libphobos.
+          PASS: the compiler-only `-fno-druntime` object check still passes.
 
-          libphobos/druntime qualification is deliberately separate from this compiler-front-end baseline.
+          PASS: the resulting normal-D toolchain linked and ran std.bigint, GC-managed class allocation, exceptions, and std.stdio.
 
-          This gate is intentionally before Icky D Unicode syntax. The D frontend is owned in the ICK overlay; unchanged runtime source remains pinned in the ordinary GCC reference.
+          The GDC line therefore includes druntime and Phobos in the qualified stack rather than treating them as an excluded future layer.
           EOF
