@@ -40,6 +40,7 @@ struct CPn(size_t dimension)
         return result;
     }
     private Complex32[coordinate_count] representative = origin();
+    @disable this(Complex32[coordinate_count] unchecked);
 
     static bool try_from_homogeneous(Complex32[coordinate_count] input, ref CPn output)
     {
