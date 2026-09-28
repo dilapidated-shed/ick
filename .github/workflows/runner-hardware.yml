@@ -1,0 +1,97 @@
+name: Identify GitHub runner hardware
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/runner-hardware.yml'
+      - 'research/runner-hardware/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fingerprint:
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Collect guest-visible identification
+        shell: bash
+        env:
+          SAMPLE: ${{ matrix.sample }}
+        run: |
+          set -eu
+          mkdir -p fingerprint/raw
+          {
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'job=%s\n' "$GITHUB_JOB"
+            printf 'sample=%s\n' "$SAMPLE"
+            printf 'source_sha=%s\n' "$GITHUB_SHA"
+            printf 'head_sha=%s\n' "${{ github.event.pull_request.head.sha || github.sha }}"
+            printf 'runner_label=ubuntu-24.04\n'
+            printf 'runner_os=%s\n' "$RUNNER_OS"
+            printf 'runner_arch=%s\n' "$RUNNER_ARCH"
+            date -u '+date_utc=%Y-%m-%dT%H:%M:%SZ'
+          } > fingerprint/provenance.txt
+          uname -a > fingerprint/raw/uname.txt
+          cat /etc/os-release > fingerprint/raw/os-release.txt
+          cat /proc/cpuinfo > fingerprint/raw/cpuinfo.txt
+          cat /proc/meminfo > fingerprint/raw/meminfo.txt
+          cat /proc/self/status > fingerprint/raw/self-status.txt
+          cat /proc/self/numa_maps > fingerprint/raw/numa-maps.txt
+          lscpu > fingerprint/raw/lscpu.txt
+          lscpu -e > fingerprint/raw/lscpu-topology.txt
+          lsblk > fingerprint/raw/lsblk.txt
+          getconf PAGESIZE > fingerprint/raw/page-size.txt
+          getconf -a > fingerprint/raw/getconf.txt
+          gcc --version > fingerprint/raw/gcc-version.txt
+          gcc -Q -march=native --help=target > fingerprint/raw/gcc-native-target.txt 2>&1
+          g++ -march=native -### -x c++ -c /dev/null > fingerprint/raw/gcc-native-command.txt 2>&1 || true
+          if command -v clang >/dev/null; then
+            clang --version > fingerprint/raw/clang-version.txt
+            clang -### -march=native -x c -c /dev/null > fingerprint/raw/clang-native-command.txt 2>&1 || true
+          fi
+          {
+            for path in /sys/devices/system/cpu/online /sys/devices/system/cpu/possible /sys/devices/system/node/online /sys/kernel/mm/transparent_hugepage/enabled /proc/sys/vm/nr_hugepages; do
+              printf '%s: ' "$path"
+              if test -r "$path"; then cat "$path"; else printf 'unavailable\n'; fi
+            done
+          } > fingerprint/raw/system-memory-topology.txt
+          {
+            for path in /sys/devices/system/cpu/cpu[0-9]*/cache/index[0-9]*/* /sys/devices/system/cpu/cpu[0-9]*/topology/* /sys/devices/system/node/node[0-9]*/cpulist /sys/devices/system/node/node[0-9]*/meminfo; do
+              test -f "$path" || continue
+              test -r "$path" || continue
+              case "$path" in */power/*) continue ;; esac
+              printf '%s: ' "$path"
+              tr '\n' ' ' < "$path"
+              printf '\n'
+            done
+          } > fingerprint/raw/sysfs.txt
+          {
+            printf 'guest_cpu_models:\n'
+            awk -F ': ' '/^model name[[:space:]]*:/ {print $2}' fingerprint/raw/cpuinfo.txt | sort -u
+            printf 'guest_hypervisor:\n'
+            lscpu | sed -n '/^Hypervisor vendor:/p; /^Virtualization type:/p'
+            printf 'guest_visible_cpu_count:\n'
+            nproc
+            printf 'guest_page_bytes:\n'
+            cat fingerprint/raw/page-size.txt
+            printf 'guest_cache_summary:\n'
+            lscpu -C 2>&1 || true
+            printf 'unknown: physical DIMMs, memory-channel count and speed, host CPU sharing, effective bandwidth, host NUMA topology, available memory-level parallelism\n'
+          } > fingerprint/summary.txt
+          find fingerprint -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > fingerprint/SHA256SUMS
+          cat fingerprint/provenance.txt fingerprint/summary.txt
+      - name: Preserve raw fingerprint
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runner-hardware-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.sample }}
+          path: fingerprint/
+          retention-days: 90
+          if-no-files-found: error
