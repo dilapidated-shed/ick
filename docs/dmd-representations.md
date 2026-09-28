@@ -83,13 +83,14 @@ prefetch distance, runner model, and fetch behavior do not enter the D API.
 Inside DMD, `dmd.packedmemory.PackedMemoryOperation` carries the operation,
 source/storage/arithmetic/destination types, storage size, base, bounds, index,
 storage alignment, byte stride, known address alignment, alias set, conversion
-policy, effect and order.
-`dmd.glue.e2ir.lowerPackedMemory` consumes that record. Its conservative
-follower emits an ordinary one-element load or store, after which existing
-DMD lowering handles the local conversions and arithmetic. The compiler has a
-versioned `PackedMemoryTrace` receipt line for the record, so those facts stay
-visible without becoming hardware properties or needing recovery from the
-lowered expression tree.
+policy, effect and order. The public packed calls reach this stage before
+ordinary call lowering, and the scalar follower checks the complete request
+before selecting the bounded scalar body. Its internal packed byte loads and
+stores are lowered by `dmd.glue.e2ir.lowerPackedMemory` into ordinary
+one-element accesses. The versioned `PackedMemoryTrace` receipt separates the
+semantic request from follower execution, so the compiler-stage facts remain
+visible without becoming hardware properties or being reconstructed from
+lowered expressions.
 
 This first surface performs scalar conservative lowering through ordinary D
 pointer loads/stores and the existing `icky.imprecise` conversions. It does not

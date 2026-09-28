@@ -90,10 +90,11 @@ jobs:
           for mode in debug optimized; do
             flags=()
             if [ "$mode" = optimized ]; then flags=(-O -inline); fi
-            "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" -c \
+            "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
               dmd/library/icky/imprecise.d dmd/library/icky/packed_memory.d \
               dmd/qualification/packed-memory/negative.d \
-              -of=".representation-build/negative-$mode.o"
+              -of=".representation-build/negative-$mode"
+            ".representation-build/negative-$mode"
           done
           echo 'PASS: unsupported formats, operations, raw bytes, const stores, whole-slice casts, and nominal mismatches were rejected.'
 
@@ -101,12 +102,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "$DMD_BIN" -betterC -release -boundscheck=off -I"$RUNTIME_IMPORT" -Idmd/library \
-            dmd/library/icky/imprecise.d dmd/library/icky/packed_memory.d \
-            dmd/qualification/packed-memory/bounds.d \
-            -of=.representation-build/packed-bounds-disabled
-          .representation-build/packed-bounds-disabled
-          echo 'PASS: empty, final, first-invalid, very-large-invalid, and offset-invalid stores rejected without packed writes with bounds/assert checks disabled.'
+          for mode in debug optimized; do
+            flags=()
+            if [ "$mode" = optimized ]; then flags=(-O -inline); fi
+            "$DMD_BIN" -betterC -release -boundscheck=off -I"$RUNTIME_IMPORT" -Idmd/library \
+              "${flags[@]}" dmd/library/icky/imprecise.d dmd/library/icky/packed_memory.d \
+              dmd/qualification/packed-memory/bounds.d \
+              .representation-build/oracle.o -of=".representation-build/packed-bounds-disabled-$mode"
+            ".representation-build/packed-bounds-disabled-$mode"
+            echo "PASS: store bounds qualified with checks disabled ($mode)."
+          done
+
+      - name: Qualify compute bounds with checks disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          for mode in debug optimized; do
+            flags=()
+            if [ "$mode" = optimized ]; then flags=(-O -inline); fi
+            "$DMD_BIN" -betterC -release -boundscheck=off -I"$RUNTIME_IMPORT" -Idmd/library \
+              "${flags[@]}" dmd/library/icky/imprecise.d dmd/library/icky/packed.d \
+              dmd/library/icky/packed_memory.d \
+              dmd/qualification/packed-memory/bounds-compute.d \
+              -of=".representation-build/packed-compute-bounds-disabled-$mode"
+            for side in e r b l R L H; do
+              set +e
+              timeout 1s ".representation-build/packed-compute-bounds-disabled-$mode" "$side"
+              status=$?
+              set -e
+              if [ "$status" -ne 134 ]; then
+                echo "FAIL: invalid compute index returned status $status for $side ($mode)"
+                exit 1
+              fi
+              echo "PASS: invalid compute index explicitly failed before returning ($side, $mode; abort status 134)."
+            done
+          done
 
       - name: Preserve packed-memory assembly receipt
         shell: bash
@@ -143,9 +174,19 @@ jobs:
               | tee ".representation-build/packed-memory-$mode-trace.txt"
             grep -F "PACKED-IR seam=follower kind=scalar-compute" \
               ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "PACKED-IR seam=request kind=scalar-compute stages=load_packed->decode->arithmetic" \
+              ".representation-build/packed-memory-$mode-trace.txt"
             grep -F "PACKED-IR seam=follower kind=scalar-load" \
               ".representation-build/packed-memory-$mode-trace.txt"
             grep -F "PACKED-IR seam=follower kind=checked-scalar-store" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "PACKED-IR seam=request kind=checked-scalar-store stages=encode->store_packed" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "operation=* rounding=Float16-per-operation" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "destination-storage=E5M3 domain=partial-reject-preserve-destination" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "follower=ordinary-scalar-body follower-executed=true" \
               ".representation-build/packed-memory-$mode-trace.txt"
             grep -F "follower-executed=true" \
               ".representation-build/packed-memory-$mode-trace.txt"
@@ -163,6 +204,9 @@ jobs:
               dmd/library/icky/packed_memory.d \
               dmd/qualification/packed-memory/receipt.d \
               -of=".representation-build/packed-memory-receipt-$mode"
+            printf 'execution-command=%q\n' \
+              ".representation-build/packed-memory-receipt-$mode" \
+              >> .representation-build/packed-memory-lowering.txt
             ".representation-build/packed-memory-receipt-$mode"
             echo "execution=$? mode=$mode" >> .representation-build/packed-memory-lowering.txt
           done
@@ -198,7 +242,7 @@ jobs:
           PASS: debug and optimized output agree with the existing C oracle.
           PASS: scalar payloads, midpoint neighbours, domain rejection and requantization.
           PASS: Circle96 oracle and finite geometry laws at 96/192/240/360/720 positions.
-          PASS: invalid arithmetic and mixed categories fail source type checking.
+          PASS: invalid arithmetic, direct E5M3 arithmetic, and mixed categories fail source type checking.
 
           This proves native D value-type support on the host. It does not prove
           new primitive compiler types, representation-aware backend IR, geometric

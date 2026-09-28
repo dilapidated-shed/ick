@@ -52,10 +52,12 @@ import dmd.expressionsem;
 import dmd.funcsem : isVirtual;
 import dmd.func;
 import dmd.hdrgen;
+import dmd.identifier : Identifier;
 import dmd.id;
 import dmd.init;
 import dmd.location;
 import dmd.mtype;
+import dmd.optimize : optimize;
 import dmd.printast;
 import dmd.sideeffect;
 import dmd.statement;
@@ -6597,11 +6599,36 @@ private bool isPackedMemoryIntrinsic(FuncDeclaration fd)
         return strcmp(functionName, "packed_read") == 0 ||
                strcmp(functionName, "packed_write") == 0;
     if (strcmp(moduleName, "packed_memory") == 0)
-        return strcmp(functionName, "packed_compute_at") == 0 ||
-               strcmp(functionName, "packed_store_at") == 0 ||
-               strcmp(functionName, "compute_at") == 0 ||
+        return strcmp(functionName, "compute_at") == 0 ||
                strcmp(functionName, "try_store_at") == 0;
     return false;
+}
+
+private bool isPackedImpreciseType(Type type, const(char)* expectedName)
+{
+    if (!type)
+        return false;
+    auto representation = type.toBasetype().mutableOf().toBasetype();
+    auto structure = representation.isTypeStruct();
+    if (!structure || !structure.sym)
+        return false;
+    auto moduleSymbol = structure.sym.getModule();
+    if (!moduleSymbol || !moduleSymbol.md || moduleSymbol.md.packages.length != 1 ||
+        strcmp(moduleSymbol.md.packages[0].toChars(), "icky") != 0 ||
+        strcmp(moduleSymbol.md.id.toChars(), "imprecise") != 0)
+        return false;
+    return strcmp(representation.toChars(), expectedName) == 0;
+}
+
+private bool isPackedStorageType(Type type)
+{
+    return isPackedImpreciseType(type, "E5M3") ||
+           isPackedImpreciseType(type, "Quantized!(ScalarFormat.e3m2)");
+}
+
+private bool isPackedFloat16Type(Type type)
+{
+    return isPackedImpreciseType(type, "Quantized!(ScalarFormat.binary16)");
 }
 
 private const(char)* packedTypeChars(Type type)
@@ -6676,13 +6703,16 @@ private const(char)* packedStageChars(uint stageMask)
     return "complete-packed-operation";
 }
 
-private void tracePackedMemory(PackedMemoryOperation operation)
+private void tracePackedMemory(PackedMemoryOperation operation, const(char)* seam)
 {
     version (PackedMemoryTrace)
     {
         const(char)* effect = operation.effect == PackedMemoryEffect.read ? "read" : "write";
-        printf("PACKED-IR seam=follower kind=%s stages=%s left-storage=%s right-storage=%s source-storage=%s arithmetic=%s operation=%s rounding=%s conversion=representation-defined destination-storage=%s domain=%s source-bytes=%zu destination-bytes=%zu base=%s bounds=%s index=%s stride=%s right-base=%s right-bounds=%s right-index=%s destination-base=%s destination-bounds=%s destination-index=%s left-stride=%zu right-stride=%zu destination-stride=%zu left-alignment=%zu right-alignment=%zu destination-alignment=%zu alignment=%zu alias-set=%u effect=%s ordering=ordinary-source-order bounded-temporary=%s disjoint-proven=%s public-surface=%s follower-executed=%s\n",
-               packedKindChars(operation.kind), packedStageChars(operation.stageMask),
+        const(char)* follower = operation.kind == PackedMemoryOperationKind.scalar_compute ||
+                                operation.kind == PackedMemoryOperationKind.checked_scalar_store
+            ? "ordinary-scalar-body" : "scalar-memory-access";
+        printf("PACKED-IR seam=%s kind=%s stages=%s left-storage=%s right-storage=%s source-storage=%s arithmetic=%s operation=%s rounding=%s conversion=representation-defined destination-storage=%s domain=%s source-bytes=%zu destination-bytes=%zu base=%s bounds=%s index=%s stride=%s right-base=%s right-bounds=%s right-index=%s destination-base=%s destination-bounds=%s destination-index=%s left-stride=%zu right-stride=%zu destination-stride=%zu left-alignment=%zu right-alignment=%zu destination-alignment=%zu alignment=%zu alias-set=%u effect=%s ordering=ordinary-source-order bounded-temporary=%s disjoint-proven=%s public-surface=%s follower=%s follower-executed=%s\n",
+               seam, packedKindChars(operation.kind), packedStageChars(operation.stageMask),
                packedTypeChars(operation.leftStorage), packedTypeChars(operation.rightStorage),
                packedTypeChars(operation.sourceStorage),
                packedTypeChars(operation.arithmeticRepresentation),
@@ -6709,6 +6739,7 @@ private void tracePackedMemory(PackedMemoryOperation operation)
                packedBoolChars(operation.boundedTemporary),
                packedBoolChars(operation.disjointProven),
                packedBoolChars(operation.publicSurface),
+               follower,
                packedBoolChars(operation.followerExecuted));
     }
 }
@@ -6716,23 +6747,18 @@ private void tracePackedMemory(PackedMemoryOperation operation)
 private PackedMemoryArithmetic packedArithmetic(FuncDeclaration fd)
 {
     auto ti = fd.toParent().isTemplateInstance();
-    if (!ti || !ti.tiargs)
+    if (!ti || !ti.tiargs || ti.tiargs.length != 4)
         return PackedMemoryArithmetic.none;
-    foreach (argument; *ti.tiargs)
-    {
-        auto expression = cast(Expression)argument;
-        auto stringExpression = expression ? expression.isStringExp() : null;
-        if (!stringExpression || stringExpression.sz != 1)
-            continue;
-        if (stringExpression.len == 1 && stringExpression.getCodeUnit(0) == '+')
-            return PackedMemoryArithmetic.add;
-        if (stringExpression.len == 1 && stringExpression.getCodeUnit(0) == '-')
-            return PackedMemoryArithmetic.subtract;
-        if (stringExpression.len == 1 && stringExpression.getCodeUnit(0) == '*')
-            return PackedMemoryArithmetic.multiply;
-        if (stringExpression.len == 1 && stringExpression.getCodeUnit(0) == '/')
-            return PackedMemoryArithmetic.divide;
-    }
+    auto rawOperation = cast(Expression)(*ti.tiargs)[1];
+    auto expression = rawOperation ? optimize(rawOperation, WANTvalue) : null;
+    auto stringExpression = expression ? expression.isStringExp() : null;
+    if (!stringExpression || stringExpression.sz != 1 || stringExpression.len != 1)
+        return PackedMemoryArithmetic.none;
+    const codeUnit = stringExpression.getCodeUnit(0);
+    if (codeUnit == '+') return PackedMemoryArithmetic.add;
+    if (codeUnit == '-') return PackedMemoryArithmetic.subtract;
+    if (codeUnit == '*') return PackedMemoryArithmetic.multiply;
+    if (codeUnit == '/') return PackedMemoryArithmetic.divide;
     return PackedMemoryArithmetic.none;
 }
 
@@ -6743,7 +6769,195 @@ private Type packedElementType(Expression expression)
     auto type = expression.type.toBasetype();
     if (type.ty != Tarray && type.ty != Tsarray)
         return null;
-    return type.nextOf().toBasetype();
+    return type.nextOf().mutableOf().toBasetype();
+}
+
+private Expression packedSliceProperty(Expression slice, Identifier property)
+{
+    return slice ? new DotIdExp(slice.loc, slice, property) : null;
+}
+
+private Expression packedStrideExpression(Loc loc, size_t stride)
+{
+    return new IntegerExp(loc, cast(ulong)stride, Type.tsize_t);
+}
+
+private Type packedTemplateType(FuncDeclaration fd, size_t index, size_t expectedCount)
+{
+    auto ti = fd.toParent().isTemplateInstance();
+    if (!ti || !ti.tiargs || ti.tiargs.length != expectedCount || index >= expectedCount)
+        return null;
+    return cast(Type)(*ti.tiargs)[index];
+}
+
+private bool packedArrayMatches(Type arrayType, Type elementType)
+{
+    if (!arrayType || !elementType)
+        return false;
+    auto array = arrayType.toBasetype();
+    return array.ty == Tarray &&
+           array.nextOf().mutableOf().equals(elementType.mutableOf());
+}
+
+private bool packedSemanticSignatureMatches(FuncDeclaration fd, CallExp ce,
+                                             bool isCompute)
+{
+    if (!ce.arguments || !ce.type)
+        return false;
+    const argumentCount = isCompute ? 4 : 3;
+    auto functionType = fd.type ? fd.type.isTypeFunction() : null;
+    if (!functionType || functionType.parameterList.varargs != VarArg.none ||
+        functionType.parameterList.length != argumentCount ||
+        ce.arguments.length != argumentCount ||
+        !functionType.nextOf() || !functionType.nextOf().equals(ce.type))
+        return false;
+    foreach (i; 0 .. argumentCount)
+    {
+        auto argumentType = (*ce.arguments)[i].type;
+        if (!argumentType || !functionType.parameterList[i].type.equals(argumentType))
+            return false;
+    }
+
+    if (isCompute)
+    {
+        auto leftStorage = packedElementType((*ce.arguments)[0]);
+        auto rightStorage = packedElementType((*ce.arguments)[2]);
+        auto arithmeticTemplate = packedTemplateType(fd, 0, 4);
+        auto leftTemplate = packedTemplateType(fd, 2, 4);
+        auto rightTemplate = packedTemplateType(fd, 3, 4);
+        return isPackedFloat16Type(functionType.nextOf()) &&
+               isPackedFloat16Type(arithmeticTemplate) &&
+               isPackedStorageType(leftStorage) && isPackedStorageType(rightStorage) &&
+               leftTemplate && rightTemplate &&
+               leftTemplate.mutableOf().equals(leftStorage) &&
+               rightTemplate.mutableOf().equals(rightStorage) &&
+               packedArrayMatches(functionType.parameterList[0].type, leftStorage) &&
+               functionType.parameterList[1].type.equals(Type.tsize_t) &&
+               packedArrayMatches(functionType.parameterList[2].type, rightStorage) &&
+               functionType.parameterList[3].type.equals(Type.tsize_t);
+    }
+
+    auto destinationStorage = packedElementType((*ce.arguments)[0]);
+    auto storageTemplate = packedTemplateType(fd, 0, 1);
+    auto valueType = functionType.parameterList[2].type;
+    return functionType.nextOf().toBasetype().ty == Tbool &&
+           isPackedStorageType(destinationStorage) && storageTemplate &&
+           storageTemplate.mutableOf().equals(destinationStorage) &&
+           packedArrayMatches(functionType.parameterList[0].type, destinationStorage) &&
+           functionType.parameterList[1].type.equals(Type.tsize_t) &&
+           isPackedFloat16Type(valueType);
+}
+
+private bool packedScalarFallbackSupports(PackedMemoryOperation operation)
+{
+    if (!operation.valid || !operation.boundedTemporary || operation.disjointProven ||
+        operation.aliasSet != 0 ||
+        operation.conversion != PackedConversionPolicy.representation_defined ||
+        operation.ordering != PackedMemoryOrdering.ordinary_source_order)
+        return false;
+
+    if (operation.kind == PackedMemoryOperationKind.scalar_compute)
+    {
+        const stages = PackedMemoryStage.load_packed |
+                       PackedMemoryStage.decode |
+                       PackedMemoryStage.arithmetic;
+        final switch (operation.arithmeticOperation)
+        {
+            case PackedMemoryArithmetic.add,
+                 PackedMemoryArithmetic.subtract,
+                 PackedMemoryArithmetic.multiply,
+                 PackedMemoryArithmetic.divide:
+                break;
+            case PackedMemoryArithmetic.none:
+                return false;
+        }
+        return operation.publicSurface && operation.stageMask == stages &&
+               operation.effect == PackedMemoryEffect.read &&
+               operation.domain == PackedMemoryDomain.total_quantization &&
+               operation.rounding == PackedMemoryRounding.float16_per_operation &&
+               isPackedStorageType(operation.leftStorage) &&
+               isPackedStorageType(operation.rightStorage) &&
+               isPackedFloat16Type(operation.arithmeticRepresentation) &&
+               operation.baseAddress && operation.byteLength && operation.elementIndex &&
+               operation.leftBase && operation.leftLength && operation.leftIndex &&
+               operation.rightBase && operation.rightLength && operation.rightIndex &&
+               operation.storageBytes != 0 && operation.leftStrideBytes != 0 &&
+               operation.rightStrideBytes != 0 && operation.leftAlignment != 0 &&
+               operation.rightAlignment != 0 && operation.knownAlignment != 0 &&
+               operation.leftStrideBytes == operation.leftStorage.size(Loc.initial) &&
+               operation.rightStrideBytes == operation.rightStorage.size(Loc.initial);
+    }
+
+    if (operation.kind == PackedMemoryOperationKind.checked_scalar_store)
+    {
+        const stages = PackedMemoryStage.encode | PackedMemoryStage.store_packed;
+        const isE5M3 = isPackedImpreciseType(operation.destinationStorage, "E5M3");
+        const expectedDomain = isE5M3
+            ? PackedMemoryDomain.partial_reject_preserve_destination
+            : PackedMemoryDomain.total_quantization;
+        return operation.publicSurface && operation.stageMask == stages &&
+               operation.effect == PackedMemoryEffect.write &&
+               operation.domain == expectedDomain &&
+               operation.rounding == PackedMemoryRounding.none &&
+               isPackedStorageType(operation.destinationStorage) &&
+               isPackedFloat16Type(operation.arithmeticRepresentation) &&
+               operation.baseAddress && operation.byteLength && operation.elementIndex &&
+               operation.destinationBase && operation.destinationLength &&
+               operation.destinationIndex && operation.storedValue &&
+               operation.storageBytes != 0 && operation.destinationAlignment != 0 &&
+               operation.knownAlignment != 0 &&
+               operation.destinationStrideBytes ==
+                   operation.destinationStorage.size(Loc.initial);
+    }
+    return false;
+}
+
+private bool packedByteAccessSignatureMatches(FuncDeclaration fd, CallExp ce,
+                                               bool isRead, Type storageType)
+{
+    if (!ce.arguments || !storageType)
+        return false;
+    const argumentCount = isRead ? 4 : 5;
+    auto functionType = fd.type ? fd.type.isTypeFunction() : null;
+    if (!functionType || !functionType.isNothrow || !functionType.isNogc ||
+        functionType.parameterList.varargs != VarArg.none ||
+        functionType.parameterList.length != argumentCount ||
+        ce.arguments.length != argumentCount || !functionType.nextOf())
+        return false;
+
+    auto templateInstance = fd.toParent().isTemplateInstance();
+    if (!templateInstance || !templateInstance.tiargs ||
+        templateInstance.tiargs.length != 4 ||
+        !cast(Type)(*templateInstance.tiargs)[0] ||
+        !cast(Type)(*templateInstance.tiargs)[1] ||
+        !cast(Expression)(*templateInstance.tiargs)[2] ||
+        !cast(Expression)(*templateInstance.tiargs)[3])
+        return false;
+    auto templateStorage = cast(Type)(*templateInstance.tiargs)[0];
+    if (!templateStorage.mutableOf().equals(storageType.mutableOf()))
+        return false;
+
+    foreach (i; 0 .. argumentCount)
+    {
+        auto argumentType = (*ce.arguments)[i].type;
+        if (!argumentType || !functionType.parameterList[i].type.equals(argumentType))
+            return false;
+    }
+
+    auto baseType = functionType.parameterList[0].type.toBasetype();
+    if (baseType.ty != Tpointer)
+        return false;
+    auto byteType = baseType.nextOf().toBasetype();
+    if (byteType.ty != Tuns8 || byteType.isConst() != isRead)
+        return false;
+    foreach (i; 1 .. 4)
+        if (!functionType.parameterList[i].type.equals(Type.tsize_t))
+            return false;
+
+    if (isRead)
+        return functionType.nextOf().mutableOf().equals(storageType.mutableOf());
+    return functionType.nextOf().toBasetype().ty == Tvoid &&
+           functionType.parameterList[4].type.mutableOf().equals(storageType.mutableOf());
 }
 
 private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, CallExp ce, ref IRState irs)
@@ -6758,12 +6972,8 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
     const functionName = fd.ident.toChars();
     const isRead = inPackedModule && strcmp(functionName, "packed_read") == 0;
     const isWrite = inPackedModule && strcmp(functionName, "packed_write") == 0;
-    const isCompute = inPackedMemoryModule &&
-        (strcmp(functionName, "packed_compute_at") == 0 ||
-         strcmp(functionName, "compute_at") == 0);
-    const isStore = inPackedMemoryModule &&
-        (strcmp(functionName, "packed_store_at") == 0 ||
-         strcmp(functionName, "try_store_at") == 0);
+    const isCompute = inPackedMemoryModule && strcmp(functionName, "compute_at") == 0;
+    const isStore = inPackedMemoryModule && strcmp(functionName, "try_store_at") == 0;
     const isPublicSurface = inPackedMemoryModule &&
         (strcmp(functionName, "compute_at") == 0 ||
          strcmp(functionName, "try_store_at") == 0);
@@ -6776,6 +6986,9 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
             irs.eSink.error(ce.loc, "malformed `icky.packed_memory` operation");
             return PackedMemoryOperation.init;
         }
+
+        if (!packedSemanticSignatureMatches(fd, ce, isCompute))
+            return PackedMemoryOperation.init;
 
         auto args = ce.arguments;
         PackedMemoryOperation operation;
@@ -6796,19 +7009,22 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
             operation.leftStorage = packedElementType((*args)[0]);
             operation.rightStorage = packedElementType((*args)[2]);
             operation.arithmeticRepresentation = ce.type.toBasetype();
-            operation.baseAddress = (*args)[0];
-            operation.byteLength = (*args)[0];
+            operation.baseAddress = packedSliceProperty((*args)[0], Id.ptr);
+            operation.byteLength = packedSliceProperty((*args)[0], Id.length);
             operation.elementIndex = (*args)[1];
-            operation.leftBase = (*args)[0];
-            operation.leftLength = (*args)[0];
+            operation.leftBase = operation.baseAddress;
+            operation.leftLength = operation.byteLength;
             operation.leftIndex = (*args)[1];
-            operation.rightBase = (*args)[2];
-            operation.rightLength = (*args)[2];
+            operation.rightBase = packedSliceProperty((*args)[2], Id.ptr);
+            operation.rightLength = packedSliceProperty((*args)[2], Id.length);
             operation.rightIndex = (*args)[3];
             operation.leftStrideBytes = operation.leftStorage ?
                 operation.leftStorage.size(ce.loc) : 0;
             operation.rightStrideBytes = operation.rightStorage ?
                 operation.rightStorage.size(ce.loc) : 0;
+            operation.byteStride = packedStrideExpression(ce.loc, operation.leftStrideBytes);
+            operation.leftStride = operation.byteStride;
+            operation.rightStride = packedStrideExpression(ce.loc, operation.rightStrideBytes);
             operation.arithmeticOperation = packedArithmetic(fd);
             operation.stageMask = PackedMemoryStage.load_packed |
                 PackedMemoryStage.decode | PackedMemoryStage.arithmetic;
@@ -6826,19 +7042,20 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
         {
             operation.destinationStorage = packedElementType((*args)[0]);
             operation.arithmeticRepresentation = (*args)[2].type.toBasetype();
-            operation.baseAddress = (*args)[0];
-            operation.byteLength = (*args)[0];
+            operation.baseAddress = packedSliceProperty((*args)[0], Id.ptr);
+            operation.byteLength = packedSliceProperty((*args)[0], Id.length);
             operation.elementIndex = (*args)[1];
-            operation.destinationBase = (*args)[0];
-            operation.destinationLength = (*args)[0];
+            operation.destinationBase = operation.baseAddress;
+            operation.destinationLength = operation.byteLength;
             operation.destinationIndex = (*args)[1];
             operation.storedValue = (*args)[2];
             operation.destinationStrideBytes = operation.destinationStorage ?
                 operation.destinationStorage.size(ce.loc) : 0;
+            operation.byteStride = packedStrideExpression(ce.loc, operation.destinationStrideBytes);
+            operation.destinationStride = operation.byteStride;
             operation.stageMask = PackedMemoryStage.encode | PackedMemoryStage.store_packed;
             operation.effect = PackedMemoryEffect.write;
-            operation.domain = operation.destinationStorage &&
-                strcmp(operation.destinationStorage.toChars(), "E5M3") == 0
+            operation.domain = isPackedImpreciseType(operation.destinationStorage, "E5M3")
                 ? PackedMemoryDomain.partial_reject_preserve_destination
                 : PackedMemoryDomain.total_quantization;
             operation.storageBytes = operation.destinationStrideBytes;
@@ -6848,10 +7065,10 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
             operation.destinationAlignment = 1;
             operation.aliasSet = 0;
         }
-        // The source body is a deliberately bounded scalar fallback.  The
-        // request itself remains intact until this call boundary, and the
-        // per-element packed load/store followers below handle its memory ops.
-        operation.followerExecuted = true;
+        // The request reaches the compiler stage before ordinary call
+        // lowering. The scalar follower is selected only after validating
+        // every representation, operation, effect, and storage obligation.
+        operation.followerExecuted = false;
         return operation;
     }
 
@@ -6876,6 +7093,13 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
         return PackedMemoryOperation.init;
     }
 
+    auto arithmeticTemplate = packedTemplateType(fd, 1, 4);
+    if (!isPackedStorageType(storageType) || !isPackedFloat16Type(arithmeticType) ||
+        !arithmeticTemplate || !isPackedFloat16Type(arithmeticTemplate) ||
+        !arithmeticTemplate.mutableOf().equals(arithmeticType.mutableOf()) ||
+        !packedByteAccessSignatureMatches(fd, ce, isRead, storageType))
+        return PackedMemoryOperation.init;
+
     const alignmentValue = alignmentExp.toInteger();
     const aliasValue = aliasExp.toInteger();
     if (alignmentValue <= 0 || (alignmentValue & (alignmentValue - 1)) != 0 ||
@@ -6897,7 +7121,7 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
     operation.domain = PackedMemoryDomain.total_quantization;
     operation.boundedTemporary = true;
     operation.disjointProven = false;
-    operation.followerExecuted = true;
+    operation.followerExecuted = false;
     operation.sourceStorage = storageType;
     operation.arithmeticRepresentation = arithmeticType;
     operation.destinationStorage = storageType;
@@ -7166,10 +7390,10 @@ elem* toElemCall(CallExp ce, ref IRState irs, elem* ehidden = null)
     }
     elem* ethis2 = null;
 
-    // Packed memory intrinsics carry a typed operation through this boundary.
-    // The conservative follower emits a single scalar load/store. This is the
-    // only place a target-specific follower needs to be added later; semantic
-    // details need not be inferred from the resulting elem tree.
+    PackedMemoryOperation packedScalarFallback;
+    bool followPackedScalarBody;
+
+    // Packed memory calls reach this stage before ordinary call lowering.
     if (fd && isPackedMemoryIntrinsic(fd))
     {
         auto operation = makePackedMemoryOperation(fd, ce, irs);
@@ -7177,8 +7401,10 @@ elem* toElemCall(CallExp ce, ref IRState irs, elem* ehidden = null)
             (operation.kind == PackedMemoryOperationKind.scalar_load ||
              operation.kind == PackedMemoryOperationKind.scalar_store))
         {
-            tracePackedMemory(operation);
+            tracePackedMemory(operation, "request");
             elem* lowered = lowerPackedMemory(operation, irs);
+            operation.followerExecuted = true;
+            tracePackedMemory(operation, "follower");
             elem_setLoc(lowered, ce.loc);
             if (eeq)
                 lowered = el_combine(eeq, lowered);
@@ -7186,12 +7412,14 @@ elem* toElemCall(CallExp ce, ref IRState irs, elem* ehidden = null)
         }
         if (operation.valid)
         {
-            // Keep the complete semantic request visible to the compiler
-            // receipt, but preserve the ordinary callable scalar body.  Its
-            // internal packed load/store calls still reach the concrete
-            // conservative followers above.  This is also what keeps taking
-            // a function address ordinary D behavior.
-            tracePackedMemory(operation);
+            tracePackedMemory(operation, "request");
+            if (!packedScalarFallbackSupports(operation))
+            {
+                irs.eSink.error(ce.loc, "unsupported packed scalar follower request");
+                return el_long(TYint, 0);
+            }
+            packedScalarFallback = operation;
+            followPackedScalarBody = true;
         }
     }
 
@@ -7205,6 +7433,12 @@ elem* toElemCall(CallExp ce, ref IRState irs, elem* ehidden = null)
         ethis2 = toElem(ve, irs);
     }
     elem* ecall = callfunc(ce.loc, irs, ce.directcall, ce.type, ec, ectype, fd, t1, ehidden, ce.arguments, null, ethis2);
+
+    if (followPackedScalarBody)
+    {
+        packedScalarFallback.followerExecuted = true;
+        tracePackedMemory(packedScalarFallback, "follower");
+    }
 
     if (dctor && ecall.Eoper == OPind)
     {

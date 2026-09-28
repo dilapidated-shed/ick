@@ -21,8 +21,9 @@ bool stored = try_store_at(destination, index, result);
 representations, and supports `+`, `-`, `*`, and `/`. It checks both indices,
 loads each packed coordinate once, decodes both values, converts them to
 `Float16`, performs one binary32 operation under the existing Float16 contract,
-and requantizes the result at that operation boundary. The public result is one
-`Float16`, never a slice.
+and requantizes the result at that operation boundary. An invalid index triggers
+an explicit non-returning failure before either coordinate is read. The public
+result is one `Float16`, never a slice.
 
 `try_store_at` checks the destination index before reading or writing the
 coordinate. E3M2 keeps its existing total quantizer, including saturation,
@@ -38,7 +39,10 @@ E5M3 arithmetic remains unavailable.
 
 ## Compiler seam
 
-The owned DMD recognizes only the exact module-qualified packed declarations.
+The owned DMD recognizes the exact public compute_at and try_store_at
+templates in module icky.packed_memory, including supported template arguments
+and checked signatures. A same-named function in another module uses normal D
+lowering.
 The request in `dmd/packedmemory.d` retains:
 
 - source representation for each operand;
@@ -51,14 +55,18 @@ The request in `dmd/packedmemory.d` retains:
 - the absence of a proven disjoint-alias relation; and
 - the obligation that temporary widening stays bounded independently of vector length.
 
-The conservative scalar follower uses ordinary DMD address calculation and
-scalar loads/stores plus the existing representation codec operations. The
-semantic request is retained before the ordinary call body is used as the
-fallback, and its internal packed loads/stores reach the compiler-owned seam.
-The recognized declarations are protected with `pragma(inline, false)` so the
-`-O -inline` path cannot erase that boundary before qualification. A function
-address still has ordinary callable D behavior, and a same-named function in a
-different module is not treated as packed memory.
+The compiler records and validates the full operation before ordinary call
+lowering, then selects its bounded scalar body as the conservative follower.
+That body checks indices before access, loads one coordinate from each source,
+uses the existing codecs and Float16 operators, and returns or stores one
+scalar. Its internal packed byte loads and stores reach the concrete DMD
+memory followers. No step constructs a widened input array.
+
+The public declarations and internal scalar helpers use
+`pragma(inline, false)` so `-O -inline` cannot erase the operation boundary before
+the request reaches DMD. Compiler receipts distinguish the semantic request
+from follower execution; the optimized qualification requires both. Taking a
+function address still emits and calls the same bounded scalar body.
 
 Bounded scalar spills are allowed. Register allocation is a backend decision;
 this contract does not require values to remain in registers. Whole-array

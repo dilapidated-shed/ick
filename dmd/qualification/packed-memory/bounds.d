@@ -3,6 +3,8 @@ module packed_memory_bounds;
 import icky.imprecise;
 import icky.packed_memory;
 
+extern(C) uint oracle_encode(uint format, uint bits) nothrow @nogc;
+
 nothrow @nogc:
 
 extern(C) int main()
@@ -24,5 +26,7 @@ extern(C) int main()
     const offsetBefore = offset;
     if (try_store_at(offset, 2, Float16.from_float(1.0f))) return 5;
     if (offset != offsetBefore) return 6;
+    if (!try_store_at(offset, 1, Float16.from_float(2.0f))) return 7;
+    if (destination[2].code() != oracle_encode(4, 0x40000000u)) return 8;
     return 0;
 }

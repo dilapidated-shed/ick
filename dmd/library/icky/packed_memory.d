@@ -12,6 +12,8 @@ import icky.packed : packed_read, packed_write;
 
 nothrow @nogc:
 
+extern(C) void abort() nothrow @nogc;
+
 private enum supported_storage(T) =
     is(T == E5M3) || is(T == E3M2) ||
     is(T == const(E5M3)) || is(T == const(E3M2));
@@ -23,9 +25,10 @@ private enum supported_storage(T) =
  */
 private Float16 invalid_compute_index()
 {
-    assert(false);
-    // The explicit loop keeps the release/bounds-disabled path from falling
-    // through to a packed read without requiring druntime or allocation.
+    // Keep a hard failure in release and bounds-disabled BetterC builds,
+    // without relying on D assertions.
+    abort();
+    // Retain the non-returning contract if a non-conforming abort returns.
     for (;;) {}
 }
 

@@ -9,6 +9,8 @@ nothrow @nogc:
 extern(C) uint oracle_decode(uint format, uint code);
 extern(C) uint oracle_encode(uint format, uint bits);
 extern(C) uint oracle_operation(uint format, uint operation, uint left, uint right);
+extern(C) uint oracle_float16_chain(uint firstOperation, uint secondOperation,
+                                    uint left, uint middle, uint right);
 extern(C) uint oracle_packed_operation(uint left_format, uint right_format,
                                       uint operation, uint left, uint right);
 extern(C) int oracle_circle(uint operation, int first, int second);
@@ -145,6 +147,21 @@ void check_storage()
     }
 }
 
+void check_float16_rounding_chain()
+{
+    auto left = Float16.from_float(1.0f);
+    auto middle = Float16.from_float(0.00048828125f);
+    auto right = Float16.from_float(1.5f);
+    auto roundedIntermediate = left + middle;
+    auto got = roundedIntermediate * right;
+    auto expected = oracle_float16_chain(0, 2, left.code(), middle.code(), right.code());
+    auto withoutIntermediateRounding = Float16.from_float(
+        (left.to_float() + middle.to_float()) * right.to_float());
+    assert(roundedIntermediate.code() == left.code());
+    assert(got.code() == expected);
+    assert(got.code() != withoutIntermediateRounding.code());
+}
+
 void check_packed_operation(string operation, Left, Right)(
     Left[] left, Right[] right, uint leftFormat, uint rightFormat)
 {
@@ -180,6 +197,12 @@ void check_packed_operation_pairs(Left, Right)(uint leftFormat, uint rightFormat
 
 void check_packed_memory_surface()
 {
+    static assert(E5M3.sizeof == 1 && E3M2.sizeof == 1 && Float16.sizeof == 2);
+    E5M3[2] adjacent_e5 = [E5M3.from_code(7), E5M3.from_code(9)];
+    E3M2[2] adjacent_e3 = [E3M2.from_code(7), E3M2.from_code(9)];
+    assert((&adjacent_e5[1] - &adjacent_e5[0]) == 1);
+    assert((&adjacent_e3[1] - &adjacent_e3[0]) == 1);
+
     E5M3[256] e5;
     E3M2[256] e3;
     foreach (uint code; 0 .. 256)
@@ -201,6 +224,24 @@ void check_packed_memory_surface()
     check_packed_operation_pairs!(E5M3, E3M2)(4, 3);
     check_packed_operation_pairs!(E3M2, E5M3)(3, 4);
     check_packed_operation_pairs!(E3M2, E3M2)(3, 3);
+
+    E5M3[1] one_e5 = [E5M3.from_code(120)];
+    E3M2[1] one_e3 = [E3M2.from_code(12)];
+    auto one_result = compute_at!(Float16, "*")(
+        one_e5[], 0, one_e3[], 0);
+    assert(one_result.code() ==
+        oracle_packed_operation(4, 3, 2, one_e5[0].code(), one_e3[0].code()));
+
+    auto offset_left = e5[19 .. 22];
+    auto offset_right = e3[33 .. 36];
+    auto offset_result = compute_at!(Float16, "-")(
+        offset_left, 2, offset_right, 2);
+    assert(offset_result.code() == oracle_packed_operation(
+        4, 3, 1, e5[21].code(), e3[35].code()));
+
+    auto exact_alias = compute_at!(Float16, "+")(one_e5[], 0, one_e5[], 0);
+    assert(exact_alias.code() == oracle_packed_operation(
+        4, 4, 0, one_e5[0].code(), one_e5[0].code()));
 
     // One coordinate, odd length, nonzero offset, final valid index and the
     // first and very large invalid indices all use the checked store surface.
@@ -251,6 +292,10 @@ void check_packed_memory_surface()
     auto multiply = &compute_at!(Float16, "*", E5M3, E5M3);
     assert(multiply(first, 0, second, 0).code() ==
            oracle_packed_operation(4, 4, 2, overlap[0].code(), overlap[1].code()));
+    auto store = &try_store_at!(E5M3);
+    E5M3[1] address_destination = [E5M3.from_code(81)];
+    assert(store(address_destination[], 0, Float16.from_float(1.0f)));
+    assert(address_destination[0].code() == oracle_encode(4, bits_of(1.0f)));
 }
 
 void check_packed_memory()
@@ -378,6 +423,7 @@ void check_grid(uint positions)()
 extern(C) int main()
 {
     check_packed_memory_surface();
+    check_float16_rounding_chain();
     check_packed_memory();
     check_format!(Float16, 0, 65536)();
     check_format!(E4M3, 1, 256)();
