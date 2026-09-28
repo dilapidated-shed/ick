@@ -41,17 +41,22 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential ldc qemu-user binutils-arm-linux-gnueabi binutils-aarch64-linux-gnu clang lld
+          sudo apt-get install -y build-essential qemu-user-static binutils-arm-linux-gnueabi binutils-aarch64-linux-gnu clang lld
+          mkdir -p build/arm-host build/bootstrap
+          curl --fail --location --retry 3 https://github.com/dlang/dmd/releases/download/v2.113.0/dmd.2.113.0.linux.tar.xz -o build/arm-host/bootstrap.tar.xz
+          echo 'b342ab8bd40cc0c46407692b31d7cd69661ff01da686234f426949e881727294  build/arm-host/bootstrap.tar.xz' | sha256sum -c -
+          tar -xJf build/arm-host/bootstrap.tar.xz -C build/bootstrap
+          echo "$GITHUB_WORKSPACE/build/bootstrap/dmd2/linux/bin64" >> "$GITHUB_PATH"
+          cp /usr/bin/qemu-arm-static /usr/bin/qemu-aarch64-static build/arm-host/
       - name: Build owned Icky DMD
         shell: bash
         run: |
           set -euxo pipefail
           cd dmd/compiler/src
-          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd -run ./build.d dmd HOST_DMD="$(command -v dmd)"
           dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
           test -x "$dmd_bin"
           "$dmd_bin" --version
-          mkdir -p ../../../build/arm-host
           cp "$dmd_bin" ../../../build/arm-host/icky-dmd
           ldd "$dmd_bin" > ../../../build/arm-host/linkage.txt
       - name: Upload compiler under test
