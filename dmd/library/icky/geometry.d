@@ -65,10 +65,10 @@ struct Quaternion(Component = Float16)
     static if (is(Component == float)) private float[4] values = 0.0f;
     else private Component[4] values;
 
-    static Quaternion from_components(float real, float i, float j, float k)
+    static Quaternion from_components(float real_component, float i, float j, float k)
     {
         Quaternion result;
-        result.values = [store_component!Component(real), store_component!Component(i),
+        result.values = [store_component!Component(real_component), store_component!Component(i),
                          store_component!Component(j), store_component!Component(k)];
         return result;
     }
@@ -147,11 +147,11 @@ struct UnitQuaternion
     nothrow @nogc:
     private float[4] values = [1.0f, 0.0f, 0.0f, 0.0f];
 
-    static bool try_from_components(float real, float i, float j, float k,
+    static bool try_from_components(float real_component, float i, float j, float k,
                                     ref UnitQuaternion output)
     {
         float[4] normalized;
-        if (!normalize_components!4([real, i, j, k], normalized)) return false;
+        if (!normalize_components!4([real_component, i, j, k], normalized)) return false;
         UnitQuaternion candidate;
         candidate.values = normalized;
         output = candidate;
