@@ -145,13 +145,16 @@ void check_storage()
 void check_packed_memory()
 {
     static assert(PackedValue!(E5M3, Float16).sizeof == E5M3.sizeof);
-    static assert(PackedView!(E5M3, Float16, 1, 7).known_alignment == 1);
-    static assert(PackedView!(E5M3, Float16, 1, 7).alias_set == 7);
+    static assert(PackedView!(E5M3, Float16, 8, 7).known_alignment == 8);
+    static assert(PackedView!(E5M3, Float16, 8, 7).alias_set == 7);
 
-    ubyte[512] bytes;
+    align(8) struct ByteBuffer { ubyte[512] data; }
+    ByteBuffer buffer;
     foreach (size_t code; 0 .. 256)
-        bytes[code * 2] = cast(ubyte)code;
-    auto view = PackedView!(E5M3, Float16, 1, 7)(bytes.ptr, bytes.length, 2);
+        buffer.data[code * 2] = cast(ubyte)code;
+    assert((cast(size_t)buffer.data.ptr & 7) == 0);
+    auto view = PackedView!(E5M3, Float16, 8, 7)(
+        buffer.data.ptr, buffer.data.length, 2);
     foreach (size_t code; 0 .. 256)
     {
         PackedValue!(E5M3, Float16) stored;
@@ -171,7 +174,7 @@ void check_packed_memory()
         else assert(encoded.code() == 91);
 
         assert(view.try_store(code, widened) == accepted);
-        assert(bytes[code * 2] == (accepted ? expectedCode : code));
+        assert(buffer.data[code * 2] == (accepted ? expectedCode : code));
     }
 
     // Failed bounds checks and failed E5M3-domain encodes preserve storage.
@@ -185,16 +188,16 @@ void check_packed_memory()
     assert(!view.try_store(0, Float16.from_float(1.0e-7f)));
     assert(!view.try_store(0, Float16.from_float(value_of(0x7f800000u))));
     assert(!view.try_store(0, Float16.from_float(value_of(0x7fc00000u))));
-    assert(bytes[0] == 0);
+    assert(buffer.data[0] == 0);
     // Ordinary unit-stride access uses the same scalar operation at each index.
-    auto unit = PackedView!(E5M3, Float16, 1, 0)(bytes.ptr, bytes.length, 1);
+    auto unit = PackedView!(E5M3, Float16, 8, 0)(buffer.data.ptr, buffer.data.length, 1);
     auto arithmetic = Float16.from_float(2.0f) * Float16.from_float(1.5f);
     assert(unit.try_store(5, arithmetic));
-    assert(bytes[5] == oracle_encode(4, bits_of(arithmetic.to_float())));
+    assert(buffer.data[5] == oracle_encode(4, bits_of(arithmetic.to_float())));
     PackedValue!(E5M3, Float16) product;
     assert(unit.try_load(5, product));
-    assert(product.stored.code() == bytes[5]);
-    assert(bits_of(product.decode().to_float()) == oracle_decode(4, bytes[5]));
+    assert(product.stored.code() == buffer.data[5]);
+    assert(bits_of(product.decode().to_float()) == oracle_decode(4, buffer.data[5]));
     assert(oracle_decode(4, 0) != 0x00000000u); // code zero is an unsigned midpoint, not IEEE zero
     assert(!unit.try_load(size_t.max, product));
 
@@ -202,7 +205,7 @@ void check_packed_memory()
     assert(loadFacts.action == PackedAction.load &&
            loadFacts.effect == PackedEffect.read &&
            loadFacts.ordering == PackedOrdering.ordinary &&
-           loadFacts.byteStride == 2 && loadFacts.knownAlignment == 1 &&
+           loadFacts.byteStride == 2 && loadFacts.knownAlignment == 8 &&
            loadFacts.aliasSet == 7 && loadFacts.elementIndex == 3);
     auto storeFacts = view.store_operation(3);
     assert(storeFacts.action == PackedAction.store &&

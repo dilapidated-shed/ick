@@ -57,8 +57,10 @@ and NaNs are rejected. Its code zero represents a positive bin midpoint,
 `S` names the stored representation and `A` names the arithmetic representation.
 For E5M3, `PackedValue!(E5M3, Float16).sizeof == 1`; decoding constructs one
 Float16 value at the point the caller requests arithmetic. Each successful
-load reads one stored element. Stores encode one arithmetic value and leave
-memory unchanged when the E5M3 input falls outside its defined domain.
+load reads one stored element. E5M3 values beyond Float16's finite range widen
+according to the existing Float16 overflow conversion. Stores encode one
+arithmetic value and leave memory unchanged when the E5M3 input falls outside
+its defined domain.
 
 ```d
 auto packed = PackedView!(E5M3, Float16, 1, alias_group)(bytes, byteLength, 1);
