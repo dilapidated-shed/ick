@@ -2,18 +2,21 @@ name: DMD Android ARM bring-up
 
 on:
   push:
-    branches: [dmd-android-arm-backends]
+    branches: [dmd, dmd-android-arm-backends]
+    paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
+  pull_request:
+    paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: dmd-android-arm-${{ github.ref }}
+  group: dmd-android-arm-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  owned-compiler:
+  native-leaves:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -22,32 +25,18 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Preserve source under test
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p build/arm-receipts
-          git rev-parse HEAD > build/arm-receipts/source-sha.txt
-          git archive --format=tar.gz HEAD > build/arm-receipts/owned-source.tar.gz
-      - name: Upload exact source
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: dmd-arm-source-${{ github.sha }}
-          path: build/arm-receipts/
-          if-no-files-found: error
-          retention-days: 7
-      - name: Install host build and ARM execution dependencies
+      - name: Install build-host dependencies
         shell: bash
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential qemu-user-static binutils-arm-linux-gnueabi binutils-aarch64-linux-gnu clang lld
-          mkdir -p build/arm-host build/bootstrap
-          curl --fail --location --retry 3 https://github.com/dlang/dmd/releases/download/v2.113.0/dmd.2.113.0.linux.tar.xz -o build/arm-host/bootstrap.tar.xz
-          echo 'b342ab8bd40cc0c46407692b31d7cd69661ff01da686234f426949e881727294  build/arm-host/bootstrap.tar.xz' | sha256sum -c -
-          tar -xJf build/arm-host/bootstrap.tar.xz -C build/bootstrap
+          sudo apt-get install -y build-essential python3 qemu-user-static clang lld
+          mkdir -p build/bootstrap build/android-arm
+          git rev-parse HEAD > build/android-arm/source-sha.txt
+          curl --fail --location --retry 3 https://github.com/dlang/dmd/releases/download/v2.113.0/dmd.2.113.0.linux.tar.xz -o build/bootstrap.tar.xz
+          echo 'b342ab8bd40cc0c46407692b31d7cd69661ff01da686234f426949e881727294  build/bootstrap.tar.xz' | sha256sum -c -
+          tar -xJf build/bootstrap.tar.xz -C build/bootstrap
           echo "$GITHUB_WORKSPACE/build/bootstrap/dmd2/linux/bin64" >> "$GITHUB_PATH"
-          cp /usr/bin/qemu-arm-static /usr/bin/qemu-aarch64-static build/arm-host/
       - name: Build owned Icky DMD
         shell: bash
         run: |
@@ -57,12 +46,49 @@ jobs:
           dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
           test -x "$dmd_bin"
           "$dmd_bin" --version
-          cp "$dmd_bin" ../../../build/arm-host/icky-dmd
-          ldd "$dmd_bin" > ../../../build/arm-host/linkage.txt
-      - name: Upload compiler under test
+          cp "$dmd_bin" ../../../build/android-arm/icky-dmd
+      - name: Preserve desktop Unicode execution
+        shell: bash
+        run: |
+          set -euxo pipefail
+          build/android-arm/icky-dmd -betterC \
+            -Ibuild/bootstrap/dmd2/src/druntime/import -Ibuild/bootstrap/dmd2/src/phobos \
+            dmd/qualification/icky_unicode.d -of=build/android-arm/host-unicode
+          build/android-arm/host-unicode
+      - name: Execute Thumb-2 and AArch64 against independent oracles
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 dmd/qualification/android-arm/verify.py \
+            --compiler build/android-arm/icky-dmd \
+            --imports build/bootstrap/dmd2/src/druntime/import \
+            --output build/android-arm/emulated
+      - name: Prepare separate Android PIE probes without claiming device execution
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for architecture in thumb2 aarch64; do
+            python3 dmd/qualification/android-arm/device.py \
+              --serial PREPARE_ONLY --architecture "$architecture" --prepare-only \
+              --compiler build/android-arm/icky-dmd \
+              --imports build/bootstrap/dmd2/src/druntime/import \
+              --output "build/android-arm/device-$architecture"
+          done
+      - name: Preserve exact-head compiler and receipts
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: dmd-arm-host-${{ github.sha }}
-          path: build/arm-host/
+          name: dmd-android-arm-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/android-arm/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
+      - name: State execution boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'TEXT'
+          PASS: owned DMD compiled and executed both native ARM leaf paths in Linux-user emulation, without and with optimization requested.
+
+          PASS: independent binary32, branch, buffer, calling-convention and rejection checks; desktop Unicode regression.
+
+          PREPARED ONLY: Android PIE probes. No physical Android, Bionic/runtime, JNI, APK or DMD-on-phone execution is claimed.
+          TEXT
