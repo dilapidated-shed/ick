@@ -1,0 +1,96 @@
+name: DMD compact representations
+
+on:
+  pull_request:
+    paths:
+      - 'dmd/compiler/**'
+      - 'dmd/library/**'
+      - 'dmd/qualification/representations/**'
+      - 'ick/include/ick/**'
+      - '.github/workflows/dmd-representations.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dmd-representations-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  representations:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install host compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc binutils
+
+      - name: Build the independent C oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .representation-build
+          cc -std=c11 -O0 -ffp-contract=off -fno-fast-math -Iick/include \
+            -c dmd/qualification/representations/oracle.c -o .representation-build/oracle.o
+
+      - name: Check the D source with the host compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          ldmd2 -betterC -Idmd/library \
+            dmd/library/icky/imprecise.d dmd/library/icky/circle.d \
+            dmd/qualification/representations/acceptance.d \
+            .representation-build/oracle.o -of=.representation-build/host-acceptance
+          .representation-build/host-acceptance
+
+      - name: Build Icky DMD from the PR source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          dmd_bin=$(realpath "$dmd_bin")
+          "$dmd_bin" --version
+          printf 'DMD_BIN=%s\n' "$dmd_bin" >> "$GITHUB_ENV"
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          test -f "$runtime_import/object.d"
+          printf 'RUNTIME_IMPORT=%s\n' "$runtime_import" >> "$GITHUB_ENV"
+
+      - name: Execute rebuilt DMD output with and without optimization
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in debug optimized; do
+            flags=()
+            if [ "$mode" = optimized ]; then flags=(-O -inline); fi
+            "$DMD_BIN" -betterC -I"$RUNTIME_IMPORT" -Idmd/library "${flags[@]}" \
+              dmd/library/icky/imprecise.d dmd/library/icky/circle.d \
+              dmd/qualification/representations/acceptance.d \
+              .representation-build/oracle.o -of=".representation-build/dmd-$mode"
+            ".representation-build/dmd-$mode"
+          done
+
+      - name: Record exact qualification scope
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: rebuilt Icky DMD compiles and executes the compact D representations.
+          PASS: debug and optimized output agree with the existing C oracle.
+          PASS: scalar payloads, midpoint neighbours, domain rejection and requantization.
+          PASS: Circle96 oracle and finite geometry laws at 96/192/240/360/720 positions.
+          PASS: invalid arithmetic and mixed categories fail source type checking.
+
+          This proves native D value-type support on the host. It does not prove
+          new primitive compiler types, representation-aware backend IR, geometric
+          codecs for quaternions/SO(n)/S²/CPⁿ, or Android execution.
+          EOF
