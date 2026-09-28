@@ -136,7 +136,7 @@ struct PackedView(Storage, Arithmetic, size_t Alignment = 1, uint AliasSet = 0)
         return true;
     }
 
-    bool try_store(size_t elementIndex, Arithmetic value) const nothrow @nogc
+    bool try_store(size_t elementIndex, Arithmetic value) nothrow @nogc
     {
         size_t offset;
         if (!byte_offset(elementIndex, offset))
@@ -158,7 +158,7 @@ struct PackedView(Storage, Arithmetic, size_t Alignment = 1, uint AliasSet = 0)
             Alignment, AliasSet, PackedEffect.read, PackedOrdering.ordinary);
     }
 
-    PackedOperation!(Storage, Arithmetic) store_operation(size_t elementIndex) const nothrow @nogc
+    PackedOperation!(Storage, Arithmetic) store_operation(size_t elementIndex) nothrow @nogc
     {
         return PackedOperation!(Storage, Arithmetic)(
             PackedAction.store, base, byteLength, elementIndex, byteStride,
