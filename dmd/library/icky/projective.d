@@ -127,18 +127,18 @@ struct CPn(size_t dimension)
         float scale = fabsf(divisor.real_part);
         if (fabsf(divisor.imaginary_part) > scale) scale = fabsf(divisor.imaginary_part);
         if (scale == 0.0f) return false;
-        float real = divisor.real_part / scale;
-        float imaginary = divisor.imaginary_part / scale;
-        float denominator = real * real + imaginary * imaginary;
+        float divisor_real = divisor.real_part / scale;
+        float divisor_imaginary = divisor.imaginary_part / scale;
+        float denominator = divisor_real * divisor_real + divisor_imaginary * divisor_imaginary;
         Complex32[dimension] candidate;
         size_t cursor = 0;
         foreach (index; 0 .. coordinate_count)
         {
             if (index == pivot) continue;
             auto coordinate = representative[index];
-            float result_real = ((coordinate.real_part * real + coordinate.imaginary_part * imaginary) /
+            float result_real = ((coordinate.real_part * divisor_real + coordinate.imaginary_part * divisor_imaginary) /
                                  denominator) / scale;
-            float result_imaginary = ((coordinate.imaginary_part * real - coordinate.real_part * imaginary) /
+            float result_imaginary = ((coordinate.imaginary_part * divisor_real - coordinate.real_part * divisor_imaginary) /
                                       denominator) / scale;
             if (!finite_float(result_real) || !finite_float(result_imaginary)) return false;
             candidate[cursor++] = Complex32(result_real, result_imaginary);
