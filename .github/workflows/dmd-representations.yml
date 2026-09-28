@@ -185,6 +185,7 @@ jobs:
             .representation-build/packed-memory-receipt-*.o
             .representation-build/packed-memory-receipt-*.disassembly
           retention-days: 90
+          include-hidden-files: true
           if-no-files-found: error
 
       - name: Record exact qualification scope
