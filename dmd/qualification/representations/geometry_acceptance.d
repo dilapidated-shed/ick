@@ -58,6 +58,22 @@ private void assert_four_equal(float[4] left, float[4] right)
 {
     foreach (index; 0 .. 4) assert(left[index] == right[index]);
 }
+private void assert_three_equal(float[3] left, float[3] right)
+{
+    foreach (index; 0 .. 3) assert(left[index] == right[index]);
+}
+private void assert_complex_equal(size_t count)(Complex32[count] left, Complex32[count] right)
+{
+    foreach (index; 0 .. count)
+    {
+        assert(left[index].real_part == right[index].real_part);
+        assert(left[index].imaginary_part == right[index].imaginary_part);
+    }
+}
+private void assert_bytes_equal(size_t count)(ubyte[count] left, ubyte[count] right)
+{
+    foreach (index; 0 .. count) assert(left[index] == right[index]);
+}
 private void check_unit(UnitQuaternion value)
 {
     float squared = 0.0f;
@@ -79,12 +95,12 @@ void algebra(Component)()
     auto i = Q.from_components(0.0f, 1.0f, 0.0f, 0.0f);
     auto j = Q.from_components(0.0f, 0.0f, 1.0f, 0.0f);
     auto k = Q.from_components(0.0f, 0.0f, 0.0f, 1.0f);
-    assert((i*j).components() == k.components());
-    assert((j*i).components() == (-k).components());
-    assert((i*i).components() == (-one).components());
-    assert(((i*j)*k).components() == (-one).components());
-    assert((i + j - j).components() == i.components());
-    assert((one*k).components() == k.components());
+    assert_four_equal((i*j).components(), k.components());
+    assert_four_equal((j*i).components(), (-k).components());
+    assert_four_equal((i*i).components(), (-one).components());
+    assert_four_equal(((i*j)*k).components(), (-one).components());
+    assert_four_equal((i + j - j).components(), i.components());
+    assert_four_equal((one*k).components(), k.components());
 }
 
 void normalization_and_frames()
@@ -113,7 +129,7 @@ void normalization_and_frames()
     foreach (index; 1 .. 4) near(product[index], 0.0f);
     auto saved_inverse = inverse;
     assert(!HH32.init.try_inverse(inverse));
-    assert(inverse.components() == saved_inverse.components());
+    assert_four_equal(inverse.components(), saved_inverse.components());
 
     Direction!Phone x;
     assert(Direction!Phone.try_from_components(1.0f, 0.0f, 0.0f, x));
@@ -136,7 +152,7 @@ void normalization_and_frames()
     assert(!S2.try_from_pure_quaternion(HH32.from_components(1.0f, 1.0f, 0.0f, 0.0f), decoded));
     assert(!S2.try_from_components(0.0f, 0.0f, 0.0f, decoded));
     assert(!S2.try_from_components(float.nan, 0.0f, 0.0f, decoded));
-    assert(decoded.components() == saved_direction.components());
+    assert_three_equal(decoded.components(), saved_direction.components());
 
     uint state = 415u;
     foreach (sample; 0 .. 4096)
@@ -180,7 +196,7 @@ void packed_quaternions(Component)()
     auto equal_packed = Packed.from_unit(equal_parts);
     assert(equal_packed.omitted_index() == 0);
     static if (is(Component == Float16))
-        assert(equal_packed.code() == cast(ubyte[7])[0xa0,0xe6,0xa0,0xe6,0xa0,0xe6,0]);
+        assert_bytes_equal(equal_packed.code(), cast(ubyte[7])[0xa0,0xe6,0xa0,0xe6,0xa0,0xe6,0]);
     static if (is(Component == Float16)) enum uint one_code = 0x3c00;
     else static if (is(Component == E4M3)) enum uint one_code = 0x38;
     else static if (is(Component == E5M2)) enum uint one_code = 0x3c;
@@ -190,12 +206,12 @@ void packed_quaternions(Component)()
     auto reserved = identity.code();
     reserved[Packed.byte_count - 1] |= 0x80;
     assert(!Packed.try_from_code(reserved, retained_output));
-    assert(retained_output.code() == equal_packed.code());
+    assert_bytes_equal(retained_output.code(), equal_packed.code());
     ubyte[Packed.byte_count] impossible;
     foreach (uint index; 0 .. 3)
         put_bits(impossible, 2 + index * Packed.component_bits, Packed.component_bits, one_code);
     assert(!Packed.try_from_code(impossible, retained_output));
-    assert(retained_output.code() == equal_packed.code());
+    assert_bytes_equal(retained_output.code(), equal_packed.code());
     static if (is(Component == Float16) || is(Component == E4M3) || is(Component == E5M2))
     {
         ubyte[Packed.byte_count] nonfinite;
@@ -211,7 +227,7 @@ void packed_quaternions(Component)()
         auto value = unit(next_component(state), next_component(state),
                           next_component(state), next_component(state));
         auto packed = Packed.from_unit(value);
-        assert(packed.code() == Packed.from_unit(-value).code());
+        assert_bytes_equal(packed.code(), Packed.from_unit(-value).code());
         Packed from_wire;
         assert(Packed.try_from_code(packed.code(), from_wire));
         auto reconstructed = from_wire.reconstruct();
@@ -275,7 +291,7 @@ void projective_geometry()
     auto saved_chart = chart;
     assert(!second.try_chart(2, chart));
     assert(!second.try_chart(3, chart));
-    assert(chart == saved_chart);
+    assert_complex_equal(chart, saved_chart);
 
     auto saved = second.homogeneous_coordinates();
     Complex32[3] invalid;
@@ -284,7 +300,7 @@ void projective_geometry()
     assert(!CP2.try_from_homogeneous(invalid, second));
     invalid[1] = Complex32(float.nan, 0.0f);
     assert(!CP2.try_from_homogeneous(invalid, second));
-    assert(second.homogeneous_coordinates() == saved);
+    assert_complex_equal(second.homogeneous_coordinates(), saved);
 
     Complex32[3] extreme = [Complex32(float.max,float.max), Complex32(-float.max,0.0f), Complex32()];
     assert(CP2.try_from_homogeneous(extreme, second));
