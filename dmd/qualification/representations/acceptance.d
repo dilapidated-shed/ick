@@ -10,6 +10,7 @@ extern(C) uint oracle_encode(uint format, uint bits);
 extern(C) uint oracle_operation(uint format, uint operation, uint left, uint right);
 extern(C) int oracle_circle(uint operation, int first, int second);
 extern(C) int puts(const char* text);
+extern(C) int fflush(void* stream);
 
 private union FloatBits { float value; uint bits; }
 private uint bits_of(float value)
@@ -257,6 +258,11 @@ void check_grid(uint positions)()
 
 extern(C) int main()
 {
+    puts("TRACE: begin packed-memory acceptance");
+    fflush(null);
+    check_packed_memory();
+    puts("TRACE: packed-memory acceptance complete");
+    fflush(null);
     check_format!(Float16, 0, 65536)();
     check_format!(E4M3, 1, 256)();
     check_format!(E5M2, 2, 256)();
@@ -269,7 +275,6 @@ extern(C) int main()
         check_encoding!(Float16, 0)(bits);
     check_storage();
     puts("PASS: all scalar payloads, boundary quantization and arithmetic against the C oracle");
-    check_packed_memory();
     check_grid!96();
     check_grid!192();
     check_grid!240();
