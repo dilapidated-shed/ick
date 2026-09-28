@@ -44,17 +44,26 @@ jobs:
           "$dmd_bin" --version
           printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.dmd-bin"
 
+      - name: Check out matching DMD libraries
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: dlang/dmd
+          ref: 74917954b53f7f35b13e61b4438c7253834929ed
+          path: .dmd-upstream
+          persist-credentials: false
+          sparse-checkout: |
+            src/druntime/import
+            src/phobos
+
       - name: Compile and run Icky D surface
         shell: bash
         run: |
           set -euxo pipefail
           dmd_bin=$(cat "$GITHUB_WORKSPACE/.dmd-bin")
-          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
-          phobos_module=$(dpkg -L libphobos2-ldc-shared-dev | awk '/\/std\/math(\/package)?\.(d|di)$/ { print; exit }')
+          runtime_import="$GITHUB_WORKSPACE/.dmd-upstream/src/druntime/import"
+          phobos_import="$GITHUB_WORKSPACE/.dmd-upstream/src/phobos"
           test -f "$runtime_import/object.d"
-          test -n "$phobos_module"
-          test -f "$phobos_module"
-          phobos_import="${phobos_module%%/std/math*}"
+          test -f "$phobos_import/std/math.d"
           "$dmd_bin" -betterC -I"$runtime_import" -I"$phobos_import" \
             "$GITHUB_WORKSPACE/dmd/qualification/icky_unicode.d" -of=/tmp/icky_unicode
           test -x /tmp/icky_unicode
