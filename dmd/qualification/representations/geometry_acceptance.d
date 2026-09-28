@@ -12,13 +12,23 @@ extern(C) void geometry_oracle_rotate(const float* quaternion, const float* poin
 struct Phone {}
 struct Room {}
 struct Camera {}
+alias FourFloats = float[4];
+alias ThreeFloats = float[3];
+alias ProjectiveCoordinates = Complex32[3];
+alias PackedHalf = SmallestThree!Float16;
+alias PackedHalfBytes = ubyte[7];
 
 static assert(!__traits(compiles, HH.init + UnitQuaternion.init));
 static assert(!__traits(compiles, Quaternion!E5M3.init));
 static assert(!__traits(compiles, SmallestThree!E5M3.init));
 static assert(!__traits(compiles, UnitQuaternion.init.values));
+static assert(!__traits(compiles, UnitQuaternion(FourFloats.init)));
+static assert(!__traits(compiles, S2(ThreeFloats.init)));
+static assert(!__traits(compiles, PackedHalf(PackedHalfBytes.init)));
+static assert(!__traits(compiles, CP2(ProjectiveCoordinates.init)));
 static assert(!__traits(compiles, CP2.init.representative));
 static assert(!__traits(compiles, CP2.init == CP2.init));
+static assert(!__traits(compiles, SO3.init == SO3.init));
 static assert(!__traits(compiles, CP1.init.distance(CP2.init)));
 static assert(!__traits(compiles, S2.init.distance(Direction!Phone.init)));
 static assert(!__traits(compiles,
@@ -81,6 +91,7 @@ void normalization_and_frames()
     near((value * value.inverse()).rotation_distance(identity), 0.0f);
     near(value.rotation_distance(-value), 0.0f);
     near(value.s3_distance(-value), 2.0f);
+    near(SO3.from_unit(value).distance(SO3.from_unit(-value)), 0.0f);
     check_unit(unit(float.max, float.max, float.max, float.max));
     check_unit(unit(from_bits(1), from_bits(1), 0.0f, 0.0f));
     auto sentinel = value;
@@ -250,7 +261,7 @@ void projective_geometry()
     assert(!first.same_point(second, 0.001f));
     assert(!first.same_point(first, -0.001f));
     assert(!first.same_point(first, float.nan));
-    auto line = [Complex32(1.0f,0.0f), Complex32(0.0f,1.0f), Complex32()];
+    Complex32[3] line = [Complex32(1.0f,0.0f), Complex32(0.0f,1.0f), Complex32()];
     assert(CP2.try_from_homogeneous(line, second));
     near(first.distance(second), sqrtf(0.5f));
     Complex32[2] chart;
