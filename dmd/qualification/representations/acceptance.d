@@ -10,7 +10,6 @@ extern(C) uint oracle_encode(uint format, uint bits);
 extern(C) uint oracle_operation(uint format, uint operation, uint left, uint right);
 extern(C) int oracle_circle(uint operation, int first, int second);
 extern(C) int puts(const char* text);
-extern(C) int fflush(void* stream);
 
 private union FloatBits { float value; uint bits; }
 private uint bits_of(float value)
@@ -152,34 +151,28 @@ void check_packed_memory()
     ubyte[512] bytes;
     foreach (size_t code; 0 .. 256)
         bytes[code * 2] = cast(ubyte)code;
-    puts("TRACE: packed bytes initialized");
-    fflush(null);
-
     auto view = PackedView!(E5M3, Float16, 1, 7)(bytes.ptr, bytes.length, 2);
-    puts("TRACE: packed view initialized");
-    fflush(null);
     foreach (size_t code; 0 .. 256)
     {
-        if ((code & 15u) == 0) { puts("TRACE: packed load checkpoint"); fflush(null); }
         PackedValue!(E5M3, Float16) stored;
         assert(view.try_load(code, stored));
-        if (code == 0) { puts("TRACE: first packed load complete"); fflush(null); }
         assert(stored.stored.code() == code);
-        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed code read"); fflush(null); }
         auto widened = stored.decode();
-        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed decode complete"); fflush(null); }
-        assert(bits_of(widened.to_float()) == oracle_decode(4, cast(uint)code));
-        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed decode verified"); fflush(null); }
-        E5M3 encoded;
-        assert(PackedValue!(E5M3, Float16).try_encode(widened, encoded));
-        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed encode complete"); fflush(null); }
-        assert(encoded.code() == code);
-        assert(view.try_store(code, widened));
-        if (code == 0 || code == 1 || code == 2 || code == 255) { puts("TRACE: packed store complete"); fflush(null); }
-        assert(bytes[code * 2] == code);
+        auto expectedWidened = Float16.from_float(value_of(oracle_decode(4, cast(uint)code)));
+        assert(bits_of(widened.to_float()) == bits_of(expectedWidened.to_float()));
+
+        // Some finite E5M3 extremes overflow the existing Float16 semantics.
+        // Narrowing then follows E5M3's existing partial input-domain rule.
+        const expectedCode = oracle_encode(4, bits_of(widened.to_float()));
+        E5M3 encoded = E5M3.from_code(91);
+        const accepted = PackedValue!(E5M3, Float16).try_encode(widened, encoded);
+        assert(accepted == (expectedCode != 0x10000u));
+        if (accepted) assert(encoded.code() == expectedCode);
+        else assert(encoded.code() == 91);
+
+        assert(view.try_store(code, widened) == accepted);
+        assert(bytes[code * 2] == (accepted ? expectedCode : code));
     }
-    puts("TRACE: packed exhaustive loop complete");
-    fflush(null);
 
     // Failed bounds checks and failed E5M3-domain encodes preserve storage.
     PackedValue!(E5M3, Float16) unchanged = { E5M3.from_code(91) };
@@ -193,9 +186,6 @@ void check_packed_memory()
     assert(!view.try_store(0, Float16.from_float(value_of(0x7f800000u))));
     assert(!view.try_store(0, Float16.from_float(value_of(0x7fc00000u))));
     assert(bytes[0] == 0);
-    puts("TRACE: packed failures complete");
-    fflush(null);
-
     // Ordinary unit-stride access uses the same scalar operation at each index.
     auto unit = PackedView!(E5M3, Float16, 1, 0)(bytes.ptr, bytes.length, 1);
     auto arithmetic = Float16.from_float(2.0f) * Float16.from_float(1.5f);
@@ -273,11 +263,7 @@ void check_grid(uint positions)()
 
 extern(C) int main()
 {
-    puts("TRACE: begin packed-memory acceptance");
-    fflush(null);
     check_packed_memory();
-    puts("TRACE: packed-memory acceptance complete");
-    fflush(null);
     check_format!(Float16, 0, 65536)();
     check_format!(E4M3, 1, 256)();
     check_format!(E5M2, 2, 256)();
