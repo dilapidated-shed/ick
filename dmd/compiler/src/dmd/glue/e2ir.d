@@ -6598,7 +6598,9 @@ private bool isPackedMemoryIntrinsic(FuncDeclaration fd)
                strcmp(functionName, "packed_write") == 0;
     if (strcmp(moduleName, "packed_memory") == 0)
         return strcmp(functionName, "packed_compute_at") == 0 ||
-               strcmp(functionName, "packed_store_at") == 0;
+               strcmp(functionName, "packed_store_at") == 0 ||
+               strcmp(functionName, "compute_at") == 0 ||
+               strcmp(functionName, "try_store_at") == 0;
     return false;
 }
 
@@ -6679,7 +6681,7 @@ private void tracePackedMemory(PackedMemoryOperation operation)
     version (PackedMemoryTrace)
     {
         const(char)* effect = operation.effect == PackedMemoryEffect.read ? "read" : "write";
-        printf("PACKED-IR seam=follower kind=%s stages=%s left-storage=%s right-storage=%s source-storage=%s arithmetic=%s operation=%s rounding=%s conversion=representation-defined destination-storage=%s domain=%s source-bytes=%zu destination-bytes=%zu base=%s bounds=%s index=%s stride=%s right-base=%s right-bounds=%s right-index=%s destination-base=%s destination-bounds=%s destination-index=%s left-stride=%zu right-stride=%zu destination-stride=%zu left-alignment=%zu right-alignment=%zu destination-alignment=%zu alignment=%zu alias-set=%u effect=%s ordering=ordinary-source-order bounded-temporary=%s disjoint-proven=%s follower-executed=%s\n",
+        printf("PACKED-IR seam=follower kind=%s stages=%s left-storage=%s right-storage=%s source-storage=%s arithmetic=%s operation=%s rounding=%s conversion=representation-defined destination-storage=%s domain=%s source-bytes=%zu destination-bytes=%zu base=%s bounds=%s index=%s stride=%s right-base=%s right-bounds=%s right-index=%s destination-base=%s destination-bounds=%s destination-index=%s left-stride=%zu right-stride=%zu destination-stride=%zu left-alignment=%zu right-alignment=%zu destination-alignment=%zu alignment=%zu alias-set=%u effect=%s ordering=ordinary-source-order bounded-temporary=%s disjoint-proven=%s public-surface=%s follower-executed=%s\n",
                packedKindChars(operation.kind), packedStageChars(operation.stageMask),
                packedTypeChars(operation.leftStorage), packedTypeChars(operation.rightStorage),
                packedTypeChars(operation.sourceStorage),
@@ -6706,6 +6708,7 @@ private void tracePackedMemory(PackedMemoryOperation operation)
                operation.knownAlignment, operation.aliasSet, effect,
                packedBoolChars(operation.boundedTemporary),
                packedBoolChars(operation.disjointProven),
+               packedBoolChars(operation.publicSurface),
                packedBoolChars(operation.followerExecuted));
     }
 }
@@ -6755,8 +6758,15 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
     const functionName = fd.ident.toChars();
     const isRead = inPackedModule && strcmp(functionName, "packed_read") == 0;
     const isWrite = inPackedModule && strcmp(functionName, "packed_write") == 0;
-    const isCompute = inPackedMemoryModule && strcmp(functionName, "packed_compute_at") == 0;
-    const isStore = inPackedMemoryModule && strcmp(functionName, "packed_store_at") == 0;
+    const isCompute = inPackedMemoryModule &&
+        (strcmp(functionName, "packed_compute_at") == 0 ||
+         strcmp(functionName, "compute_at") == 0);
+    const isStore = inPackedMemoryModule &&
+        (strcmp(functionName, "packed_store_at") == 0 ||
+         strcmp(functionName, "try_store_at") == 0);
+    const isPublicSurface = inPackedMemoryModule &&
+        (strcmp(functionName, "compute_at") == 0 ||
+         strcmp(functionName, "try_store_at") == 0);
 
     if (isCompute || isStore)
     {
@@ -6777,6 +6787,7 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
                                          PackedMemoryRounding.none;
         operation.boundedTemporary = true;
         operation.disjointProven = false;
+        operation.publicSurface = isPublicSurface;
         operation.conversion = PackedConversionPolicy.representation_defined;
         operation.ordering = PackedMemoryOrdering.ordinary_source_order;
 

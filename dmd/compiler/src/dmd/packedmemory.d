@@ -86,6 +86,7 @@ struct PackedMemoryOperation
     bool boundedTemporary;
     bool disjointProven;
     bool followerExecuted;
+    bool publicSurface;
 
     // Representation facts. Type identity carries the existing format rules;
     // storageBytes and alignment make physical layout facts directly visible.

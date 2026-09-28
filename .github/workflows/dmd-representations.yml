@@ -149,6 +149,8 @@ jobs:
               ".representation-build/packed-memory-$mode-trace.txt"
             grep -F "follower-executed=true" \
               ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "public-surface=true" \
+              ".representation-build/packed-memory-$mode-trace.txt"
             objdump -drwC -Mintel \
               ".representation-build/packed-memory-receipt-$mode.o" \
               > ".representation-build/packed-memory-receipt-$mode.disassembly"
