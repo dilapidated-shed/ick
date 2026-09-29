@@ -15,6 +15,10 @@ The kernel is a research corpus here, not ICK source. Do not copy kernel code
 into ICK merely to construct compiler tests; write reduced examples whose
 semantics are independently stated.
 
+> **Method:** start from the exact production source sites. Small reductions are
+> allowed only after the source pair is recorded; a reduction must never replace
+> the archaeology or silently change the compiler question.
+
 ## Selection rule
 
 A construct qualifies for this corpus when:

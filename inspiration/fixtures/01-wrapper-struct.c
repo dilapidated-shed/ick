@@ -1,20 +1,26 @@
 /*
- * Independent reduction of the one-field wrapper pattern used by ICK's
- * imprecise and finite-geometry types.
+ * Reduction for:
+ *   Linux atomic_t-style one-field aligned wrapper
+ *   ICK E4M3/Circle96-style one-byte semantic wrapper
+ *
+ * The production sources, not this file, are authoritative.
  */
 typedef struct {
-    unsigned char payload;
-} box8;
+    int counter __attribute__((aligned(sizeof(int))));
+} aligned_counter;
 
-box8
-box8_make(unsigned char payload)
+typedef struct {
+    unsigned char payload;
+} byte_wrapper;
+
+int
+aligned_counter_value(aligned_counter value)
 {
-    box8 value = { payload };
-    return value;
+    return value.counter;
 }
 
 unsigned char
-box8_code(box8 value)
+byte_wrapper_value(byte_wrapper value)
 {
     return value.payload;
 }

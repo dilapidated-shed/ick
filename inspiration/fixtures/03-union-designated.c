@@ -1,15 +1,31 @@
 /*
- * Tests union construction plus a designated initializer without relying on
- * type-punning semantics or target endianness.
+ * Reduction for:
+ *   Linux C-SKY memcpy pointer-view unions
+ *   ICK imprecise.h float/integer bit-view union
+ *
+ * This intentionally tests an alternate-member representation view.
  */
-union word_view {
-    unsigned int word;
-    unsigned char bytes[sizeof(unsigned int)];
-};
+_Static_assert(sizeof(float) == sizeof(unsigned int),
+               "reduction needs float and unsigned int of equal size");
 
 unsigned int
-union_designated_round_trip(unsigned int value)
+float_object_bits(float value)
 {
-    union word_view view = { .word = value };
-    return view.word;
+    union {
+        float value;
+        unsigned int bits;
+    } view = { .value = value };
+
+    return view.bits;
+}
+
+float
+float_from_object_bits(unsigned int bits)
+{
+    union {
+        float value;
+        unsigned int bits;
+    } view = { .bits = bits };
+
+    return view.value;
 }

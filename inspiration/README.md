@@ -63,5 +63,5 @@ notices.
 
 - [`kernel-construct-corpus.md`](kernel-construct-corpus.md) — Linux-kernel-derived real-world C construct suite tied back to constructs already used in ICK/Wegert/Pauli; this is now the preferred source-archeology corpus.
 
-- [`first-six-traces.md`](first-six-traces.md) — source-level trace of the first six kernel-backed constructs through GCC/ICK and every pinned reference compiler.
-- [`fixtures/`](fixtures/) — independently reduced C inputs for executable comparison; no kernel source copied.
+- [`first-six-traces.md`](first-six-traces.md) — corrected paired-source trace: six exact Linux-kernel sites beside the corresponding ICK/Wegert/Pauli sites, then mapped through the pinned reference compilers.
+- [`fixtures/`](fixtures/) — secondary executable reductions tied back to those exact source pairs; they do not define the archaeology.
