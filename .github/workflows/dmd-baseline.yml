@@ -86,6 +86,14 @@ jobs:
           test -s /tmp/dmd-baseline-smoke.o
           file /tmp/dmd-baseline-smoke.o
 
+      - name: Check out matching druntime interfaces
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dlang/dmd
+          ref: 74917954b53f7f35b13e61b4438c7253834929ed
+          path: .runtime-dmd
+          persist-credentials: false
+
       - name: Qualify NetBSD amd64 BetterC target
         if: steps.source.outputs.loaded == 'true'
         shell: bash
@@ -93,8 +101,10 @@ jobs:
           set -euxo pipefail
           dmd_bin=$(find dmd/generated -type f -name dmd -perm -u+x -print -quit)
           test -n "$dmd_bin"
-          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          runtime_import="$GITHUB_WORKSPACE/.runtime-dmd/druntime/src"
           test -f "$runtime_import/object.d"
+          test -f "$runtime_import/core/stdc/stdarg.d"
+          test -f "$runtime_import/core/internal/vararg/sysv_x64.d"
 
           mkdir -p dmd/qualification/.build
           netbsd_object="$GITHUB_WORKSPACE/dmd/qualification/.build/netbsd_amd64_betterc.o"
