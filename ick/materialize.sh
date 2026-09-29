@@ -29,11 +29,58 @@ awk '{ print $2 }' "$script_dir/OVERLAY.sha256" | LC_ALL=C sort \
 (cd "$repository_root" && find ick/source -type f -print | LC_ALL=C sort) \
   > "$source_paths"
 
-if ! cmp -s "$manifest_paths" "$source_paths"; then
-  echo "overlay manifest does not exactly match ick/source" >&2
-  diff -u "$manifest_paths" "$source_paths" >&2 || :
-  exit 1
-fi
+# The ordinary ICK overlay is checksummed in OVERLAY.sha256.  The imported D
+# frontend is different: files copied unchanged from the pinned GCC commit are
+# verified directly against that commit, while ICK-modified D files stay in
+# OVERLAY.sha256.  This keeps the provenance check exact without duplicating a
+# 200+ file checksum manifest for an upstream tree we already pin by commit.
+. "$script_dir/D_SOURCE.lock"
+
+while IFS= read -r source; do
+  if grep -Fqx "$source" "$manifest_paths"; then
+    continue
+  fi
+
+  relative=${source#ick/source/}
+  case "$relative" in
+    gcc/d/*)
+      reference_path=$relative
+      ;;
+    gcc/config/*-d.cc)
+      reference_path=$relative
+      case ",$target_hooks," in
+        *",${relative#gcc/config/},"*) ;;
+        *)
+          echo "unmanifested D target hook is not in D_SOURCE.lock: $source" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+    *)
+      echo "unmanifested owned source: $source" >&2
+      exit 1
+      ;;
+  esac
+
+  if ! git -C "$reference" cat-file -e "$gcc_commit:$reference_path" 2>/dev/null; then
+    echo "imported D source is absent from pinned GCC: $source" >&2
+    exit 1
+  fi
+
+  local_blob=$(git hash-object "$repository_root/$source")
+  upstream_blob=$(git -C "$reference" rev-parse "$gcc_commit:$reference_path")
+  if test "$local_blob" != "$upstream_blob"; then
+    echo "modified D source must be recorded in OVERLAY.sha256: $source" >&2
+    exit 1
+  fi
+done < "$source_paths"
+
+while IFS= read -r source; do
+  test -f "$repository_root/$source" || {
+    echo "overlay manifest names missing source: $source" >&2
+    exit 1
+  }
+done < "$manifest_paths"
 
 (cd "$repository_root" && sha256sum -c ick/OVERLAY.sha256)
 rm -f "$manifest_paths" "$source_paths"

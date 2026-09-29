@@ -1,0 +1,13 @@
+# D compiler import provenance
+upstream_repository=https://github.com/gcc-mirror/gcc.git
+upstream_commit=6294f1d9e7536e5ffcde09d1528c918d63abfef5
+upstream_gcc_d_tree=6e2dbe38d2a8900512d833b06bca8efcf64ede7c
+destination=ick/source/gcc/d
+imported_gcc_d_files=228
+excluded_gcc_d_glob=ChangeLog*
+excluded_reason='archival history; not compiler input; some files are not UTF-8'
+target_hooks_destination=ick/source/gcc/config
+target_hooks=gnu-d.cc,sol2-d.cc,linux-d.cc,darwin-d.cc,netbsd-d.cc,openbsd-d.cc,freebsd-d.cc,kfreebsd-d.cc,dragonfly-d.cc,mingw/winnt-d.cc,kopensolaris-d.cc,mingw/cygwin-d.cc
+runtime_library='not imported'
+runtime_note='libphobos is a separate runtime/standard-library tree, not the D compiler frontend'
+build_wiring='not modified in this import commit'
