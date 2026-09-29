@@ -22,6 +22,13 @@ struct NetbsdMixed
     long count;
 }
 
+struct NetbsdLarge
+{
+    long first;
+    long second;
+    long third;
+}
+
 extern(C) alias NetbsdCallback = int function(int);
 
 private int tlsCounter;
@@ -63,6 +70,45 @@ extern(C) long netbsd_vararg_sum(int count, ...)
     long total;
     foreach (_; 0 .. count)
         total += va_arg!long(arguments);
+    va_end(arguments);
+    return total;
+}
+
+extern(C) long netbsd_many_ints(long a, long b, long c, long d,
+    long e, long f, long g, long h)
+{
+    return a + b + c + d + e + f + g + h;
+}
+
+extern(C) double netbsd_many_fp(double a, double b, double c, double d,
+    double e, double f, double g, double h, double i, double j)
+{
+    return a + b + c + d + e + f + g + h + i + j;
+}
+
+extern(C) real netbsd_long_double(real value)
+{
+    return value + cast(real) 0.5;
+}
+
+extern(C) NetbsdLarge netbsd_large(NetbsdLarge input, long extra)
+{
+    input.first += extra;
+    input.second += extra * 2;
+    input.third += extra * 3;
+    return input;
+}
+
+extern(C) double netbsd_vararg_mixed(int pairs, ...)
+{
+    va_list arguments;
+    va_start(arguments, pairs);
+    double total;
+    foreach (_; 0 .. pairs)
+    {
+        total += cast(double) va_arg!long(arguments);
+        total += va_arg!double(arguments);
+    }
     va_end(arguments);
     return total;
 }
