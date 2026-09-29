@@ -76,7 +76,8 @@ jobs:
               return 42;
           }
           EOF
-          "$gdc" -fno-druntime -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
+          "$gdc" -I"$GITHUB_WORKSPACE/source/libphobos/libdruntime" \
+            -fno-druntime -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
           test -s /tmp/ick_gdc_baseline.o
 
       - name: Compile and run normal D with druntime and Phobos
@@ -133,7 +134,7 @@ jobs:
 
           PASS: native ICK/GCC built with `--enable-languages=c,d`, built and installed libphobos, and installed the GDC driver.
 
-          PASS: the compiler-only `-fno-druntime` object check still passes.
+          PASS: the compiler-only `-fno-druntime` object check still passes using only the pinned libdruntime `object.d` interface; it does not link druntime or Phobos.
 
           PASS: the resulting normal-D toolchain linked and ran std.bigint, GC-managed class allocation, exceptions, and std.stdio.
 
