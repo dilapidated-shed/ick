@@ -8,6 +8,7 @@ on:
       - 'ick/OVERLAY.sha256'
       - 'qualification/gdc_icky_unicode.d'
       - 'qualification/gdc_en_dash_rejected.d'
+      - 'qualification/gdc_thin_arrow_lambda_rejected.d'
       - '.github/workflows/gdc-icky-unicode.yml'
   workflow_dispatch:
 
@@ -75,6 +76,21 @@ jobs:
             -o /tmp/gdc_icky_unicode.o
           test -s /tmp/gdc_icky_unicode.o
 
+      - name: Prove thin arrow is not the lambda result arrow
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gdc=$(find "$GITHUB_WORKSPACE/stage/bin" -maxdepth 1 -type f \
+            \( -name gdc -o -name '*-gdc' \) | head -n 1)
+          test -n "$gdc"
+          if "$gdc" -I"$GITHUB_WORKSPACE/source/libphobos/libdruntime" \
+            -fno-druntime -c "$GITHUB_WORKSPACE/qualification/gdc_thin_arrow_lambda_rejected.d" \
+            -o /tmp/gdc_thin_arrow_lambda_rejected.o > /tmp/gdc_thin_arrow_lambda.log 2>&1; then
+            echo 'thin arrow unexpectedly compiled as a lambda result arrow' >&2
+            exit 1
+          fi
+          cat /tmp/gdc_thin_arrow_lambda.log
+
       - name: Prove en dash is not mathematical minus
         shell: bash
         run: |
@@ -97,7 +113,7 @@ jobs:
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           PASS: the GDC frontend compiled the Icky D Unicode acceptance source to an object.
 
-          PASS: λ/ƒ, ←, →, ≠, ≟, ²/³, −, ×, and ÷ are accepted at the source boundary.
+          PASS: λ/ƒ, ←, →, ⇒, ≠, ≟, ²/³, −, ×, and ÷ are accepted at the source boundary; → is directional assignment while ⇒ is the D function/result arrow.
 
-          PASS: en dash U+2013 remains distinct and is rejected rather than normalized to mathematical minus U+2212.
+          PASS: thin arrow U+2192 is rejected as a lambda result arrow.\n\n          PASS: en dash U+2013 remains distinct and is rejected rather than normalized to mathematical minus U+2212.
           EOF
