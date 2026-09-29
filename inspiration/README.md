@@ -60,3 +60,5 @@ notices.
 ## Discussion notes
 
 - [`gcc-contrast-notes.md`](gcc-contrast-notes.md) — first research pass through public discussions and project documentation contrasting each reference compiler with GCC, with questions for ICK rather than design conclusions.
+
+- [`kernel-construct-corpus.md`](kernel-construct-corpus.md) — Linux-kernel-derived real-world C construct suite tied back to constructs already used in ICK/Wegert/Pauli; this is now the preferred source-archeology corpus.
