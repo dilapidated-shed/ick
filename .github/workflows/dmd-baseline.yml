@@ -114,64 +114,10 @@ jobs:
           grep -Eq 'OS/ABI:[[:space:]]+UNIX - System V' /tmp/netbsd_amd64_betterc.elf
           grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' /tmp/netbsd_amd64_betterc.elf
           readelf -Ws "$netbsd_object" | tee /tmp/netbsd_amd64_betterc.symbols
-          grep -Eq '[[:space:]]netbsd_add
-        if: steps.source.outputs.loaded == 'true'
-        shell: bash
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: pinned standalone DMD source built from the owned Mars snapshot.
-
-          PASS: the resulting compiler started and produced a BetterC object.
-
-          PASS: Icky DMD emitted an ELF64/System-V NetBSD amd64 BetterC PIC object with version(NetBSD), version(Posix), and version(X86_64).
-
-          PASS: NetBSD 9.3 amd64's native C toolchain linked that exact object and executed integer, 64-bit integer, floating-point, pointer, mixed aggregate, C varargs, C callback, and TLS crossings successfully.
-
-          OUT OF SCOPE: druntime, Phobos, full-D executable startup, upstream tests, and Icky D Unicode syntax.
-          EOF
- /tmp/netbsd_amd64_betterc.symbols
-          grep -Eq '[[:space:]]netbsd_mixed
-        if: steps.source.outputs.loaded == 'true'
-        shell: bash
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: pinned standalone DMD source built from the owned Mars snapshot.
-
-          PASS: the resulting compiler started and produced a BetterC object.
-
-          PASS: Icky DMD emitted an ELF64/System-V NetBSD amd64 BetterC object with version(NetBSD), version(Posix), and version(X86_64).
-
-          OUT OF SCOPE: native NetBSD linking/execution, druntime, Phobos, upstream tests, and Icky D Unicode syntax.
-          EOF
- /tmp/netbsd_amd64_betterc.symbols
-          grep -Eq '[[:space:]]netbsd_vararg_sum
-        if: steps.source.outputs.loaded == 'true'
-        shell: bash
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: pinned standalone DMD source built from the owned Mars snapshot.
-
-          PASS: the resulting compiler started and produced a BetterC object.
-
-          PASS: Icky DMD emitted an ELF64/System-V NetBSD amd64 BetterC object with version(NetBSD), version(Posix), and version(X86_64).
-
-          OUT OF SCOPE: native NetBSD linking/execution, druntime, Phobos, upstream tests, and Icky D Unicode syntax.
-          EOF
- /tmp/netbsd_amd64_betterc.symbols
-          grep -Eq '[[:space:]]netbsd_tls_bump
-        if: steps.source.outputs.loaded == 'true'
-        shell: bash
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: pinned standalone DMD source built from the owned Mars snapshot.
-
-          PASS: the resulting compiler started and produced a BetterC object.
-
-          PASS: Icky DMD emitted an ELF64/System-V NetBSD amd64 BetterC object with version(NetBSD), version(Posix), and version(X86_64).
-
-          OUT OF SCOPE: native NetBSD linking/execution, druntime, Phobos, upstream tests, and Icky D Unicode syntax.
-          EOF
- /tmp/netbsd_amd64_betterc.symbols
+          grep -Eq '[[:space:]]netbsd_add$' /tmp/netbsd_amd64_betterc.symbols
+          grep -Eq '[[:space:]]netbsd_mixed$' /tmp/netbsd_amd64_betterc.symbols
+          grep -Eq '[[:space:]]netbsd_vararg_sum$' /tmp/netbsd_amd64_betterc.symbols
+          grep -Eq '[[:space:]]netbsd_tls_bump$' /tmp/netbsd_amd64_betterc.symbols
 
       - name: Link and run the exact object on NetBSD 9.3 amd64
         if: steps.source.outputs.loaded == 'true'
@@ -207,7 +153,9 @@ jobs:
 
           PASS: the resulting compiler started and produced a BetterC object.
 
-          PASS: Icky DMD emitted an ELF64/System-V NetBSD amd64 BetterC object with version(NetBSD), version(Posix), and version(X86_64).
+          PASS: Icky DMD emitted an ELF64/System-V NetBSD amd64 BetterC PIC object with version(NetBSD), version(Posix), and version(X86_64).
 
-          OUT OF SCOPE: native NetBSD linking/execution, druntime, Phobos, upstream tests, and Icky D Unicode syntax.
+          PASS: NetBSD 9.3 amd64's native C toolchain linked that exact object and executed integer, 64-bit integer, floating-point, pointer, mixed aggregate, C varargs, C callback, and TLS crossings successfully.
+
+          OUT OF SCOPE: druntime, Phobos, full-D executable startup, upstream tests, and Icky D Unicode syntax.
           EOF
