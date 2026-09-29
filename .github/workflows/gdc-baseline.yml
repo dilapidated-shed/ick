@@ -126,6 +126,17 @@ jobs:
           "$gdc" /tmp/ick_gdc_normal.d -o /tmp/ick_gdc_normal
           /tmp/ick_gdc_normal | grep -Fx '123456789012345678901234567891'
 
+      - name: Run Icky D Unicode semantics
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gdc=$(find "$GITHUB_WORKSPACE/stage/bin" -maxdepth 1 -type f \
+            \( -name gdc -o -name '*-gdc' \) | head -n 1)
+          test -n "$gdc"
+          "$gdc" "$GITHUB_WORKSPACE/qualification/gdc_icky_unicode.d" \
+            -o /tmp/gdc_icky_unicode
+          /tmp/gdc_icky_unicode
+
       - name: Record full-stack boundary
         shell: bash
         run: |
@@ -136,7 +147,9 @@ jobs:
 
           PASS: the compiler-only `-fno-druntime` object check still passes using only the pinned libdruntime `object.d` interface; it does not link druntime or Phobos.
 
-          PASS: the resulting normal-D toolchain linked and ran std.bigint, GC-managed class allocation, exceptions, and std.stdio.
+          PASS: the resulting normal-D toolchain linked and ran std.bigint, GC-managed class allocation, exceptions, and std.stdio. 
+
+          PASS: the same full toolchain linked and ran the Icky D Unicode semantics fixture, so Unicode qualification is not parser-only.
 
           The GDC line therefore includes druntime and Phobos in the qualified stack rather than treating them as an excluded future layer.
           EOF
