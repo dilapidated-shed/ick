@@ -22,6 +22,8 @@ struct NetbsdMixed
     long count;
 }
 
+extern(C) alias NetbsdCallback = int function(int);
+
 private int tlsCounter;
 
 extern(C) int netbsd_add(int a, int b)
@@ -65,7 +67,7 @@ extern(C) long netbsd_vararg_sum(int count, ...)
     return total;
 }
 
-extern(C) int netbsd_callback(int function(int) callback, int value)
+extern(C) int netbsd_callback(NetbsdCallback callback, int value)
 {
     return callback(value) + 1;
 }
