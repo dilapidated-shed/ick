@@ -1,6 +1,6 @@
 module netbsd_amd64_betterc;
 
-import core.stdc.stdarg : va_arg, va_end, va_list, va_start;
+import core.stdc.stdarg : __va_list_tag, va_arg, va_end, va_list, va_start;
 
 version (NetBSD) {}
 else static assert(0, "NetBSD target version was not defined");
