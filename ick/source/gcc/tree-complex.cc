@@ -1441,7 +1441,7 @@ build_polar_unary_call (gimple_seq *stmts, location_t loc, tree type,
   gcc_assert (work_type);
 
   if (work_type != type)
-    arg = gimple_build (stmts, loc, NOP_EXPR, work_type, arg);
+    arg = gimple_convert (stmts, loc, work_type, arg);
 
   tree fn = mathfn_built_in (work_type, code);
   tree lhs = make_ssa_name (work_type);
@@ -1453,7 +1453,7 @@ build_polar_unary_call (gimple_seq *stmts, location_t loc, tree type,
   gimple_seq_add_stmt (stmts, call);
 
   if (work_type != type)
-    lhs = gimple_build (stmts, loc, NOP_EXPR, type, lhs);
+    lhs = gimple_convert (stmts, loc, type, lhs);
   return lhs;
 }
 
@@ -1466,8 +1466,8 @@ build_polar_binary_call (gimple_seq *stmts, location_t loc, tree type,
 
   if (work_type != type)
     {
-      arg0 = gimple_build (stmts, loc, NOP_EXPR, work_type, arg0);
-      arg1 = gimple_build (stmts, loc, NOP_EXPR, work_type, arg1);
+      arg0 = gimple_convert (stmts, loc, work_type, arg0);
+      arg1 = gimple_convert (stmts, loc, work_type, arg1);
     }
 
   tree fn = mathfn_built_in (work_type, code);
@@ -1480,7 +1480,7 @@ build_polar_binary_call (gimple_seq *stmts, location_t loc, tree type,
   gimple_seq_add_stmt (stmts, call);
 
   if (work_type != type)
-    lhs = gimple_build (stmts, loc, NOP_EXPR, type, lhs);
+    lhs = gimple_convert (stmts, loc, type, lhs);
   return lhs;
 }
 
