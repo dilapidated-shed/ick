@@ -15,15 +15,17 @@ Defined now:
 - binder liveness and strong-reference operations;
 - transaction preparation and dispatch;
 - death-recipient creation/link/unlink;
-- primitive Parcel reads/writes and Binder handles;
-- Java Binder/Parcel conversion entry points;
+- primitive and UTF-8 string Parcel reads/writes plus Binder handles;
+- Java Binder conversion and Java-to-native Parcel conversion entry points;
 - Android log write.
 
-The NDK Binder surface used here starts at Android API 29. Shizuku-API itself
-currently has a lower minimum Android version, so this is not yet a complete
-compatibility replacement for its Java Binder path. JNI/Java framework bridges
-for Bundle, Intent, ComponentName, ContentProvider, Looper/Handler and older
-Android releases remain explicit missing touch points.
+Public NDK Binder transactions and most primitive Parcel operations start at
+Android API 29. AParcel_fromJavaParcel starts at API 30; AParcel_create and
+AParcel_appendFrom start at API 31. Shizuku-API itself has a lower minimum
+Android version, so this is not yet a complete compatibility replacement for
+its Java Binder path. JNI/Java framework bridges for Bundle, Intent,
+ComponentName, ContentProvider, Looper/Handler and older Android releases remain
+explicit missing touch points.
 
 ## Compiler qualification status
 
