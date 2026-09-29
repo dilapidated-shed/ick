@@ -28,3 +28,8 @@ extern(C) int probe()
 
     return 0;
 }
+
+extern(C) int main()
+{
+    return probe();
+}
