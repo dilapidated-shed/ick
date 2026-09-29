@@ -73,7 +73,8 @@ jobs:
               return 42;
           }
           EOF
-          "$gdc" -fno-druntime -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
+          "$gdc" -I"$GITHUB_WORKSPACE/source/libphobos/libdruntime" \
+            -fno-druntime -c /tmp/ick_gdc_baseline.d -o /tmp/ick_gdc_baseline.o
           test -s /tmp/ick_gdc_baseline.o
 
       - name: Record baseline boundary
@@ -84,7 +85,7 @@ jobs:
 
           PASS: native ICK/GCC built with `--enable-languages=c,d` and installed a GDC driver.
 
-          PASS: that GDC compiled an ordinary D translation unit to an object without requiring druntime/libphobos.
+          PASS: that GDC compiled an ordinary D translation unit to an object without building or linking druntime/libphobos. The D front end reads the pinned libdruntime `object.d` interface during semantic analysis.
 
           libphobos/druntime qualification is deliberately separate from this compiler-front-end baseline.
 
