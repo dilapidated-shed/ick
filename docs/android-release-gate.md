@@ -70,3 +70,8 @@ The compiler gate must not require GLES 3. Wegert's current GLES 3 implementatio
 ## F-Droid rule for ICK adoption
 
 The ordinary NDK compiler may remain the F-Droid release compiler until the remaining runtime, Wegert-library, APK-packaging, and source-rebuild gates are genuinely green. When ICK becomes part of the F-Droid build, F-Droid must be able to rebuild the compiler or its required source-derived artifacts from pinned, redistributable source; a checked-in opaque compiler binary is not the foundation.
+
+
+## Cross-project Android architecture
+
+The generic Android DEX/JNI/NDK and APK boundary is documented in [isomorphisms/android-NDK](https://github.com/isomorphisms/android-NDK/tree/ndk-dex-jni-migration). This document remains ICK's source, ABI, ELF, and loader qualification gate; it does not claim generic store-release support.
