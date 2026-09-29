@@ -74,4 +74,4 @@ The ordinary NDK compiler may remain the F-Droid release compiler until the rema
 
 ## Cross-project Android architecture
 
-The generic Android DEX/JNI/NDK and APK boundary is documented in [isomorphisms/android-NDK](https://github.com/isomorphisms/android-NDK/tree/ndk-dex-jni-migration). This document remains ICK's source, ABI, ELF, and loader qualification gate; it does not claim generic store-release support.
+The generic Android DEX/JNI/NDK and APK boundary is documented in [isomorphisms/android-NDK](https://github.com/isomorphisms/android-NDK/tree/main). This document remains ICK's source, ABI, ELF, and loader qualification gate; it does not claim generic store-release support.
