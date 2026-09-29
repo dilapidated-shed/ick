@@ -1047,8 +1047,13 @@ void reconcileCommands(ref Param params, ref Target target)
         if (!target.isX86_64)
             error(Loc.initial, "`-m32` is not supported on DragonFlyBSD, it is 64-bit only");
     }
+    else if (target.os == Target.OS.NetBSD)
+    {
+        if (!target.isX86_64)
+            error(Loc.initial, "Icky DMD currently supports NetBSD on amd64 only");
+    }
 
-    if (target.os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
+    if (target.os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
     {
         if (driverParams.lib && driverParams.dll)
             error(Loc.initial, "cannot mix `-lib` and `-shared`");
