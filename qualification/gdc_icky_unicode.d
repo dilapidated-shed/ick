@@ -10,6 +10,7 @@ extern(C) int probe()
 
     auto square = λ(int x) ⇒ x²;
     auto cube = λ(int x) ⇒ x³;
+    auto increment = ƒ(int x) ⇒ x + 1;
 
     if (left ≠ 4)
         return 1;
@@ -25,6 +26,8 @@ extern(C) int probe()
         return 6;
     if (!(−3 + 4 ≟ 1))
         return 7;
+    if (!(increment(4) ≟ 5))
+        return 8;
 
     return 0;
 }
