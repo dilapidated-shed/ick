@@ -9454,9 +9454,9 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
 
         const loc = token.loc;
 
-        // Literal Unicode → is directional assignment outside lambda/result
-        // position: value → target. ASCII => remains ordinary D syntax.
-        if (token.value == TOK.goesTo && tokenSpelling(&token, "→"))
+        // Literal Unicode → is directional assignment: value → target.
+        // Unicode ⇒ and ASCII => remain function/result arrows.
+        if (token.value == TOK.arrow && tokenSpelling(&token, "→"))
         {
             checkRequiredParens();
             nextToken();
