@@ -56,3 +56,7 @@ git submodule update --init --recursive
 
 Each reference remains governed by its own upstream copyright and license
 notices.
+
+## Discussion notes
+
+- [`gcc-contrast-notes.md`](gcc-contrast-notes.md) — first research pass through public discussions and project documentation contrasting each reference compiler with GCC, with questions for ICK rather than design conclusions.
