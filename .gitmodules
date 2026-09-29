@@ -1,3 +1,58 @@
 [submodule "gcc"]
 	path = gcc
 	url = https://github.com/gcc-mirror/gcc.git
+
+[submodule "inspiration/clang"]
+	path = inspiration/clang
+	url = https://github.com/llvm/llvm-project.git
+	shallow = true
+
+[submodule "inspiration/tinycc"]
+	path = inspiration/tinycc
+	url = https://github.com/TinyCC/tinycc.git
+	shallow = true
+
+[submodule "inspiration/chibicc"]
+	path = inspiration/chibicc
+	url = https://github.com/rui314/chibicc.git
+	shallow = true
+
+[submodule "inspiration/cproc"]
+	path = inspiration/cproc
+	url = https://github.com/michaelforney/cproc.git
+	shallow = true
+
+[submodule "inspiration/lacc"]
+	path = inspiration/lacc
+	url = https://github.com/larmel/lacc.git
+	shallow = true
+
+[submodule "inspiration/8cc"]
+	path = inspiration/8cc
+	url = https://github.com/rui314/8cc.git
+	shallow = true
+
+[submodule "inspiration/cparser"]
+	path = inspiration/cparser
+	url = https://github.com/libfirm/cparser.git
+	shallow = true
+
+[submodule "inspiration/compcert"]
+	path = inspiration/compcert
+	url = https://github.com/AbsInt/CompCert.git
+	shallow = true
+
+[submodule "inspiration/pcc"]
+	path = inspiration/pcc
+	url = https://github.com/PortableCC/pcc.git
+	shallow = true
+
+[submodule "inspiration/slimcc"]
+	path = inspiration/slimcc
+	url = https://github.com/fuhsnn/slimcc.git
+	shallow = true
+
+[submodule "inspiration/c4"]
+	path = inspiration/c4
+	url = https://github.com/rswier/c4.git
+	shallow = true

@@ -23,6 +23,15 @@ The purpose of the exception is to allow eligible compilation processes to produ
 
 The pinned meaning model in `model/` has its own license. `model/LICENSE` is the authority for that subtree and currently records the MIT license and its upstream copyright notice.
 
+## Inspiration reference sources
+
+The `inspiration` branch pins external compiler repositories as submodules
+under `inspiration/`. They are study references, not ICK-derived source.
+Each submodule remains governed by its own upstream copyright and license
+notices. Copying material from a reference tree into ICK requires preserving
+that provenance and satisfying the corresponding license; the existence of a
+reference submodule does not change ICK's GCC-derived ancestry.
+
 ## Compiler output
 
 Using a GPL-licensed compiler does not by itself relicense the input program. Where generated target code incorporates covered GCC runtime-library material, the runtime-library exception and its eligibility conditions matter. ICK must not make broader licensing claims than the notices actually grant.
