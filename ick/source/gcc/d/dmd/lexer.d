@@ -1211,6 +1211,10 @@ class Lexer
                             return;
                         case '→':
                             p++;
+                            t.value = TOK.arrow;
+                            return;
+                        case '⇒':
+                            p++;
                             t.value = TOK.goesTo;
                             return;
                         case '←':
