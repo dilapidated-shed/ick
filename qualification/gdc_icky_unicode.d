@@ -8,8 +8,8 @@ extern(C) int probe()
     int right;
     3 → right;
 
-    auto square = λ(int x) → x²;
-    auto cube = λ(int x) → x³;
+    auto square = λ(int x) ⇒ x²;
+    auto cube = λ(int x) ⇒ x³;
 
     if (left ≠ 4)
         return 1;
