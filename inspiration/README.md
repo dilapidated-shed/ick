@@ -62,3 +62,6 @@ notices.
 - [`gcc-contrast-notes.md`](gcc-contrast-notes.md) — first research pass through public discussions and project documentation contrasting each reference compiler with GCC, with questions for ICK rather than design conclusions.
 
 - [`kernel-construct-corpus.md`](kernel-construct-corpus.md) — Linux-kernel-derived real-world C construct suite tied back to constructs already used in ICK/Wegert/Pauli; this is now the preferred source-archeology corpus.
+
+- [`first-six-traces.md`](first-six-traces.md) — source-level trace of the first six kernel-backed constructs through GCC/ICK and every pinned reference compiler.
+- [`fixtures/`](fixtures/) — independently reduced C inputs for executable comparison; no kernel source copied.
