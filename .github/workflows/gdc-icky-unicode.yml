@@ -115,5 +115,7 @@ jobs:
 
           PASS: λ/ƒ, ←, →, ⇒, ≠, ≟, ²/³, −, ×, and ÷ are accepted at the source boundary; → is directional assignment while ⇒ is the D function/result arrow.
 
-          PASS: thin arrow U+2192 is rejected as a lambda result arrow.\n\n          PASS: en dash U+2013 remains distinct and is rejected rather than normalized to mathematical minus U+2212.
+          PASS: thin arrow U+2192 is rejected as a lambda result arrow.
+
+          PASS: en dash U+2013 remains distinct and is rejected rather than normalized to mathematical minus U+2212.
           EOF
