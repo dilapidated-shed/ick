@@ -129,11 +129,11 @@ jobs:
           grep -Eq '[[:space:]]netbsd_vararg_sum$' /tmp/netbsd_amd64_betterc.symbols
           grep -Eq '[[:space:]]netbsd_tls_bump$' /tmp/netbsd_amd64_betterc.symbols
 
-      - name: Link and run the exact object on NetBSD 9.3 amd64
+      - name: Link and run the exact object on NetBSD 11 amd64
         if: steps.source.outputs.loaded == 'true'
         uses: vmactions/netbsd-vm@c8a0d7ddb84619a7a8cc4e652efa7950b3fd9f92
         with:
-          release: "9.3"
+          release: "11"
           arch: x86_64
           sync: rsync
           run: |
@@ -165,7 +165,7 @@ jobs:
 
           PASS: Icky DMD emitted an ELF64/System-V NetBSD amd64 BetterC PIC object with version(NetBSD), version(Posix), and version(X86_64).
 
-          PASS: NetBSD 9.3 amd64's native C toolchain linked that exact object and executed integer, 64-bit integer, floating-point, pointer, mixed aggregate, C varargs, C callback, and TLS crossings successfully.
+          PASS: NetBSD 11 amd64's native C toolchain linked that exact object and executed integer, 64-bit integer, floating-point, pointer, mixed aggregate, C varargs, C callback, and TLS crossings successfully.
 
           OUT OF SCOPE: druntime, Phobos, full-D executable startup, upstream tests, and Icky D Unicode syntax.
           EOF
