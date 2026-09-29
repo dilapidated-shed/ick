@@ -86,6 +86,30 @@ jobs:
           test -s /tmp/dmd-baseline-smoke.o
           file /tmp/dmd-baseline-smoke.o
 
+      - name: Qualify NetBSD amd64 BetterC target
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(find dmd/generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          test -f "$runtime_import/object.d"
+
+          "$dmd_bin" \
+            -betterC \
+            -c \
+            -target=x86_64-unknown-netbsd \
+            -I"$runtime_import" \
+            dmd/qualification/netbsd_amd64_betterc.d \
+            -of=/tmp/netbsd_amd64_betterc.o
+
+          test -s /tmp/netbsd_amd64_betterc.o
+          readelf -h /tmp/netbsd_amd64_betterc.o | tee /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'Class:[[:space:]]+ELF64' /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'OS/ABI:[[:space:]]+UNIX - System V' /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' /tmp/netbsd_amd64_betterc.elf
+
       - name: Record boundary
         if: steps.source.outputs.loaded == 'true'
         shell: bash
@@ -95,5 +119,7 @@ jobs:
 
           PASS: the resulting compiler started and produced a BetterC object.
 
-          OUT OF SCOPE: druntime, Phobos, upstream tests, and Icky D Unicode syntax.
+          PASS: Icky DMD emitted an ELF64/System-V NetBSD amd64 BetterC object with version(NetBSD), version(Posix), and version(X86_64).
+
+          OUT OF SCOPE: native NetBSD linking/execution, druntime, Phobos, upstream tests, and Icky D Unicode syntax.
           EOF

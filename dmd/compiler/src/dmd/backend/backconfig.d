@@ -207,7 +207,7 @@ void out_config_init(
         cfg.flags |= CFGromable; // put switch tables in code segment
         cfg.objfmt = OBJ_MACH;
     }
-    if (cfg.exe & (EX_FREEBSD | EX_FREEBSD64))
+    if (cfg.exe & (EX_FREEBSD | EX_FREEBSD64 | EX_NETBSD64))
     {
         if (model == 64)
         {
@@ -319,7 +319,7 @@ static if (0)
 
     if (symdebug)
     {
-        if (cfg.exe & (EX_LINUX | EX_LINUX64 | EX_OPENBSD | EX_OPENBSD64 | EX_FREEBSD | EX_FREEBSD64 | EX_DRAGONFLYBSD64 |
+        if (cfg.exe & (EX_LINUX | EX_LINUX64 | EX_OPENBSD | EX_OPENBSD64 | EX_FREEBSD | EX_FREEBSD64 | EX_NETBSD64 | EX_DRAGONFLYBSD64 |
                           EX_SOLARIS | EX_SOLARIS64 | EX_OSX | EX_OSX64))
         {
             configv.addlinenumbers = 1;
@@ -446,7 +446,7 @@ void util_set32(exefmt_t exe)
     _tysize[TYnullptr] = LONGSIZE;
     _tysize[TYnptr] = LONGSIZE;
     _tysize[TYnref] = LONGSIZE;
-if (exe & (EX_LINUX | EX_LINUX64 | EX_FREEBSD | EX_FREEBSD64 | EX_OPENBSD | EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS | EX_SOLARIS64))
+if (exe & (EX_LINUX | EX_LINUX64 | EX_FREEBSD | EX_FREEBSD64 | EX_NETBSD64 | EX_OPENBSD | EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS | EX_SOLARIS64))
 {
     _tysize[TYreal] = 12;
     _tysize[TYireal] = 12;
@@ -477,7 +477,7 @@ if (exe & EX_windos)
     _tyalignsize[TYnullptr] = LONGSIZE;
     _tyalignsize[TYnref] = LONGSIZE;
     _tyalignsize[TYnptr] = LONGSIZE;
-if (exe & (EX_LINUX | EX_LINUX64 | EX_FREEBSD | EX_FREEBSD64 | EX_OPENBSD | EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS | EX_SOLARIS64))
+if (exe & (EX_LINUX | EX_LINUX64 | EX_FREEBSD | EX_FREEBSD64 | EX_NETBSD64 | EX_OPENBSD | EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS | EX_SOLARIS64))
 {
     _tyalignsize[TYreal] = 4;
     _tyalignsize[TYireal] = 4;
@@ -532,7 +532,7 @@ void util_set64(exefmt_t exe)
     _tysize[TYnullptr] = 8;
     _tysize[TYnptr] = 8;
     _tysize[TYnref] = 8;
-    if (exe & (EX_LINUX | EX_LINUX64 | EX_FREEBSD | EX_FREEBSD64 | EX_OPENBSD |
+    if (exe & (EX_LINUX | EX_LINUX64 | EX_FREEBSD | EX_FREEBSD64 | EX_NETBSD64 | EX_OPENBSD |
                       EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS | EX_SOLARIS64 | EX_OSX | EX_OSX64))
     {
         _tysize[TYreal] = 16;
@@ -557,7 +557,7 @@ void util_set64(exefmt_t exe)
     _tyalignsize[TYnullptr] = 8;
     _tyalignsize[TYnptr] = 8;
     _tyalignsize[TYnref] = 8;
-    if (exe & (EX_LINUX | EX_LINUX64 | EX_FREEBSD | EX_FREEBSD64 | EX_OPENBSD | EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS | EX_SOLARIS64))
+    if (exe & (EX_LINUX | EX_LINUX64 | EX_FREEBSD | EX_FREEBSD64 | EX_NETBSD64 | EX_OPENBSD | EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS | EX_SOLARIS64))
     {
         _tyalignsize[TYreal] = 16;
         _tyalignsize[TYireal] = 16;
