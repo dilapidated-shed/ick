@@ -1415,7 +1415,7 @@ polar_math_call_type (tree type, enum built_in_function code)
     return type;
 
   tree candidates[] = { float_type_node, double_type_node,
-			long_double_type_node };
+			long_double_type_node, float128_type_node };
   for (unsigned int i = 0; i < ARRAY_SIZE (candidates); ++i)
     if (TYPE_PRECISION (candidates[i]) >= TYPE_PRECISION (type)
 	&& mathfn_built_in (candidates[i], code))

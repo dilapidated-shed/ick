@@ -1,0 +1,189 @@
+name: GDC NetBSD amd64
+
+on:
+  pull_request:
+    paths:
+      - 'ick/**'
+      - '.github/workflows/gdc-netbsd-amd64.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gdc-netbsd-amd64-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  netbsd-amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      NETBSD_RELEASE: "9.3"
+      NETBSD_TARGET: x86_64-unknown-netbsd
+    steps:
+      - name: Check out exact ICK head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          submodules: true
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gdc flex bison texinfo curl xz-utils \
+            libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev
+
+      - name: Materialize pinned ICK and GDC source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sh ick/materialize.sh gcc source
+          test -d source/libphobos/libdruntime
+          test -d source/libphobos/src
+
+      - name: Materialize verified NetBSD 9.3 amd64 sysroot
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sets="https://cdn.netbsd.org/pub/NetBSD/NetBSD-${NETBSD_RELEASE}/amd64/binary/sets"
+          mkdir -p _netbsd-sets _netbsd-sysroot
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            "$sets/SHA512" -o _netbsd-sets/SHA512
+
+          for archive in base.tar.xz comp.tar.xz; do
+            curl --fail --location --proto '=https' --tlsv1.2 \
+              "$sets/$archive" -o "_netbsd-sets/$archive"
+            expected=$(awk -v name="($archive)" '$2 == name { print $4 }' _netbsd-sets/SHA512)
+            test -n "$expected"
+            actual=$(sha512sum "_netbsd-sets/$archive" | awk '{ print $1 }')
+            test "$actual" = "$expected"
+            tar -xJpf "_netbsd-sets/$archive" -C _netbsd-sysroot
+          done
+
+          test -f _netbsd-sysroot/usr/include/sys/types.h
+          test -f _netbsd-sysroot/usr/lib/crt0.o
+          test -f _netbsd-sysroot/usr/lib/libc.so
+          test -f _netbsd-sysroot/usr/lib/libc.a
+
+      - name: Provide x86-64 GNU target tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p _netbsd-tools
+          for tool in as ld ar nm ranlib strip objcopy objdump readelf; do
+            host_tool=$(command -v "$tool")
+            test -n "$host_tool"
+            ln -s "$host_tool" "_netbsd-tools/${NETBSD_TARGET}-$tool"
+          done
+          printf '%s\n' "$GITHUB_WORKSPACE/_netbsd-tools" >> "$GITHUB_PATH"
+
+      - name: Build Icky GDC, libgcc, druntime and Phobos for NetBSD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir build-netbsd stage-netbsd
+          cd build-netbsd
+          ../source/configure \
+            --target="$NETBSD_TARGET" \
+            --prefix="$GITHUB_WORKSPACE/stage-netbsd" \
+            --with-sysroot="$GITHUB_WORKSPACE/_netbsd-sysroot" \
+            --with-native-system-header-dir=/usr/include \
+            --enable-languages=c,d \
+            --enable-libphobos \
+            --with-libphobos-druntime-only=no \
+            --disable-bootstrap \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-libatomic \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv
+          make -j"$(nproc)" all-gcc all-target-libgcc all-target-libphobos
+          make install-gcc install-target-libgcc install-target-libphobos
+
+      - name: Cross-build a normal D NetBSD executable
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gdc="$GITHUB_WORKSPACE/stage-netbsd/bin/${NETBSD_TARGET}-gdc"
+          test -x "$gdc"
+          "$gdc" --version
+          "$gdc" -v 2>&1 | tee /tmp/netbsd-gdc-version.txt
+          grep -F "Target: ${NETBSD_TARGET}" /tmp/netbsd-gdc-version.txt
+
+          cat > _netbsd_probe.d <<'EOF'
+          import std.bigint : BigInt;
+          import std.stdio : writeln;
+
+          class Box
+          {
+              BigInt value;
+
+              this(BigInt value)
+              {
+                  this.value = value;
+              }
+          }
+
+          int main()
+          {
+              auto box = new Box(BigInt("123456789012345678901234567890"));
+              try
+              {
+                  throw new Exception("netbsd-gdc");
+              }
+              catch (Exception error)
+              {
+                  if (error.msg != "netbsd-gdc")
+                      return 2;
+              }
+
+              box.value += 1;
+              writeln(box.value);
+              return box.value == BigInt("123456789012345678901234567891") ? 0 : 3;
+          }
+          EOF
+
+          "$gdc" _netbsd_probe.d -o _netbsd_probe
+          test -s _netbsd_probe
+          file _netbsd_probe
+          readelf -h _netbsd_probe
+          readelf -l _netbsd_probe | tee /tmp/netbsd-probe-program-headers.txt
+
+      - name: Execute the exact GDC binary product on NetBSD 9.3 amd64
+        uses: vmactions/netbsd-vm@c8a0d7ddb84619a7a8cc4e652efa7950b3fd9f92
+        with:
+          release: "9.3"
+          arch: x86_64
+          sync: rsync
+          run: |
+            set -eu
+            test "$(uname -s)" = NetBSD
+            test "$(uname -m)" = amd64
+            uname -a
+            file "$GITHUB_WORKSPACE/_netbsd_probe"
+            ldd "$GITHUB_WORKSPACE/_netbsd_probe" || true
+            actual=$("$GITHUB_WORKSPACE/_netbsd_probe")
+            test "$actual" = 123456789012345678901234567891
+
+      - name: Record qualification boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: the pinned ICK/GCC source built a GDC cross compiler targeting x86_64-unknown-netbsd.
+
+          PASS: target libgcc, druntime, and full Phobos built against a SHA-512-verified NetBSD 9.3 amd64 base+comp sysroot.
+
+          PASS: that Icky GDC linked a normal D executable using std.bigint, GC allocation, exceptions, and std.stdio.
+
+          PASS: the exact executable ran successfully inside NetBSD 9.3 amd64.
+
+          This qualifies the ordinary hosted D runtime/library path for this target. It does not by itself qualify the translated Grease/YSH program.
+          EOF
