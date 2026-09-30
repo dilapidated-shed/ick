@@ -14,6 +14,6 @@ enum AndroidLogPriority : int {
 
 extern(C) nothrow @nogc int __android_log_write(
     int priority,
-    const char* tag,
-    const char* text
+    const(char)* tag,
+    const(char)* text
 );
