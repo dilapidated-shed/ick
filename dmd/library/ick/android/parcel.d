@@ -5,6 +5,21 @@ public import ick.android.types;
 /* Android NDK r27: int32_t is represented by D int. */
 alias AParcel_stringAllocator =
     extern(C) bool function(void* string_data, int length, char** buffer) nothrow @nogc;
+alias AParcel_stringArrayAllocator =
+    extern(C) bool function(void* array_data, int length) nothrow @nogc;
+alias AParcel_stringArrayElementAllocator =
+    extern(C) bool function(
+        void* array_data,
+        size_t index,
+        int length,
+        char** buffer
+    ) nothrow @nogc;
+alias AParcel_stringArrayElementGetter =
+    extern(C) const(char)* function(
+        const void* array_data,
+        size_t index,
+        int* out_length
+    ) nothrow @nogc;
 
 extern(C) nothrow @nogc:
 
@@ -33,6 +48,19 @@ binder_status_t AParcel_readString(
     const AParcel* parcel,
     void* string_data,
     AParcel_stringAllocator allocator
+);
+
+binder_status_t AParcel_writeStringArray(
+    AParcel* parcel,
+    const void* array_data,
+    int length,
+    AParcel_stringArrayElementGetter getter
+);
+binder_status_t AParcel_readStringArray(
+    const AParcel* parcel,
+    void* array_data,
+    AParcel_stringArrayAllocator allocator,
+    AParcel_stringArrayElementAllocator element_allocator
 );
 
 binder_status_t AParcel_writeStrongBinder(AParcel* parcel, AIBinder* binder);

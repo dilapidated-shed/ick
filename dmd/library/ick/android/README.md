@@ -16,7 +16,7 @@ Defined now:
 - transaction preparation and dispatch;
 - death-recipient creation/link/unlink;
 - Binder transaction status-header read/write and status inspection/deletion;
-- primitive and UTF-8 string Parcel reads/writes plus Binder handles;
+- primitive, UTF-8 string and nullable UTF-8 string-array Parcel reads/writes plus Binder handles;
 - ParcelFileDescriptor read/write;
 - Java Binder conversion and Java-to-native Parcel conversion entry points;
 - Android log write.
