@@ -31,4 +31,5 @@ alias transaction_code_t = uint;
 alias binder_flags_t = uint;
 
 enum binder_status_t STATUS_OK = 0;
+enum binder_status_t STATUS_UNKNOWN_TRANSACTION = -74; // -EBADMSG on Linux/Android
 enum binder_flags_t FLAG_ONEWAY = 0x01;

@@ -21,6 +21,9 @@ binder_status_t AParcel_readInt32(const AParcel* parcel, int* value);
 binder_status_t AParcel_writeUint32(AParcel* parcel, uint value);
 binder_status_t AParcel_readUint32(const AParcel* parcel, uint* value);
 
+binder_status_t AParcel_writeInt64(AParcel* parcel, long value);
+binder_status_t AParcel_readInt64(const AParcel* parcel, long* value);
+
 binder_status_t AParcel_writeBool(AParcel* parcel, bool value);
 binder_status_t AParcel_readBool(const AParcel* parcel, bool* value);
 
