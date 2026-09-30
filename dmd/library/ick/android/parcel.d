@@ -2,12 +2,9 @@ module ick.android.parcel;
 
 public import ick.android.types;
 
-/*
- * android/binder_parcel.h:
- *   typedef char* (*AParcel_stringAllocator)(void* stringData, size_t length);
- */
+/* Android NDK r27: int32_t is represented by D int. */
 alias AParcel_stringAllocator =
-    extern(C) char* function(void* string_data, size_t length) nothrow @nogc;
+    extern(C) bool function(void* string_data, int length, char** buffer) nothrow @nogc;
 
 extern(C) nothrow @nogc:
 
@@ -27,7 +24,8 @@ binder_status_t AParcel_readUint32(const AParcel* parcel, uint* value);
 binder_status_t AParcel_writeBool(AParcel* parcel, bool value);
 binder_status_t AParcel_readBool(const AParcel* parcel, bool* value);
 
-binder_status_t AParcel_writeString(AParcel* parcel, const char* value, size_t length);
+/* length == -1 with value == null writes a nullable AIDL string. */
+binder_status_t AParcel_writeString(AParcel* parcel, const char* value, int length);
 binder_status_t AParcel_readString(
     const AParcel* parcel,
     void* string_data,

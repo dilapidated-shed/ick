@@ -21,11 +21,10 @@ Defined now:
 - Java Binder conversion and Java-to-native Parcel conversion entry points;
 - Android log write.
 
-The string allocator and string-length declarations intentionally follow the
-NDK C header exactly: AParcel_stringAllocator returns a char pointer and takes
-size_t, and AParcel_writeString takes size_t. Earlier declarations on this
-branch used a bool/out-pointer allocator shape and int length; those were ABI
-mismatches found while translating Shizuku-API.
+The string declarations follow the modern NDK C ABI: AParcel_stringAllocator
+returns bool and receives an int32 length plus char** output buffer, while
+AParcel_writeString takes int32 length. A null string is encoded by a null
+pointer with length -1.
 
 Public NDK Binder transactions and most primitive Parcel operations start at
 Android API 29. AParcel_fromJavaParcel starts at API 30; AParcel_create and
