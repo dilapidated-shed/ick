@@ -105,15 +105,8 @@ jobs:
             --disable-libquadmath \
             --disable-libssp \
             --disable-libvtv
-          # The pinned GCC snapshot currently ICEs in the optimized complex
-          # lowering pass while compiling libgcc's complex helpers, on both
-          # native Linux and the NetBSD cross build.  Keep this target-runtime
-          # qualification moving at -O0 while preserving that optimizer bug as
-          # a separate compiler defect rather than confusing it with NetBSD ABI.
-          make -j"$(nproc)" CFLAGS_FOR_TARGET='-g -O0' \
-            all-gcc all-target-libgcc all-target-libphobos
-          make CFLAGS_FOR_TARGET='-g -O0' \
-            install-gcc install-target-libgcc install-target-libphobos
+          make -j"$(nproc)" all-gcc all-target-libgcc all-target-libphobos
+          make install-gcc install-target-libgcc install-target-libphobos
 
       - name: Cross-build a normal D NetBSD executable
         shell: bash
