@@ -1210,6 +1210,7 @@ class Lexer
                             t.value = TOK.function_;
                             return;
                         case '→':
+                        case '⇒':
                             p++;
                             t.value = TOK.goesTo;
                             return;
