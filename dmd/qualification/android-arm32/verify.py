@@ -33,7 +33,9 @@ def check_elf(path: Path) -> None:
     # The emitter fixes .symtab at section 2. Global function values must be
     # word-aligned and must not carry the Thumb low-bit marker.
     sym = shoff + 2 * shentsize
-    symoff, symsize, syment = struct.unpack_from("<III", data, sym + 16)
+    symoff = struct.unpack_from("<I", data, sym + 16)[0]
+    symsize = struct.unpack_from("<I", data, sym + 20)[0]
+    syment = struct.unpack_from("<I", data, sym + 36)[0]
     if syment != 16 or symsize < 48:
         raise RuntimeError("unexpected ARM32 symbol table")
     for at in range(symoff + 32, symoff + symsize, 16):
