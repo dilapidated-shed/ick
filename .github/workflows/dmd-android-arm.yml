@@ -2,7 +2,7 @@ name: DMD Android ARM bring-up
 
 on:
   push:
-    branches: [dmd, dmd-android-arm-backends, dmd-pauli-aarch64-calls, dmd-pauli-thumb-calls]
+    branches: [dmd, dmd-android-arm-backends, dmd-pauli-aarch64-calls, dmd-pauli-thumb-calls, dmd-pauli-byte-rgb]
     paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
   pull_request:
     paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
@@ -125,6 +125,45 @@ jobs:
 
           qemu-aarch64-static "$out/aarch64-call"
 
+      - name: Execute Pauli-shaped ubyte memory qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          compiler=build/android-arm/icky-dmd
+          imports="$GITHUB_WORKSPACE/build/bootstrap/dmd2/src/druntime/import"
+          out=build/android-arm/byte-rgb
+          mkdir -p "$out"
+
+          "$compiler" \
+            -target=armv7a-linux-androideabi21 \
+            -betterC -c -I"$imports" \
+            dmd/qualification/android-arm/byte-rgb.d \
+            -of="$out/thumb-byte.o"
+
+          clang --target=armv7a-linux-gnueabi \
+            -c dmd/qualification/android-arm/thumb-byte-harness.s \
+            -o "$out/thumb-harness.o"
+
+          ld.lld -m armelf_linux_eabi -static -e _start \
+            "$out/thumb-harness.o" "$out/thumb-byte.o" \
+            -o "$out/thumb-byte"
+          qemu-arm-static "$out/thumb-byte"
+
+          "$compiler" \
+            -target=aarch64-linux-android21 \
+            -betterC -c -I"$imports" \
+            dmd/qualification/android-arm/byte-rgb.d \
+            -of="$out/aarch64-byte.o"
+
+          clang --target=aarch64-linux-gnu \
+            -c dmd/qualification/android-arm/aarch64-byte-harness.s \
+            -o "$out/aarch64-harness.o"
+
+          ld.lld -m aarch64linux -static -e _start \
+            "$out/aarch64-harness.o" "$out/aarch64-byte.o" \
+            -o "$out/aarch64-byte"
+          qemu-aarch64-static "$out/aarch64-byte"
+
       - name: Prepare separate Android PIE probes without claiming device execution
         shell: bash
         run: |
@@ -153,6 +192,8 @@ jobs:
           PASS: owned DMD compiled and executed both native ARM leaf paths in Linux-user emulation, without and with optimization requested.
 
           PASS: Thumb-2 and AArch64 direct top-level extern(C) scalar call relocations resolved against independent objects and preserved their Float32 argument/result ABIs.
+
+          PASS: both Android ARM backends executed Pauli-shaped ubyte pointer indexing, truncating store, and zero-extending load without touching neighboring bytes.
 
           PASS: independent binary32, branch, buffer, calling-convention and rejection checks; desktop Unicode regression.
 
