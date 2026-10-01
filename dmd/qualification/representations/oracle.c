@@ -52,6 +52,60 @@ unsigned oracle_operation(unsigned format, unsigned operation, unsigned left, un
     return 0x10000u;
 }
 
+static Float16 oracle_float16_binary(unsigned operation, Float16 left, Float16 right)
+{
+    switch (operation) {
+    case 0: return float16_add(left, right);
+    case 1: return float16_subtract(left, right);
+    case 2: return float16_multiply(left, right);
+    case 3: return float16_divide(left, right);
+    default: return float16_from_code(0);
+    }
+}
+
+unsigned oracle_float16_chain(unsigned first_operation, unsigned second_operation,
+                              unsigned left, unsigned middle, unsigned right)
+{
+    Float16 first = float16_from_code((ick_u16)left);
+    Float16 second = float16_from_code((ick_u16)middle);
+    Float16 third = float16_from_code((ick_u16)right);
+    Float16 rounded_intermediate =
+        oracle_float16_binary(first_operation, first, second);
+    return float16_code(
+        oracle_float16_binary(second_operation, rounded_intermediate, third));
+}
+
+static float oracle_packed_decode(unsigned format, unsigned code)
+{
+    switch (format) {
+    case 3: return e3m2_to_float(e3m2_from_code((ick_byte)code));
+    case 4: return e5m3_to_float(e5m3_from_code((ick_byte)code));
+    default: return 0.0f;
+    }
+}
+
+/* Independent packed-memory oracle:
+ * decode storage -> convert each operand to Float16 -> recover its binary32
+ * semantic value -> perform one binary32 operation -> Float16 quantize.
+ */
+unsigned oracle_packed_operation(unsigned left_format, unsigned right_format,
+                                 unsigned operation, unsigned left, unsigned right)
+{
+    Float16 left_half = float16_from_float(oracle_packed_decode(left_format, left));
+    Float16 right_half = float16_from_float(oracle_packed_decode(right_format, right));
+    volatile float left_value = float16_to_float(left_half);
+    volatile float right_value = float16_to_float(right_half);
+    float result;
+    switch (operation) {
+    case 0: result = left_value + right_value; break;
+    case 1: result = left_value - right_value; break;
+    case 2: result = left_value * right_value; break;
+    case 3: result = left_value / right_value; break;
+    default: return 0x10000u;
+    }
+    return float16_code(float16_from_float(result));
+}
+
 int oracle_circle(unsigned operation, int first, int second)
 {
     switch (operation) {

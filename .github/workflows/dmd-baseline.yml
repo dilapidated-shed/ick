@@ -48,7 +48,7 @@ jobs:
           test "$upstream_tag" = v2.113.0
           test "$upstream_commit" = 74917954b53f7f35b13e61b4438c7253834929ed
           test "$upstream_compiler_src_dmd_tree" = 609b890e7cfc65474e5fdebd001c580e174cd22b
-          test "$(find dmd/compiler/src/dmd -type f | wc -l | tr -d ' ')" = 329
+          test "$(find dmd/compiler/src/dmd -type f | wc -l | tr -d ' ')" = 330
           test -x dmd/compiler/src/build.d
           test -x dmd/compiler/src/bootstrap.sh
           test ! -e dmd/druntime
@@ -86,6 +86,59 @@ jobs:
           test -s /tmp/dmd-baseline-smoke.o
           file /tmp/dmd-baseline-smoke.o
 
+      - name: Verify BetterC aggregate initialization
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(find dmd/generated -type f -name dmd -perm -u+x -print -quit)
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          test -x "$dmd_bin"
+          test -f "$runtime_import/object.d"
+
+          for optimization in unoptimized optimized; do
+            flags=()
+            if test "$optimization" = optimized; then
+              flags=(-O -inline)
+            fi
+            object="/tmp/betterc-init-$optimization.o"
+            executable="/tmp/betterc-init-$optimization"
+            "$dmd_bin" -betterC "${flags[@]}" -c -I"$runtime_import" \
+              dmd/qualification/betterc_init_semantics.d -of="$object"
+            if nm -u "$object" | awk '{ print $NF }' | grep -Eq '^_memset'; then
+              nm -u "$object"
+              exit 1
+            fi
+            "$dmd_bin" -betterC "${flags[@]}" -I"$runtime_import" \
+              dmd/qualification/betterc_init_semantics.d -of="$executable"
+            "$executable"
+          done
+
+          "$dmd_bin" -m32 -betterC -c -I"$runtime_import" \
+            dmd/qualification/betterc_init_semantics.d -of=/tmp/betterc-init-32.o
+          file /tmp/betterc-init-32.o | grep -F 'ELF 32-bit'
+          if nm -u /tmp/betterc-init-32.o | awk '{ print $NF }' | grep -Eq '^_memset'; then
+            nm -u /tmp/betterc-init-32.o
+            exit 1
+          fi
+
+          "$dmd_bin" -betterC -c -I"$runtime_import" \
+            dmd/qualification/betterc_void_init.d -of=/tmp/betterc-void-init.o
+          for function in void_float_case void_double_case void_real_case; do
+            objdump -d --no-show-raw-insn --disassemble="$function" \
+              /tmp/betterc-void-init.o > "/tmp/$function.asm"
+            if grep -Eq ',[^,]*\([^)]*\)[[:space:]]*$' "/tmp/$function.asm"; then
+              cat "/tmp/$function.asm"
+              exit 1
+            fi
+          done
+
+          "$dmd_bin" -c -I"$runtime_import" \
+            dmd/qualification/betterc_init_semantics.d -of=/tmp/normal-d-init.o
+          for symbol in _memsetFloat _memsetDouble _memset80; do
+            nm -u /tmp/normal-d-init.o | awk '{ print $NF }' | grep -Fx "$symbol"
+          done
+
       - name: Record boundary
         if: steps.source.outputs.loaded == 'true'
         shell: bash
@@ -94,6 +147,12 @@ jobs:
           PASS: pinned standalone DMD source built from the owned Mars snapshot.
 
           PASS: the resulting compiler started and produced a BetterC object.
+
+          PASS: BetterC default, void, zero, negative-zero, nested, aggregate,
+          and large fixed-array initialization executed unoptimized and optimized
+          without unresolved druntime array-initialization helpers.
+
+          PASS: normal D retained its existing float, double, and real helper selection.
 
           OUT OF SCOPE: druntime, Phobos, upstream tests, and Icky D Unicode syntax.
           EOF

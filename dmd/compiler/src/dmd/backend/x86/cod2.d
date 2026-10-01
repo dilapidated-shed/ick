@@ -4410,7 +4410,7 @@ private void cdmemsetn(ref CGstate cg, ref CodeBuilder cdb,elem* e,ref regm_t pr
     cs.Iop = 0x89;
     if (!I16 && sz == 2)
         cs.Iflags |= CFopsize;
-    if (I64 && sz == 8)
+    if (I64 && (sz == 8 || sz == 2 * REGSIZE))
         cs.Irex |= REX_W;
     code_newreg(&cs, valreg);
     cdb.gen(&cs);                                       // MOV [idxreg],AX
