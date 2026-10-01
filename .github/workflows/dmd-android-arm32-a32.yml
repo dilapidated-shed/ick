@@ -1,0 +1,101 @@
+name: DMD Android armeabi-v7a A32
+
+on:
+  push:
+    branches: [dmd-android-armeabi-v7a-a32]
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-android-arm32-a32.yml'
+  pull_request:
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-android-arm32-a32.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dmd-android-arm32-a32-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  a32-softfp:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install build and ARM execution dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 qemu-user-static clang lld
+          mkdir -p build/bootstrap build/android-arm32
+          git rev-parse HEAD > build/android-arm32/source-sha.txt
+          curl --fail --location --retry 3             https://github.com/dlang/dmd/releases/download/v2.113.0/dmd.2.113.0.linux.tar.xz             -o build/bootstrap.tar.xz
+          echo 'b342ab8bd40cc0c46407692b31d7cd69661ff01da686234f426949e881727294  build/bootstrap.tar.xz' | sha256sum -c -
+          tar -xJf build/bootstrap.tar.xz -C build/bootstrap
+          echo "$GITHUB_WORKSPACE/build/bootstrap/dmd2/linux/bin64" >> "$GITHUB_PATH"
+
+      - name: Build owned Icky DMD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          dmd -run ./build.d dmd HOST_DMD="$(command -v dmd)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -x "$dmd_bin"
+          "$dmd_bin" --version
+          cp "$dmd_bin" ../../../build/android-arm32/icky-dmd
+
+      - name: Compile and execute A32 softfp ABI probes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 dmd/qualification/android-arm32/verify.py             --compiler build/android-arm32/icky-dmd             --imports build/bootstrap/dmd2/src/druntime/import             --output build/android-arm32/qualification
+
+      - name: Reject nearby targets rather than silently changing ABI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          compiler=build/android-arm32/icky-dmd
+          imports=build/bootstrap/dmd2/src/druntime/import
+          src=dmd/qualification/android-arm32/smoke.d
+          for target in             armv7a-linux-gnu             thumbv7a-linux-androideabi21             armv7a-windows-androideabi21             armv7a-linux-androideabi20-junk
+          do
+            if "$compiler" -target="$target" -betterC -c -I"$imports" "$src" -of=/tmp/reject.o; then
+              echo "unexpectedly accepted $target" >&2
+              exit 1
+            fi
+            rm -f /tmp/reject.o
+          done
+
+      - name: Preserve compiler and qualification output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dmd-android-arm32-a32-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/android-arm32/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Record boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          TARGET: Android armeabi-v7a, ARM state (A32), AAPCS32 base PCS/softfp.
+
+          PASS criteria: ELF32 EM_ARM EABI5 object, A32 mapping/symbols, 32-bit pointer model,
+          binary64 real model, Bionic/Android/ARM_SoftFP versions, r0-r3 plus stack scalar
+          arguments, softfp binary32 arguments/results, 8-byte public stack restoration,
+          and execution of the generated code under qemu-arm.
+
+          CURRENT LOWERING BOUNDARY: BetterC scalar A32 functions. Calls, relocatable globals,
+          aggregates, variadics, integer helper calls, and druntime/Phobos remain future work.
+          EOF
