@@ -89,6 +89,7 @@ jobs:
 
           readelf -r "$out/thumb-call.o" | tee "$out/relocations.txt"
           grep -Eq 'R_ARM_THM_CALL.*pauli_external_scale' "$out/relocations.txt"
+          grep -Eq 'R_ARM_THM_CALL.*pauli_external_mix' "$out/relocations.txt"
 
           ld.lld -m armelf_linux_eabi -static -e _start \
             "$out/harness.o" "$out/thumb-call.o" \
