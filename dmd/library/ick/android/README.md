@@ -33,14 +33,20 @@ AParcel_appendFrom start at API 31. Shizuku-API itself has a lower minimum
 Android version, so this is not yet a complete compatibility replacement for
 its Java Binder path.
 
-For the Shizuku remote-transaction path specifically, public NDK now covers the
-mechanical Parcel/Binder pieces needed by the D translation: caller UID/PID,
-strong Binder reads, current Parcel position/size, `AParcel_appendFrom`,
-transaction preparation/dispatch, liveness, and death recipients. The stable
-NDK does **not** expose Java Binder's `clearCallingIdentity()` /
-`restoreCallingIdentity()` pair. Exact Shizuku forwarding therefore still
-needs a narrow framework/JNI or platform-Binder identity bridge; that bridge
-must remain explicit rather than silently dropping identity restoration.
+For the Shizuku remote-transaction path specifically, public NDK exposes useful
+pieces such as caller UID/PID, strong Binder reads, Parcel position/size,
+`AParcel_appendFrom`, liveness, and death recipients. It is **not** by itself
+an opaque Shizuku forwarding interface. `AIBinder_transact` requires its input
+Parcel to come from `AIBinder_prepareTransaction`, and
+`AIBinder_prepareTransaction` requires the target Binder to be associated with
+an NDK Binder class. Shizuku instead accepts an arbitrary target Binder and
+copies the caller's remaining opaque Parcel bytes.
+
+The stable NDK also does **not** expose Java Binder's
+`clearCallingIdentity()` / `restoreCallingIdentity()` pair. Exact Shizuku
+forwarding therefore needs a narrow framework/JNI or platform-libbinder bridge
+for the transparent transact/identity portion. These NDK declarations remain
+useful around that bridge; they are not evidence that the bridge can be omitted.
 
 JNI/Java framework bridges for Bundle, Intent,
 ComponentName, ContentProvider, Looper/Handler and older Android releases remain
