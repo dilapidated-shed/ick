@@ -235,6 +235,7 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         'real': 'extern(C) real bad(real x) { return x; }',
         'call': 'extern(C) float helper(float); extern(C) float bad(float x) { return helper(x); }',
         'indirect_call': 'extern(C) float helper(float); extern(C) float bad(float x) { auto f = &helper; return f(x); }',
+        'byte_abi': 'extern(C) ubyte bad(ubyte x) { return x; }',
         'five_arguments': 'extern(C) float bad(float a,float b,float c,float d,float e) { return e; }',
         'global': 'int state; extern(C) int bad() { return state; }',
         'aggregate': 'struct Pair { float a,b; } extern(C) Pair bad(Pair x) { return x; }',
@@ -245,7 +246,7 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         'frame_bound': 'extern(C) int bad(int x) {' + ''.join(f'int a{i}=x+{i};' for i in range(128)) + 'return a127;}',
     }
     count = 0
-    for name in ['double', 'real', 'indirect_call', 'five_arguments', 'global', 'aggregate',
+    for name in ['double', 'real', 'indirect_call', 'byte_abi', 'five_arguments', 'global', 'aggregate',
                  'reference', 'integer_division', 'float_conversion',
                  'void_initialization', 'frame_bound']:
         source = bad_sources[name]
@@ -259,7 +260,7 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         count += 1
     # The existing AArch64 generator must not advertise unqualified runtime,
     # aggregate or extended-real support merely because it emits ELF.
-    for name in ['double', 'real', 'indirect_call', 'five_arguments', 'global', 'aggregate',
+    for name in ['double', 'real', 'indirect_call', 'byte_abi', 'five_arguments', 'global', 'aggregate',
                  'reference', 'void_initialization']:
         file = out / f'aarch64_reject_{name}.d'; file.write_text(bad_sources[name])
         obj = out / f'aarch64_reject_{name}.o'; obj.write_bytes(b'stale output must be removed')
