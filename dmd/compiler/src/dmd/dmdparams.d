@@ -362,6 +362,7 @@ void setTargetBuildDefaults(ref Target target) @safe
 void setTriple(ref Target target, const ref Triple triple) @safe
 {
     target.cpu     = triple.cpu;
+    target.isAArch64 = false;
     target.isX86_64 = triple.isX86_64;
     target.isARM32  = triple.isARM32;
     target.isAndroid = triple.isAndroid;
