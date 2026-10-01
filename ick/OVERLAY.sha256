@@ -5,9 +5,11 @@ eb5224f958342e3f90ea592e46bb6a1df25a40ec15e46a9c8c573191bbd51148  ick/source/gcc
 83247d67c48e8587f6b762bf932e88f2b0c3bd356142afed5254dee9005eb874  ick/source/gcc/fold-const.cc
 85b6a87aebfa02b41f80bb86278effefc109432fb8a730f5d3c94557a3d8484e  ick/source/gcc/ipa-icf.cc
 bae0c71f56075b442e2e36e9a8913ae608b67d0d4d7e5536d7b396d0ca567053  ick/source/gcc/testsuite/gcc.dg/ick-complex-object-byte-fold.c
+b86d5dcdf4c0d63dfcaf87b0224dd91ec4bb20b6ab08f6f441b22c2a23a8aa54  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float128.c
+03c65d49694145bec18339a5276d7ea1631aa0f0d527c3836b8cbc6baea30091  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float16.c
 59af45cc272bf94fae95cacf9dcaaac2b2202fc00cfafe6f84d813cfc5707f21  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-layout.c
 74bd07610e4b9cd18602009d7b0a100468c4109f41f81f2ca2f3b466f8e97f77  ick/source/gcc/testsuite/gcc.dg/ick-complex-round.c
-aa8dfca47b4ccc4e207bc984706de74b26bf84de20e0ee0e71a18532ef375f2a  ick/source/gcc/tree-complex.cc
+2c54cdbedc75da8059f31ee413818992f528fc6680a6090db717ef29f8d5a670  ick/source/gcc/tree-complex.cc
 23f7aa6a9a92d81594a1d497c0e0e023b1890e42c588a82c7deac8a72a5bddf2  ick/source/gcc/tree-ssa-sccvn.cc
 08a10054b4dcf6e897e19717ac1cf8ed6ef45b5a7b41c1de3877b9eca6954e5d  ick/source/gcc/tree-streamer-in.cc
 cf7f5de72531f0d45bcae5e351159953c3e81901987597c2a255ae270b530ecb  ick/source/gcc/tree-streamer-out.cc

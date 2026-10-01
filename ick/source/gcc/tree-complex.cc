@@ -1403,27 +1403,57 @@ expand_complex_libcall (gimple_stmt_iterator *gsi, tree type, tree ar, tree ai,
    not the Cartesian complex ABI used by ordinary GCC and Clang.  External
    boundaries must expose scalar or array components instead.  */
 
+/* Some low-precision real types, notably _Float16, do not have a complete
+   family of libc math entry points.  Keep the polar representation for those
+   types, but perform transcendental work in the narrowest wider binary type
+   that has the required builtin, then convert the result back to storage
+   precision.  Never silently compute in a narrower type.  */
+static tree
+polar_math_call_type (tree type, enum built_in_function code)
+{
+  if (mathfn_built_in (type, code))
+    return type;
+
+  tree candidates[] = { float_type_node, double_type_node,
+			long_double_type_node, float128_type_node };
+  for (unsigned int i = 0; i < ARRAY_SIZE (candidates); ++i)
+    if (TYPE_PRECISION (candidates[i]) >= TYPE_PRECISION (type)
+	&& mathfn_built_in (candidates[i], code))
+      return candidates[i];
+
+  return NULL_TREE;
+}
+
 static bool
 polar_math_builtins_available (tree type)
 {
-  return (mathfn_built_in (type, BUILT_IN_HYPOT)
-	  && mathfn_built_in (type, BUILT_IN_ATAN2)
-	  && mathfn_built_in (type, BUILT_IN_COS)
-	  && mathfn_built_in (type, BUILT_IN_SIN));
+  return (polar_math_call_type (type, BUILT_IN_HYPOT)
+	  && polar_math_call_type (type, BUILT_IN_ATAN2)
+	  && polar_math_call_type (type, BUILT_IN_COS)
+	  && polar_math_call_type (type, BUILT_IN_SIN));
 }
 
 static tree
 build_polar_unary_call (gimple_seq *stmts, location_t loc, tree type,
 			enum built_in_function code, tree arg)
 {
-  tree fn = mathfn_built_in (type, code);
-  tree lhs = make_ssa_name (type);
+  tree work_type = polar_math_call_type (type, code);
+  gcc_assert (work_type);
+
+  if (work_type != type)
+    arg = gimple_convert (stmts, loc, work_type, arg);
+
+  tree fn = mathfn_built_in (work_type, code);
+  tree lhs = make_ssa_name (work_type);
   gcall *call = gimple_build_call (fn, 1, arg);
 
   gimple_set_location (call, loc);
   gimple_call_set_nothrow (call, true);
   gimple_call_set_lhs (call, lhs);
   gimple_seq_add_stmt (stmts, call);
+
+  if (work_type != type)
+    lhs = gimple_convert (stmts, loc, type, lhs);
   return lhs;
 }
 
@@ -1431,14 +1461,26 @@ static tree
 build_polar_binary_call (gimple_seq *stmts, location_t loc, tree type,
 			 enum built_in_function code, tree arg0, tree arg1)
 {
-  tree fn = mathfn_built_in (type, code);
-  tree lhs = make_ssa_name (type);
+  tree work_type = polar_math_call_type (type, code);
+  gcc_assert (work_type);
+
+  if (work_type != type)
+    {
+      arg0 = gimple_convert (stmts, loc, work_type, arg0);
+      arg1 = gimple_convert (stmts, loc, work_type, arg1);
+    }
+
+  tree fn = mathfn_built_in (work_type, code);
+  tree lhs = make_ssa_name (work_type);
   gcall *call = gimple_build_call (fn, 2, arg0, arg1);
 
   gimple_set_location (call, loc);
   gimple_call_set_nothrow (call, true);
   gimple_call_set_lhs (call, lhs);
   gimple_seq_add_stmt (stmts, call);
+
+  if (work_type != type)
+    lhs = gimple_convert (stmts, loc, type, lhs);
   return lhs;
 }
 
