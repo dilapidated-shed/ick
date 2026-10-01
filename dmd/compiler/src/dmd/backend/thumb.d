@@ -55,6 +55,12 @@ struct ThumbCode
         half(0x9000 | reg << 8 | slot);
     }
 
+    void uxtb(uint destination = 0, uint source = 0)
+    {
+        enforce(destination < 8 && source < 8, "Thumb UXTB low register required");
+        half(0xB2C0 | source << 3 | destination);
+    }
+
     // Canonical unresolved Thumb-2 BL. ARM ELF uses REL rather than RELA;
     // the encoded -4 addend accounts for Thumb PC+4 semantics.
     size_t call()
