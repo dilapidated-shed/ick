@@ -38,7 +38,8 @@ private bool supported(Type type)
     if (!type) return true;
     switch (type.toBasetype().ty)
     {
-        case TY.Tvoid: case TY.Tbool: case TY.Tint32: case TY.Tuns32:
+        case TY.Tvoid: case TY.Tbool: case TY.Tuns8:
+        case TY.Tint32: case TY.Tuns32:
         case TY.Tint64: case TY.Tuns64: case TY.Tpointer: case TY.Tfloat32:
             return true;
         default:
@@ -49,7 +50,26 @@ private bool supported(Type type)
 private void check_type(Type type, Loc loc)
 {
     if (!supported(type))
-        diagnose(loc, "only integer, pointer and binary32 scalar representations are qualified; aggregates, double and real are not");
+        diagnose(loc, "only ubyte, integer, pointer and binary32 scalar representations are qualified; aggregates, double and real are not");
+}
+
+private bool abi_type(Type type)
+{
+    if (!type) return true;
+    switch (type.toBasetype().ty)
+    {
+        case TY.Tvoid: case TY.Tbool: case TY.Tint32: case TY.Tuns32:
+        case TY.Tint64: case TY.Tuns64: case TY.Tpointer: case TY.Tfloat32:
+            return true;
+        default:
+            return false;
+    }
+}
+
+private void check_abi_type(Type type, Loc loc)
+{
+    if (!abi_type(type))
+        diagnose(loc, "external ABI positions remain limited to word-sized integer, pointer and binary32 scalar representations");
 }
 
 private void check_direct_c_function(FuncDeclaration function_, Loc loc)
@@ -60,10 +80,10 @@ private void check_direct_c_function(FuncDeclaration function_, Loc loc)
         (function_.parameters && function_.parameters.length > 4))
         diagnose(loc, "direct calls require top-level extern(C), non-variadic scalar functions with at most four arguments");
 
-    check_type(signature.next, loc);
+    check_abi_type(signature.next, loc);
     if (function_.parameters) foreach (parameter; *function_.parameters)
     {
-        check_type(parameter.type, parameter.loc);
+        check_abi_type(parameter.type, parameter.loc);
         if (parameter.storage_class & (STC.ref_ | STC.out_ | STC.lazy_))
             diagnose(parameter.loc, "direct-call ref/out/lazy parameters are unqualified");
     }
@@ -209,11 +229,11 @@ bool validate_aarch64_leaves(Module[] modules)
                     signature.isRef || signature.parameterList.varargs != VarArg.none ||
                     (function_.parameters && function_.parameters.length > 4))
                     diagnose(function_.loc, "requires top-level extern(C), non-variadic leaves with at most four arguments");
-                check_type(signature.next, function_.loc);
+                check_abi_type(signature.next, function_.loc);
                 auto expressions = new Expressions();
                 if (function_.parameters) foreach (parameter; *function_.parameters)
                 {
-                    check_type(parameter.type, parameter.loc);
+                    check_abi_type(parameter.type, parameter.loc);
                     if (parameter.storage_class & (STC.ref_ | STC.out_ | STC.lazy_))
                         diagnose(parameter.loc, "ref/out/lazy parameters are unqualified");
                     expressions.locals[parameter] = true;
