@@ -263,8 +263,13 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         command = [compiler, '-target=aarch64-linux-android21', '-betterC', '-c', f'-I{imports}', str(file), f'-of={obj}']
         result = subprocess.run(command, capture_output=True, timeout=30)
         (out/f'aarch64_reject_{name}.log').write_bytes(result.stdout+result.stderr)
-        if result.returncode == 0 or obj.exists() or b'AArch64 Android leaf boundary:' not in result.stderr:
-            raise RuntimeError(f'AArch64 rejection failed for {name}: {result.stderr.decode(errors="replace")}')
+        marker = b'AArch64 Android leaf boundary:' in result.stderr
+        if result.returncode == 0 or obj.exists() or not marker:
+            raise RuntimeError(
+                f'AArch64 rejection failed for {name}: '
+                f'returncode={result.returncode} object_exists={obj.exists()} marker={marker}\n'
+                f'{result.stderr.decode(errors="replace")}'
+            )
         count += 1
     good = out/'target_probe.d'; good.write_text('extern(C) int probe(int x) {return x;}')
     for target in ['armv7a-linux-android21', 'aarch64-linux-androideabi21', 'armv7a-linux-androideabi20',
