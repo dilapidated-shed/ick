@@ -245,7 +245,10 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         'frame_bound': 'extern(C) int bad(int x) {' + ''.join(f'int a{i}=x+{i};' for i in range(128)) + 'return a127;}',
     }
     count = 0
-    for name, source in bad_sources.items():
+    for name in ['double', 'real', 'indirect_call', 'five_arguments', 'global', 'aggregate',
+                 'reference', 'integer_division', 'float_conversion',
+                 'void_initialization', 'frame_bound']:
+        source = bad_sources[name]
         file = out / f'reject_{name}.d'; file.write_text(source)
         obj = out / f'reject_{name}.o'; obj.write_bytes(b'stale output must be removed')
         command = [compiler, '-target=armv7a-linux-androideabi21', '-betterC', '-c', f'-I{imports}', str(file), f'-of={obj}']
