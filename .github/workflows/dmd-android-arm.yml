@@ -25,6 +25,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
       - name: Install build-host dependencies
         shell: bash
         run: |
@@ -37,6 +38,7 @@ jobs:
           echo 'b342ab8bd40cc0c46407692b31d7cd69661ff01da686234f426949e881727294  build/bootstrap.tar.xz' | sha256sum -c -
           tar -xJf build/bootstrap.tar.xz -C build/bootstrap
           echo "$GITHUB_WORKSPACE/build/bootstrap/dmd2/linux/bin64" >> "$GITHUB_PATH"
+
       - name: Build owned Icky DMD
         shell: bash
         run: |
@@ -47,6 +49,7 @@ jobs:
           test -x "$dmd_bin"
           "$dmd_bin" --version
           cp "$dmd_bin" ../../../build/android-arm/icky-dmd
+
       - name: Preserve desktop Unicode execution
         shell: bash
         run: |
@@ -55,6 +58,7 @@ jobs:
             -Ibuild/bootstrap/dmd2/src/druntime/import -Ibuild/bootstrap/dmd2/src/phobos \
             dmd/qualification/icky_unicode.d -of=build/android-arm/host-unicode
           build/android-arm/host-unicode
+
       - name: Execute Thumb-2 and AArch64 against independent oracles
         shell: bash
         run: |
@@ -63,6 +67,7 @@ jobs:
             --compiler build/android-arm/icky-dmd \
             --imports build/bootstrap/dmd2/src/druntime/import \
             --output build/android-arm/emulated
+
       - name: Execute AArch64 direct extern(C) call qualification
         shell: bash
         run: |
@@ -83,7 +88,7 @@ jobs:
             -o "$out/harness.o"
 
           readelf -r "$out/aarch64-call.o" | tee "$out/relocations.txt"
-          grep -Eq 'R_AARCH64_CALL26.*pauli_external_scale \+ 0
+          grep -Eq 'R_AARCH64_CALL26.*pauli_external_scale [+] 0$' "$out/relocations.txt"
 
           ld.lld -m aarch64linux -static -e _start \
             "$out/harness.o" "$out/aarch64-call.o" \
@@ -102,6 +107,7 @@ jobs:
               --imports build/bootstrap/dmd2/src/druntime/import \
               --output "build/android-arm/device-$architecture"
           done
+
       - name: Preserve exact-head compiler and receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -110,45 +116,7 @@ jobs:
           path: build/android-arm/
           if-no-files-found: error
           retention-days: 14
-      - name: State execution boundary
-        shell: bash
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'TEXT'
-          PASS: owned DMD compiled and executed both native ARM leaf paths in Linux-user emulation, without and with optimization requested.
 
-          PASS: AArch64 direct top-level extern(C) scalar call relocation resolved against an independent object and preserved the Float32 argument/result ABI.
-
-          PASS: independent binary32, branch, buffer, calling-convention and rejection checks; desktop Unicode regression.
-
-          PREPARED ONLY: Android PIE probes. No physical Android, Bionic/runtime, JNI, APK or DMD-on-phone execution is claimed.
-          TEXT
- "$out/relocations.txt"
-
-          ld.lld -m aarch64linux -static -e _start \
-            "$out/harness.o" "$out/aarch64-call.o" \
-            -o "$out/aarch64-call"
-
-          qemu-aarch64-static "$out/aarch64-call"
-
-      - name: Prepare separate Android PIE probes without claiming device execution
-        shell: bash
-        run: |
-          set -euxo pipefail
-          for architecture in thumb2 aarch64; do
-            python3 dmd/qualification/android-arm/device.py \
-              --serial PREPARE_ONLY --architecture "$architecture" --prepare-only \
-              --compiler build/android-arm/icky-dmd \
-              --imports build/bootstrap/dmd2/src/druntime/import \
-              --output "build/android-arm/device-$architecture"
-          done
-      - name: Preserve exact-head compiler and receipts
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: dmd-android-arm-${{ github.event.pull_request.head.sha || github.sha }}
-          path: build/android-arm/
-          if-no-files-found: error
-          retention-days: 14
       - name: State execution boundary
         shell: bash
         run: |
