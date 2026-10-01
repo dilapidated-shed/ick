@@ -16,6 +16,7 @@ Defined now:
 - transaction preparation and dispatch;
 - death-recipient creation/link/unlink;
 - Binder transaction status-header read/write and status inspection/deletion;
+- Parcel data-position/data-size inspection and repositioning;
 - primitive, UTF-8 string and nullable UTF-8 string-array Parcel reads/writes plus Binder handles;
 - ParcelFileDescriptor read/write;
 - Java Binder conversion and Java-to-native Parcel conversion entry points;
@@ -30,7 +31,18 @@ Public NDK Binder transactions and most primitive Parcel operations start at
 Android API 29. AParcel_fromJavaParcel starts at API 30; AParcel_create and
 AParcel_appendFrom start at API 31. Shizuku-API itself has a lower minimum
 Android version, so this is not yet a complete compatibility replacement for
-its Java Binder path. JNI/Java framework bridges for Bundle, Intent,
+its Java Binder path.
+
+For the Shizuku remote-transaction path specifically, public NDK now covers the
+mechanical Parcel/Binder pieces needed by the D translation: caller UID/PID,
+strong Binder reads, current Parcel position/size, `AParcel_appendFrom`,
+transaction preparation/dispatch, liveness, and death recipients. The stable
+NDK does **not** expose Java Binder's `clearCallingIdentity()` /
+`restoreCallingIdentity()` pair. Exact Shizuku forwarding therefore still
+needs a narrow framework/JNI or platform-Binder identity bridge; that bridge
+must remain explicit rather than silently dropping identity restoration.
+
+JNI/Java framework bridges for Bundle, Intent,
 ComponentName, ContentProvider, Looper/Handler and older Android releases remain
 explicit missing touch points.
 
