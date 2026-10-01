@@ -88,7 +88,10 @@ private extern(C++) class Expressions : StoppableVisitor
                 auto callee = call.e1 ? call.e1.isVarExp() : null;
                 auto function_ = callee ? callee.var.isFuncDeclaration() : null;
                 if (!function_)
+                {
                     diagnose(e.loc, "only direct extern(C) function calls are qualified");
+                    return;
+                }
                 owner.directCallees[cast(const(void)*)call.e1] = true;
             }
         }
@@ -150,7 +153,10 @@ private extern(C++) class Expressions : StoppableVisitor
                 auto callee = call.e1 ? call.e1.isVarExp() : null;
                 auto function_ = callee ? callee.var.isFuncDeclaration() : null;
                 if (!function_)
+                {
                     diagnose(e.loc, "only direct extern(C) function calls are qualified");
+                    break;
+                }
                 check_direct_c_function(function_, e.loc);
                 break;
             }
