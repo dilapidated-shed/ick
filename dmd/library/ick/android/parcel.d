@@ -27,6 +27,14 @@ extern(C) nothrow @nogc:
 AParcel* AParcel_create();
 void AParcel_delete(AParcel* parcel);
 
+/* API 29. */
+binder_status_t AParcel_setDataPosition(
+    const(AParcel)* parcel,
+    int position
+);
+int AParcel_getDataPosition(const(AParcel)* parcel);
+int AParcel_getDataSize(const(AParcel)* parcel);
+
 binder_status_t AParcel_writeStatusHeader(AParcel* parcel, const(AStatus)* status);
 binder_status_t AParcel_readStatusHeader(const(AParcel)* parcel, AStatus** status);
 
