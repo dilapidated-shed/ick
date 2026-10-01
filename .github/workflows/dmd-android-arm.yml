@@ -51,7 +51,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          build/android-arm/icky-dmd -betterC \
+          build/android-arm/icky-dmd -betterC -L-no-pie \
             -Ibuild/bootstrap/dmd2/src/druntime/import -Ibuild/bootstrap/dmd2/src/phobos \
             dmd/qualification/icky_unicode.d -of=build/android-arm/host-unicode
           build/android-arm/host-unicode
