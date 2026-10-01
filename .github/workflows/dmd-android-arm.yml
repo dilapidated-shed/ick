@@ -2,7 +2,7 @@ name: DMD Android ARM bring-up
 
 on:
   push:
-    branches: [dmd, dmd-android-arm-backends, dmd-pauli-aarch64-calls]
+    branches: [dmd, dmd-android-arm-backends, dmd-pauli-aarch64-calls, dmd-pauli-thumb-calls]
     paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
   pull_request:
     paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
@@ -68,6 +68,34 @@ jobs:
             --imports build/bootstrap/dmd2/src/druntime/import \
             --output build/android-arm/emulated
 
+      - name: Execute Thumb direct extern(C) call qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          compiler=build/android-arm/icky-dmd
+          imports="$GITHUB_WORKSPACE/build/bootstrap/dmd2/src/druntime/import"
+          out=build/android-arm/thumb-call
+          mkdir -p "$out"
+
+          "$compiler" \
+            -target=armv7a-linux-androideabi21 \
+            -betterC -c -I"$imports" \
+            dmd/qualification/android-arm/thumb-call.d \
+            -of="$out/thumb-call.o"
+
+          clang --target=armv7a-linux-gnueabi \
+            -c dmd/qualification/android-arm/thumb-call-harness.s \
+            -o "$out/harness.o"
+
+          readelf -r "$out/thumb-call.o" | tee "$out/relocations.txt"
+          grep -Eq 'R_ARM_THM_CALL.*pauli_external_scale' "$out/relocations.txt"
+
+          ld.lld -m armelf_linux_eabi -static -e _start \
+            "$out/harness.o" "$out/thumb-call.o" \
+            -o "$out/thumb-call"
+
+          qemu-arm-static "$out/thumb-call"
+
       - name: Execute AArch64 direct extern(C) call qualification
         shell: bash
         run: |
@@ -123,7 +151,7 @@ jobs:
           cat >> "$GITHUB_STEP_SUMMARY" <<'TEXT'
           PASS: owned DMD compiled and executed both native ARM leaf paths in Linux-user emulation, without and with optimization requested.
 
-          PASS: AArch64 direct top-level extern(C) scalar call relocation resolved against an independent object and preserved the Float32 argument/result ABI.
+          PASS: Thumb-2 and AArch64 direct top-level extern(C) scalar call relocations resolved against independent objects and preserved their Float32 argument/result ABIs.
 
           PASS: independent binary32, branch, buffer, calling-convention and rejection checks; desktop Unicode regression.
 
