@@ -234,6 +234,7 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         'double': 'extern(C) double bad(double x) { return x; }',
         'real': 'extern(C) real bad(real x) { return x; }',
         'call': 'extern(C) float helper(float); extern(C) float bad(float x) { return helper(x); }',
+        'indirect_call': 'extern(C) float helper(float); extern(C) float bad(float x) { auto f = &helper; return f(x); }',
         'five_arguments': 'extern(C) float bad(float a,float b,float c,float d,float e) { return e; }',
         'global': 'int state; extern(C) int bad() { return state; }',
         'aggregate': 'struct Pair { float a,b; } extern(C) Pair bad(Pair x) { return x; }',
@@ -255,7 +256,7 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         count += 1
     # The existing AArch64 generator must not advertise unqualified runtime,
     # aggregate or extended-real support merely because it emits ELF.
-    for name in ['double', 'real', 'five_arguments', 'global', 'aggregate',
+    for name in ['double', 'real', 'indirect_call', 'five_arguments', 'global', 'aggregate',
                  'reference', 'void_initialization']:
         file = out / f'aarch64_reject_{name}.d'; file.write_text(bad_sources[name])
         obj = out / f'aarch64_reject_{name}.o'; obj.write_bytes(b'stale output must be removed')
