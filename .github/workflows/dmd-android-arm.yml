@@ -2,7 +2,7 @@ name: DMD Android ARM bring-up
 
 on:
   push:
-    branches: [dmd, dmd-android-arm-backends]
+    branches: [dmd, dmd-android-arm-backends, dmd-pauli-aarch64-calls, dmd-pauli-thumb-calls]
     paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
   pull_request:
     paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
@@ -25,6 +25,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
       - name: Install build-host dependencies
         shell: bash
         run: |
@@ -37,6 +38,7 @@ jobs:
           echo 'b342ab8bd40cc0c46407692b31d7cd69661ff01da686234f426949e881727294  build/bootstrap.tar.xz' | sha256sum -c -
           tar -xJf build/bootstrap.tar.xz -C build/bootstrap
           echo "$GITHUB_WORKSPACE/build/bootstrap/dmd2/linux/bin64" >> "$GITHUB_PATH"
+
       - name: Build owned Icky DMD
         shell: bash
         run: |
@@ -47,14 +49,16 @@ jobs:
           test -x "$dmd_bin"
           "$dmd_bin" --version
           cp "$dmd_bin" ../../../build/android-arm/icky-dmd
+
       - name: Preserve desktop Unicode execution
         shell: bash
         run: |
           set -euxo pipefail
-          build/android-arm/icky-dmd -betterC \
+          build/android-arm/icky-dmd -betterC -L-no-pie \
             -Ibuild/bootstrap/dmd2/src/druntime/import -Ibuild/bootstrap/dmd2/src/phobos \
             dmd/qualification/icky_unicode.d -of=build/android-arm/host-unicode
           build/android-arm/host-unicode
+
       - name: Execute Thumb-2 and AArch64 against independent oracles
         shell: bash
         run: |
@@ -63,6 +67,64 @@ jobs:
             --compiler build/android-arm/icky-dmd \
             --imports build/bootstrap/dmd2/src/druntime/import \
             --output build/android-arm/emulated
+
+      - name: Execute Thumb direct extern(C) call qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          compiler=build/android-arm/icky-dmd
+          imports="$GITHUB_WORKSPACE/build/bootstrap/dmd2/src/druntime/import"
+          out=build/android-arm/thumb-call
+          mkdir -p "$out"
+
+          "$compiler" \
+            -target=armv7a-linux-androideabi21 \
+            -betterC -c -I"$imports" \
+            dmd/qualification/android-arm/thumb-call.d \
+            -of="$out/thumb-call.o"
+
+          clang --target=armv7a-linux-gnueabi \
+            -c dmd/qualification/android-arm/thumb-call-harness.s \
+            -o "$out/harness.o"
+
+          readelf -r "$out/thumb-call.o" | tee "$out/relocations.txt"
+          grep -Eq 'R_ARM_THM_CALL.*pauli_external_scale' "$out/relocations.txt"
+          grep -Eq 'R_ARM_THM_CALL.*pauli_external_mix' "$out/relocations.txt"
+
+          ld.lld -m armelf_linux_eabi -static -e _start \
+            "$out/harness.o" "$out/thumb-call.o" \
+            -o "$out/thumb-call"
+
+          qemu-arm-static "$out/thumb-call"
+
+      - name: Execute AArch64 direct extern(C) call qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          compiler=build/android-arm/icky-dmd
+          imports="$GITHUB_WORKSPACE/build/bootstrap/dmd2/src/druntime/import"
+          out=build/android-arm/aarch64-call
+          mkdir -p "$out"
+
+          "$compiler" \
+            -target=aarch64-linux-android21 \
+            -betterC -c -I"$imports" \
+            dmd/qualification/android-arm/aarch64-call.d \
+            -of="$out/aarch64-call.o"
+
+          clang --target=aarch64-linux-gnu \
+            -c dmd/qualification/android-arm/aarch64-call-harness.s \
+            -o "$out/harness.o"
+
+          readelf -r "$out/aarch64-call.o" | tee "$out/relocations.txt"
+          grep -Eq 'R_AARCH64_CALL26.*pauli_external_scale [+] 0$' "$out/relocations.txt"
+
+          ld.lld -m aarch64linux -static -e _start \
+            "$out/harness.o" "$out/aarch64-call.o" \
+            -o "$out/aarch64-call"
+
+          qemu-aarch64-static "$out/aarch64-call"
+
       - name: Prepare separate Android PIE probes without claiming device execution
         shell: bash
         run: |
@@ -74,6 +136,7 @@ jobs:
               --imports build/bootstrap/dmd2/src/druntime/import \
               --output "build/android-arm/device-$architecture"
           done
+
       - name: Preserve exact-head compiler and receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -82,11 +145,14 @@ jobs:
           path: build/android-arm/
           if-no-files-found: error
           retention-days: 14
+
       - name: State execution boundary
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'TEXT'
           PASS: owned DMD compiled and executed both native ARM leaf paths in Linux-user emulation, without and with optimization requested.
+
+          PASS: Thumb-2 and AArch64 direct top-level extern(C) scalar call relocations resolved against independent objects and preserved their Float32 argument/result ABIs.
 
           PASS: independent binary32, branch, buffer, calling-convention and rejection checks; desktop Unicode regression.
 

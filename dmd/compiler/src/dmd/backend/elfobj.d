@@ -3274,12 +3274,14 @@ static if (0)
                     else
                     {
                         //printf("\tadding relocation\n");
-                        if (s.Sclass == SC.global && config.flags3 & CFG3pie && tyfunc(s.ty()))
-                            relinfo = R_X86_64_PC32;
-                        else
-                            relinfo = R_AARCH64_CALL26;
-                            //relinfo = config.flags3 & CFG3pic ?  R_X86_64_PLT32 : R_X86_64_PC32;
-                        //val = -cast(targ_size_t)4;
+                        /*
+                         * AArch64 CALL26 is RELA. The BL opcode remains in the
+                         * instruction word; the relocation addend is the
+                         * symbolic displacement only. Ordinary direct calls
+                         * have no source-level addend.
+                         */
+                        relinfo = R_AARCH64_CALL26;
+                        val = 0;
                     }
                 }
                 else

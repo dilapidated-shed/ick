@@ -56,12 +56,25 @@ private bool word_type(Type t)
 
 private bool floating(Type t) { return t && t.toBasetype().ty == TY.Tfloat32; }
 
+private string c_symbol_name(FuncDeclaration function_, Loc loc)
+{
+    string name = function_.mangleOverride.length ? function_.mangleOverride.idup :
+                  function_.ident.toString().idup;
+    foreach (i, ch; name)
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' ||
+              (i > 0 && ch >= '0' && ch <= '9')))
+            reject(loc, "Thumb ELF symbol must be a nonempty ASCII C identifier");
+    if (!name.length) reject(loc, "empty Thumb symbol");
+    return name;
+}
+
 private struct LeafEmitter
 {
     ThumbCode code;
     uint[VarDeclaration] homes;
     uint slots;
     size_t[] returns;
+    ThumbCall[] calls;
     struct LoopEdges { size_t[] breaks; size_t[] continues; }
     LoopEdges[] loops;
     Loc location;
@@ -170,6 +183,46 @@ private struct LeafEmitter
             return;
         }
         if (e.op == EXP.null_) { code.constant(0); return; }
+        if (auto call = e.isCallExp())
+        {
+            auto callee = call.e1 ? call.e1.isVarExp() : null;
+            auto function_ = callee ? callee.var.isFuncDeclaration() : null;
+            if (!function_)
+                reject(e.loc, "only direct extern(C) function calls are supported");
+
+            auto signature = function_.type.toTypeFunction();
+            if (function_.resolvedLinkage() != LINK.c || function_.isNested() || function_.isMember() ||
+                signature.isRef || signature.parameterList.varargs != VarArg.none)
+                reject(e.loc, "direct calls require top-level non-variadic extern(C) functions");
+            if (function_.parameters && function_.parameters.length > 4)
+                reject(e.loc, "Thumb softfp direct call accepts at most four one-word arguments");
+
+            if (signature.next.toBasetype().ty != TY.Tvoid)
+                require_word(signature.next, e.loc);
+
+            if (function_.parameters) foreach (parameter; *function_.parameters)
+            {
+                require_word(parameter.type, parameter.loc);
+                if (parameter.storage_class & (STC.ref_ | STC.out_ | STC.lazy_))
+                    reject(parameter.loc, "direct-call ref/out/lazy parameters are outside the leaf subset");
+            }
+
+            uint[] saved;
+            if (call.arguments) foreach (argument; *call.arguments)
+            {
+                require_word(argument.type, argument.loc);
+                expression(argument);
+                saved ~= temporary();
+                code.store(saved[$ - 1]);
+            }
+            if (saved.length > 4)
+                reject(e.loc, "Thumb softfp direct call accepts at most four one-word arguments");
+            foreach (i, slot; saved)
+                code.load(slot, cast(uint)i);
+
+            calls ~= ThumbCall(code.call(), c_symbol_name(function_, e.loc));
+            return;
+        }
         if (auto variable = e.isVarExp())
         {
             auto declaration = variable.var.isVarDeclaration();
@@ -298,7 +351,7 @@ private struct LeafEmitter
         {
             expression(ret.exp);
             returns ~= code.bytes.length;
-            code.half(0xB000); code.half(0x4770); // ADD sp, #frame; BX lr
+            code.half(0xB000); code.half(0xBD10); // ADD sp, #frame; POP {r4, pc}
             return;
         }
         if (auto branch = s.isIfStatement())
@@ -356,13 +409,8 @@ private struct LeafEmitter
         if (result.toBasetype().ty != TY.Tvoid) require_word(result, location);
         if (function_.parameters && function_.parameters.length > 4)
             reject(location, "Thumb softfp leaf accepts at most four one-word arguments");
-        string name = function_.mangleOverride.length ? function_.mangleOverride.idup :
-                      function_.ident.toString().idup;
-        foreach (i, c; name)
-            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
-                  (i > 0 && c >= '0' && c <= '9')))
-                reject(location, "Thumb ELF symbol must be a nonempty ASCII C identifier");
-        if (!name.length) reject(location, "empty Thumb symbol");
+        string name = c_symbol_name(function_, location);
+        code.half(0xB510); // PUSH {r4, lr}; keeps the public stack 8-byte aligned
         code.half(0xB080); // frame size patched after allocating all homes
         if (function_.parameters) foreach (i, parameter; *function_.parameters)
         {
@@ -374,12 +422,12 @@ private struct LeafEmitter
         }
         statement(function_.fbody);
         if (result.toBasetype().ty == TY.Tvoid)
-        { returns ~= code.bytes.length; code.half(0xB000); code.half(0x4770); }
+        { returns ~= code.bytes.length; code.half(0xB000); code.half(0xBD10); }
         else code.half(0xDE00); // unreachable fallthrough traps rather than returning garbage
         const frame = (slots * 4 + 7) & ~7U;
-        code.patch_half(0, 0xB080 | frame / 4);
+        code.patch_half(2, 0xB080 | frame / 4);
         foreach (at; returns) code.patch_half(at, 0xB000 | frame / 4);
-        return ThumbFunction(name, code.bytes);
+        return ThumbFunction(name, code.bytes, calls);
     }
 }
 

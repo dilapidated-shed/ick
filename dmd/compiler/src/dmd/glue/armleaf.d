@@ -52,14 +52,57 @@ private void check_type(Type type, Loc loc)
         diagnose(loc, "only integer, pointer and binary32 scalar representations are qualified; aggregates, double and real are not");
 }
 
+private void check_direct_c_function(FuncDeclaration function_, Loc loc)
+{
+    auto signature = function_.type.toTypeFunction();
+    if (function_.resolvedLinkage() != LINK.c || function_.isNested() || function_.isMember() ||
+        signature.isRef || signature.parameterList.varargs != VarArg.none ||
+        (function_.parameters && function_.parameters.length > 4))
+        diagnose(loc, "direct calls require top-level extern(C), non-variadic scalar functions with at most four arguments");
+
+    check_type(signature.next, loc);
+    if (function_.parameters) foreach (parameter; *function_.parameters)
+    {
+        check_type(parameter.type, parameter.loc);
+        if (parameter.storage_class & (STC.ref_ | STC.out_ | STC.lazy_))
+            diagnose(parameter.loc, "direct-call ref/out/lazy parameters are unqualified");
+    }
+}
+
 private extern(C++) class Expressions : StoppableVisitor
 {
     alias visit = typeof(super).visit;
     bool[VarDeclaration] locals;
+    bool[const(void)*] directCallees;
+
+    private extern(C++) class CallCollector : StoppableVisitor
+    {
+        alias visit = typeof(super).visit;
+        Expressions owner;
+        extern(D) this(Expressions owner) { this.owner = owner; }
+
+        override void visit(Expression e)
+        {
+            if (auto call = e.isCallExp())
+            {
+                auto callee = call.e1 ? call.e1.isVarExp() : null;
+                auto function_ = callee ? callee.var.isFuncDeclaration() : null;
+                if (!function_)
+                {
+                    diagnose(e.loc, "only direct extern(C) function calls are qualified");
+                    return;
+                }
+                owner.directCallees[cast(const(void)*)call.e1] = true;
+            }
+        }
+    }
 
     void inspect(Expression expression_)
     {
-        if (expression_) walkPostorder(expression_, this);
+        if (!expression_) return;
+        auto collector = new CallCollector(this);
+        walkPostorder(expression_, collector);
+        walkPostorder(expression_, this);
     }
 
     void local(VarDeclaration declaration)
@@ -79,6 +122,17 @@ private extern(C++) class Expressions : StoppableVisitor
 
     override void visit(Expression e)
     {
+        if (auto functionValue = e.isVarExp())
+        {
+            if (auto function_ = functionValue.var.isFuncDeclaration())
+            {
+                if (!(cast(const(void)*)e in directCallees))
+                    diagnose(e.loc, "function values are unqualified; only direct calls are allowed");
+                check_direct_c_function(function_, e.loc);
+                return;
+            }
+        }
+
         check_type(e.type, e.loc);
         if (auto declaration = e.isDeclarationExp())
         {
@@ -89,14 +143,27 @@ private extern(C++) class Expressions : StoppableVisitor
         {
             auto declaration = variable.var.isVarDeclaration();
             if (!declaration || !(declaration in locals))
-                diagnose(e.loc, "external, captured and function values are unqualified");
+                diagnose(e.loc, "external or captured values are unqualified");
         }
         switch (e.op)
         {
-            case EXP.call: case EXP.new_: case EXP.newAnonymousClass:
+            case EXP.call:
+            {
+                auto call = e.isCallExp();
+                auto callee = call.e1 ? call.e1.isVarExp() : null;
+                auto function_ = callee ? callee.var.isFuncDeclaration() : null;
+                if (!function_)
+                {
+                    diagnose(e.loc, "only direct extern(C) function calls are qualified");
+                    break;
+                }
+                check_direct_c_function(function_, e.loc);
+                break;
+            }
+            case EXP.new_: case EXP.newAnonymousClass:
             case EXP.arrayLiteral: case EXP.assocArrayLiteral: case EXP.structLiteral:
             case EXP.assert_: case EXP.throw_: case EXP.delegate_: case EXP.function_:
-                diagnose(e.loc, "calls, allocation, delegates and runtime operations are unqualified");
+                diagnose(e.loc, "allocation, delegates and runtime operations are unqualified");
                 break;
             default: break;
         }

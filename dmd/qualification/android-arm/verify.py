@@ -234,6 +234,7 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         'double': 'extern(C) double bad(double x) { return x; }',
         'real': 'extern(C) real bad(real x) { return x; }',
         'call': 'extern(C) float helper(float); extern(C) float bad(float x) { return helper(x); }',
+        'indirect_call': 'extern(C) float helper(float); extern(C) float bad(float x) { auto f = &helper; return f(x); }',
         'five_arguments': 'extern(C) float bad(float a,float b,float c,float d,float e) { return e; }',
         'global': 'int state; extern(C) int bad() { return state; }',
         'aggregate': 'struct Pair { float a,b; } extern(C) Pair bad(Pair x) { return x; }',
@@ -244,7 +245,10 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         'frame_bound': 'extern(C) int bad(int x) {' + ''.join(f'int a{i}=x+{i};' for i in range(128)) + 'return a127;}',
     }
     count = 0
-    for name, source in bad_sources.items():
+    for name in ['double', 'real', 'indirect_call', 'five_arguments', 'global', 'aggregate',
+                 'reference', 'integer_division', 'float_conversion',
+                 'void_initialization', 'frame_bound']:
+        source = bad_sources[name]
         file = out / f'reject_{name}.d'; file.write_text(source)
         obj = out / f'reject_{name}.o'; obj.write_bytes(b'stale output must be removed')
         command = [compiler, '-target=armv7a-linux-androideabi21', '-betterC', '-c', f'-I{imports}', str(file), f'-of={obj}']
@@ -255,15 +259,20 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         count += 1
     # The existing AArch64 generator must not advertise unqualified runtime,
     # aggregate or extended-real support merely because it emits ELF.
-    for name in ['double', 'real', 'call', 'five_arguments', 'global', 'aggregate',
+    for name in ['double', 'real', 'indirect_call', 'five_arguments', 'global', 'aggregate',
                  'reference', 'void_initialization']:
         file = out / f'aarch64_reject_{name}.d'; file.write_text(bad_sources[name])
         obj = out / f'aarch64_reject_{name}.o'; obj.write_bytes(b'stale output must be removed')
         command = [compiler, '-target=aarch64-linux-android21', '-betterC', '-c', f'-I{imports}', str(file), f'-of={obj}']
         result = subprocess.run(command, capture_output=True, timeout=30)
         (out/f'aarch64_reject_{name}.log').write_bytes(result.stdout+result.stderr)
-        if result.returncode == 0 or obj.exists() or b'AArch64 Android leaf boundary:' not in result.stderr:
-            raise RuntimeError(f'AArch64 rejection failed for {name}: {result.stderr.decode(errors="replace")}')
+        marker = b'AArch64 Android leaf boundary:' in result.stderr
+        if result.returncode == 0 or obj.exists() or not marker:
+            raise RuntimeError(
+                f'AArch64 rejection failed for {name}: '
+                f'returncode={result.returncode} object_exists={obj.exists()} marker={marker}\n'
+                f'{result.stderr.decode(errors="replace")}'
+            )
         count += 1
     good = out/'target_probe.d'; good.write_text('extern(C) int probe(int x) {return x;}')
     for target in ['armv7a-linux-android21', 'aarch64-linux-androideabi21', 'armv7a-linux-androideabi20',
