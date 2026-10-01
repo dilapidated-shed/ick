@@ -55,6 +55,15 @@ struct ThumbCode
         half(0x9000 | reg << 8 | slot);
     }
 
+    // Canonical unresolved Thumb-2 BL. ARM ELF uses REL rather than RELA;
+    // the encoded -4 addend accounts for Thumb PC+4 semantics.
+    size_t call()
+    {
+        auto at = bytes.length;
+        wide(0xF7FF, 0xFFFE);
+        return at;
+    }
+
     // A wide branch has a signed 25-bit byte displacement from PC+4.
     // Use it for every long edge so source size cannot silently wrap a branch.
     size_t branch()
@@ -96,10 +105,17 @@ struct ThumbCode
     }
 }
 
+struct ThumbCall
+{
+    size_t offset;
+    string symbol;
+}
+
 struct ThumbFunction
 {
     string name;
     ubyte[] code;
+    ThumbCall[] calls;
 }
 
 private void word(ref ubyte[] bytes, uint value)
@@ -113,14 +129,19 @@ private void half(ref ubyte[] bytes, uint value)
     bytes ~= cast(ubyte)(value >> 8);
 }
 
-/** Relocation-free ELF32 ARM object for independent, data-free leaf functions.
- * Every function is marked Thumb, including its ELF symbol's low bit.
- * There are no runtime helpers, absolute addresses, or writable/executable data.
+/**
+ * ELF32 ARM object for independent Thumb-2 functions.
+ *
+ * Direct calls use the ordinary ARM ELF `.rel.text` / `R_ARM_THM_CALL`
+ * contract. The BL instruction stores its implicit REL addend; the relocation
+ * points at either another function in this object or an undefined external
+ * symbol for the final linker.
  */
 ubyte[] thumb_object(ThumbFunction[] functions)
 {
-    ubyte[] text, strings = [0], symbols;
+    ubyte[] text, relocations, strings = [0], symbols;
     symbols.length = 16; // mandatory undefined symbol
+
     uint name(string value)
     {
         auto start = cast(uint)strings.length;
@@ -128,18 +149,75 @@ ubyte[] thumb_object(ThumbFunction[] functions)
         strings ~= 0;
         return start;
     }
-    void symbol(uint name_offset, uint value, uint size, ubyte info)
+
+    uint symbol(uint name_offset, uint value, uint size, ubyte info, uint section)
     {
-        word(symbols, name_offset); word(symbols, value); word(symbols, size);
-        symbols ~= info; symbols ~= 0; half(symbols, 1); // .text
+        const index = cast(uint)(symbols.length / 16);
+        word(symbols, name_offset);
+        word(symbols, value);
+        word(symbols, size);
+        symbols ~= info;
+        symbols ~= 0;
+        half(symbols, section);
+        return index;
     }
-    symbol(name("$t"), 0, 0, 0); // local Thumb mapping symbol
+
+    uint[string] symbol_indices;
+    symbol(name("$t"), 0, 0, 0, 1); // local Thumb mapping symbol
+
+    struct PendingRelocation
+    {
+        uint offset;
+        string symbol;
+    }
+    PendingRelocation[] pending;
+
     foreach (function_; functions)
     {
-        while (text.length % 4) { text ~= 0; text ~= 0xBF; } // Thumb NOP
-        symbol(name(function_.name), cast(uint)text.length | 1,
-               cast(uint)function_.code.length, 0x12); // GLOBAL FUNC
+        while (text.length % 4)
+        {
+            text ~= 0;
+            text ~= 0xBF; // Thumb NOP
+        }
+
+        const start = cast(uint)text.length;
+        const index = symbol(
+            name(function_.name),
+            start | 1,
+            cast(uint)function_.code.length,
+            0x12, // GLOBAL FUNC
+            1
+        );
+        symbol_indices[function_.name] = index;
+
+        foreach (call; function_.calls)
+            pending ~= PendingRelocation(
+                start + cast(uint)call.offset,
+                call.symbol
+            );
+
         text ~= function_.code;
+    }
+
+    foreach (relocation; pending)
+    {
+        uint target;
+        if (auto found = relocation.symbol in symbol_indices)
+            target = *found;
+        else
+        {
+            target = symbol(
+                name(relocation.symbol),
+                0,
+                0,
+                0x10, // GLOBAL NOTYPE, matching ordinary assemblers
+                0
+            );
+            symbol_indices[relocation.symbol] = target;
+        }
+
+        word(relocations, relocation.offset);
+        word(relocations, (target << 8) | 10); // R_ARM_THM_CALL
     }
 
     // aeabi Tag_File: v7-A, Thumb-2, VFPv3-D16, 8-byte stack, base PCS.
@@ -151,39 +229,112 @@ ubyte[] thumb_object(ThumbFunction[] functions)
     word(attributes, cast(uint)(5 + tags.length));
     attributes ~= tags;
 
-    immutable section_names = "\0.text\0.symtab\0.strtab\0.shstrtab\0.ARM.attributes\0.note.GNU-stack\0";
-    ubyte[][] contents = [null, text, symbols, strings,
-        cast(ubyte[])section_names.dup, attributes, null];
-    uint[7] offsets;
+    ubyte[] section_names = [0];
+    uint section_name(string value)
+    {
+        const offset = cast(uint)section_names.length;
+        section_names ~= cast(const(ubyte)[])value;
+        section_names ~= 0;
+        return offset;
+    }
+
+    uint[8] names = [
+        0,
+        section_name(".text"),
+        section_name(".rel.text"),
+        section_name(".symtab"),
+        section_name(".strtab"),
+        section_name(".shstrtab"),
+        section_name(".ARM.attributes"),
+        section_name(".note.GNU-stack")
+    ];
+
+    ubyte[][] contents = [
+        null,
+        text,
+        relocations,
+        symbols,
+        strings,
+        section_names,
+        attributes,
+        null
+    ];
+
+    uint[8] offsets;
     ubyte[] result;
     result.length = 52; // ELF header, filled below
-    foreach (i; 1 .. 7)
+    foreach (i; 1 .. 8)
     {
         while (result.length % 4) result ~= 0;
         offsets[i] = cast(uint)result.length;
         result ~= contents[i];
     }
+
     while (result.length % 4) result ~= 0;
     const section_offset = cast(uint)result.length;
-    uint[7] names = [0, 1, 7, 15, 23, 33, 49];
-    uint[7] types = [0, 1, 2, 3, 3, 0x70000003, 1];
-    foreach (i; 0 .. 7)
+
+    uint[8] types = [
+        0,
+        1,          // SHT_PROGBITS .text
+        9,          // SHT_REL .rel.text
+        2,          // SHT_SYMTAB
+        3,          // SHT_STRTAB
+        3,          // SHT_STRTAB
+        0x70000003, // SHT_ARM_ATTRIBUTES
+        1
+    ];
+
+    foreach (i; 0 .. 8)
     {
-        word(result, names[i]); word(result, types[i]);
-        word(result, i == 1 ? 6 : 0); // ALLOC | EXECINSTR
-        word(result, 0); word(result, offsets[i]);
+        word(result, names[i]);
+        word(result, types[i]);
+        word(result, i == 1 ? 6 : 0); // .text: ALLOC | EXECINSTR
+        word(result, 0);
+        word(result, offsets[i]);
         word(result, cast(uint)contents[i].length);
-        word(result, i == 2 ? 3 : 0); // symtab -> strtab
-        word(result, i == 2 ? 2 : 0); // first global symbol index
-        word(result, i == 0 ? 0 : (i == 1 || i == 2 ? 4 : 1));
-        word(result, i == 2 ? 16 : 0);
+
+        uint link = 0;
+        uint info = 0;
+        uint alignment = i == 0 ? 0 : 1;
+        uint entry_size = 0;
+
+        if (i == 2)
+        {
+            link = 3;      // .rel.text -> .symtab
+            info = 1;      // relocation applies to .text
+            alignment = 4;
+            entry_size = 8;
+        }
+        else if (i == 3)
+        {
+            link = 4;      // .symtab -> .strtab
+            info = 2;      // first global symbol
+            alignment = 4;
+            entry_size = 16;
+        }
+        else if (i == 1)
+            alignment = 4;
+
+        word(result, link);
+        word(result, info);
+        word(result, alignment);
+        word(result, entry_size);
     }
+
     ubyte[] header = [0x7F, 'E', 'L', 'F', 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    half(header, 1); half(header, 40); // ET_REL, EM_ARM
-    word(header, 1); word(header, 0); word(header, 0);
-    word(header, section_offset); word(header, 0x05000000); // EABI version 5
-    half(header, 52); half(header, 0); half(header, 0);
-    half(header, 40); half(header, 7); half(header, 4);
+    half(header, 1);
+    half(header, 40); // ET_REL, EM_ARM
+    word(header, 1);
+    word(header, 0);
+    word(header, 0);
+    word(header, section_offset);
+    word(header, 0x05000000); // EABI version 5
+    half(header, 52);
+    half(header, 0);
+    half(header, 0);
+    half(header, 40);
+    half(header, 8);
+    half(header, 5); // .shstrtab
     result[0 .. 52] = header;
     return result;
 }
