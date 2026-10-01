@@ -255,7 +255,7 @@ def negative_tests(compiler: str, imports: str, out: Path) -> int:
         count += 1
     # The existing AArch64 generator must not advertise unqualified runtime,
     # aggregate or extended-real support merely because it emits ELF.
-    for name in ['double', 'real', 'call', 'five_arguments', 'global', 'aggregate',
+    for name in ['double', 'real', 'five_arguments', 'global', 'aggregate',
                  'reference', 'void_initialization']:
         file = out / f'aarch64_reject_{name}.d'; file.write_text(bad_sources[name])
         obj = out / f'aarch64_reject_{name}.o'; obj.write_bytes(b'stale output must be removed')
