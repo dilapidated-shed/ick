@@ -83,7 +83,46 @@ jobs:
             -o "$out/harness.o"
 
           readelf -r "$out/aarch64-call.o" | tee "$out/relocations.txt"
-          grep -Eq 'R_AARCH64_CALL26.*pauli_external_scale' "$out/relocations.txt"
+          grep -Eq 'R_AARCH64_CALL26.*pauli_external_scale \+ 0
+
+          ld.lld -m aarch64linux -static -e _start \
+            "$out/harness.o" "$out/aarch64-call.o" \
+            -o "$out/aarch64-call"
+
+          qemu-aarch64-static "$out/aarch64-call"
+
+      - name: Prepare separate Android PIE probes without claiming device execution
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for architecture in thumb2 aarch64; do
+            python3 dmd/qualification/android-arm/device.py \
+              --serial PREPARE_ONLY --architecture "$architecture" --prepare-only \
+              --compiler build/android-arm/icky-dmd \
+              --imports build/bootstrap/dmd2/src/druntime/import \
+              --output "build/android-arm/device-$architecture"
+          done
+      - name: Preserve exact-head compiler and receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dmd-android-arm-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/android-arm/
+          if-no-files-found: error
+          retention-days: 14
+      - name: State execution boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'TEXT'
+          PASS: owned DMD compiled and executed both native ARM leaf paths in Linux-user emulation, without and with optimization requested.
+
+          PASS: AArch64 direct top-level extern(C) scalar call relocation resolved against an independent object and preserved the Float32 argument/result ABI.
+
+          PASS: independent binary32, branch, buffer, calling-convention and rejection checks; desktop Unicode regression.
+
+          PREPARED ONLY: Android PIE probes. No physical Android, Bionic/runtime, JNI, APK or DMD-on-phone execution is claimed.
+          TEXT
+ "$out/relocations.txt"
 
           ld.lld -m aarch64linux -static -e _start \
             "$out/harness.o" "$out/aarch64-call.o" \
