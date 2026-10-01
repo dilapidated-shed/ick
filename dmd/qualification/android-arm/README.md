@@ -36,15 +36,23 @@ inside the already-qualified scalar set. The ELF gate verifies a
 independent definition, and executes the Float32 argument/result boundary.
 Indirect calls and function values remain rejected.
 
-Thumb calls remain outside the slice. Closures, allocation, exceptions,
-aggregates, global data, binary64/extended-real representations and complete
-druntime/Phobos support also remain outside this slice. Thumb additionally
-rejects integer division, integer/float conversion, by-reference parameters,
-more than four argument words, byte-element memory access, excessive frames and
-other unimplemented expressions/statements. AArch64's guard remains
-deliberately conservative even where the underlying native generator has
-additional capabilities. Its unqualified extended-real ABI must not be exposed
-as Android `long double` support.
+Thumb now qualifies the same direct top-level `extern(C)` scalar-call
+surface. The custom emitter evaluates arguments into stack homes, reloads the
+softfp `r0-r3` boundary, preserves LR with an 8-byte-aligned stack, and emits
+ordinary ELF32 `.rel.text` `R_ARM_THM_CALL` relocations. The independent
+Thumb fixture resolves such a call against a separately assembled definition
+and executes the Float32 argument/result ABI under QEMU.
+
+Indirect calls and function values remain rejected on both ARM architectures.
+Closures, allocation, exceptions, aggregates, global data,
+binary64/extended-real representations and complete druntime/Phobos support
+also remain outside this slice. Thumb additionally rejects integer division,
+integer/float conversion, by-reference parameters, more than four argument
+words, byte-element memory access, excessive frames and other unimplemented
+expressions/statements. AArch64's guard remains deliberately conservative even
+where the underlying native generator has additional capabilities. Its
+unqualified extended-real ABI must not be exposed as Android `long double`
+support.
 
 ## Reuse and corrections
 
