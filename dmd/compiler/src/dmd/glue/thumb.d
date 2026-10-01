@@ -46,12 +46,22 @@ private void reject(Loc loc, string message)
     throw new UnsupportedThumb(loc, message);
 }
 
+private bool byte_type(Type t)
+{
+    return t && t.toBasetype().ty == TY.Tuns8;
+}
+
 private bool word_type(Type t)
 {
     if (!t) return false;
     const ty = t.toBasetype().ty;
     return ty == TY.Tint32 || ty == TY.Tuns32 || ty == TY.Tfloat32 ||
            ty == TY.Tbool || ty == TY.Tpointer;
+}
+
+private bool scalar_type(Type t)
+{
+    return word_type(t) || byte_type(t);
 }
 
 private bool floating(Type t) { return t && t.toBasetype().ty == TY.Tfloat32; }
@@ -93,9 +103,16 @@ private struct LeafEmitter
         return *found;
     }
 
+    void require_scalar(Type t, Loc loc)
+    {
+        if (!scalar_type(t))
+            reject(loc, "only ubyte, float, int, uint, bool and pointers are supported in Thumb leaves");
+    }
+
     void require_word(Type t, Loc loc)
     {
-        if (!word_type(t)) reject(loc, "only float, int, uint, bool and pointers are supported in Thumb leaves");
+        if (!word_type(t))
+            reject(loc, "this Thumb ABI position requires float, int, uint, bool or pointer");
     }
 
     void condition(Expression expression_)
@@ -114,14 +131,16 @@ private struct LeafEmitter
         if (auto index = expression_.isIndexExp())
         {
             if (index.e1.type.toBasetype().ty != TY.Tpointer ||
-                !word_type(index.type) || index.type.toBasetype().ty == TY.Tbool)
-                reject(index.loc, "only caller-owned four-byte pointer elements are supported");
+                (!word_type(index.type) && !byte_type(index.type)) ||
+                index.type.toBasetype().ty == TY.Tbool)
+                reject(index.loc, "only caller-owned ubyte or four-byte pointer elements are supported");
             expression(index.e1);
             const saved = temporary();
             code.store(saved);
             expression(index.e2);
             code.half(0x4601); // MOV r1, r0
-            code.half(0x0089); // LSLS r1, r1, #2
+            if (!byte_type(index.type))
+                code.half(0x0089); // LSLS r1, r1, #2 for four-byte elements
             code.load(saved);
             code.half(0x1840); // ADDS r0, r0, r1
             return;
@@ -129,7 +148,9 @@ private struct LeafEmitter
         if (expression_.op == EXP.star)
         {
             if (expression_.type.toBasetype().ty == TY.Tbool)
-                reject(expression_.loc, "byte-sized memory accesses are not implemented");
+                reject(expression_.loc, "bool memory accesses are not implemented");
+            if (!word_type(expression_.type) && !byte_type(expression_.type))
+                reject(expression_.loc, "only ubyte or four-byte dereference is supported");
             expression(expression_.isUnaExp().e1);
             return;
         }
@@ -149,13 +170,21 @@ private struct LeafEmitter
         code.store(saved);
         address(destination);
         code.load(saved, 1);
-        code.half(0x6001); // STR r1, [r0]
-        code.half(0x4608); // MOV r0, r1: assignment evaluates to stored value
+        if (byte_type(destination.type))
+        {
+            code.half(0x7001); // STRB r1, [r0]
+            code.uxtb(0, 1);   // assignment value is the stored zero-extended byte
+        }
+        else
+        {
+            code.half(0x6001); // STR r1, [r0]
+            code.half(0x4608); // MOV r0, r1
+        }
     }
 
     void declare(VarDeclaration variable)
     {
-        require_word(variable.type, variable.loc);
+        require_scalar(variable.type, variable.loc);
         if (variable.storage_class & (STC.static_ | STC.ref_ | STC.out_ | STC.lazy_))
             reject(variable.loc, "static and by-reference locals are outside the leaf subset");
         homes[variable] = temporary();
@@ -171,7 +200,7 @@ private struct LeafEmitter
         if (++depth > 128) reject(e.loc, "Thumb expression nesting exceeds 128");
         scope(exit) --depth;
         if (e.type && e.type.toBasetype().ty != TY.Tvoid && e.op != EXP.declaration)
-            require_word(e.type, e.loc);
+            require_scalar(e.type, e.loc);
         if (auto integer = e.isIntegerExp()) { code.constant(cast(uint)integer.value); return; }
         if (auto real_constant = e.isRealExp())
         {
@@ -239,16 +268,31 @@ private struct LeafEmitter
         {
             if (cast_.type.toBasetype().ty == TY.Tbool)
             { condition(cast_.e1); code.boolean_result(1); return; }
+
+            if (byte_type(cast_.type))
+            {
+                if (floating(cast_.e1.type) || !scalar_type(cast_.e1.type))
+                    reject(e.loc, "ubyte narrowing currently accepts integer-like scalar sources only");
+                expression(cast_.e1);
+                code.uxtb();
+                return;
+            }
+
             if (floating(cast_.type) != floating(cast_.e1.type))
                 reject(e.loc, "integer/float conversions are not implemented in this Thumb slice");
-            require_word(cast_.e1.type, e.loc);
+            require_scalar(cast_.e1.type, e.loc);
             expression(cast_.e1);
-            if (e.type.toBasetype().ty == TY.Tbool)
-            { code.half(0x2800); code.boolean_result(1); }
             return;
         }
         if (e.op == EXP.index || e.op == EXP.star)
-        { address(e); code.half(0x6800); return; } // LDR r0, [r0]
+        {
+            address(e);
+            if (byte_type(e.type))
+                code.half(0x7800); // LDRB r0, [r0]
+            else
+                code.half(0x6800); // LDR r0, [r0]
+            return;
+        }
         if (e.op == EXP.negate || e.op == EXP.uadd || e.op == EXP.not)
         {
             auto operand = e.isUnaExp().e1;
