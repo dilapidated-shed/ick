@@ -29,15 +29,22 @@ regression configuration, **not a claim of a Thumb optimization pass**. The
 AArch64 `-O` invocation uses the existing native optimizer. Both Android forms
 require `-betterC -c` and reject runtime/linking/debug/profiling modes.
 
-Unsupported forms are errors, not omitted code. General calls, closures,
-allocation, exceptions, aggregates, global data, binary64/extended-real
-representations and complete druntime/Phobos support remain outside this slice.
-Thumb additionally rejects integer division, integer/float conversion,
-by-reference parameters, more than four argument words, byte-element memory
-access, excessive frames and other unimplemented expressions/statements.
-AArch64's guard is deliberately conservative even where the underlying native
-generator has additional capabilities. Its unqualified extended-real ABI must
-not be exposed as Android `long double` support.
+Unsupported forms are errors, not omitted code. AArch64 now qualifies direct
+top-level `extern(C)` calls whose return and at most four parameters stay
+inside the already-qualified scalar set. The ELF gate verifies a
+`R_AARCH64_CALL26` relocation with zero RELA addend, links it against an
+independent definition, and executes the Float32 argument/result boundary.
+Indirect calls and function values remain rejected.
+
+Thumb calls remain outside the slice. Closures, allocation, exceptions,
+aggregates, global data, binary64/extended-real representations and complete
+druntime/Phobos support also remain outside this slice. Thumb additionally
+rejects integer division, integer/float conversion, by-reference parameters,
+more than four argument words, byte-element memory access, excessive frames and
+other unimplemented expressions/statements. AArch64's guard remains
+deliberately conservative even where the underlying native generator has
+additional capabilities. Its unqualified extended-real ABI must not be exposed
+as Android `long double` support.
 
 ## Reuse and corrections
 
@@ -50,7 +57,10 @@ Mars already emitted AArch64 ELF before this change; it did not need replacing.
 Execution tests exposed two real comparison errors in that path: integer
 condition codes incorrectly treated unordered Float32 comparisons as ordered,
 and a register-reuse operand swap was not reflected in floating-point compare
-emission. The changes correct both. Android objects use ELF SYSV OSABI and
+emission. The changes correct both. The direct-call gate later exposed a third
+AArch64 object bug: `R_AARCH64_CALL26` RELA records incorrectly copied the BL
+opcode `0x94000000` into the relocation addend. The instruction keeps the BL
+opcode while the ordinary direct-call RELA addend is now zero. Android objects use ELF SYSV OSABI and
 Bionic predefined identifiers; they do not inherit host Glibc identifiers.
 The existing AArch64 register mask already excludes Android's reserved `x18`.
 
