@@ -2,7 +2,7 @@ name: DMD Android ARM bring-up
 
 on:
   push:
-    branches: [dmd, dmd-android-arm-backends]
+    branches: [dmd, dmd-android-arm-backends, dmd-pauli-aarch64-calls]
     paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
   pull_request:
     paths: ['dmd/**', '.github/workflows/dmd-android-arm.yml']
