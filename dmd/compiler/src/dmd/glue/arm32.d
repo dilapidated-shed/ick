@@ -57,10 +57,10 @@ private bool floating(Type t)
     return t && t.toBasetype().ty == TY.Tfloat32;
 }
 
-private string functionName(FuncDeclaration function_, Loc loc)
+private string declarationName(Declaration declaration, Loc loc)
 {
-    string name = function_.mangleOverride.length ? function_.mangleOverride.idup :
-                  function_.ident.toString().idup;
+    string name = declaration.mangleOverride.length ? declaration.mangleOverride.idup :
+                  declaration.ident.toString().idup;
     foreach (i, ch; name)
     {
         if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' ||
@@ -79,6 +79,14 @@ private struct LeafEmitter
     uint[VarDeclaration] homes;
     uint slots;
     size_t[] returns;
+
+    struct GlobalLiteral
+    {
+        size_t loadAt;
+        string symbol;
+    }
+    GlobalLiteral[] globalLiterals;
+    uint[] dataOffsets;
 
     struct StackParameterLoad
     {
@@ -118,6 +126,23 @@ private struct LeafEmitter
             reject(loc, "initial A32 lowering supports float, int, uint, bool and pointers");
     }
 
+    string globalName(VarDeclaration variable)
+    {
+        requireWord(variable.type, variable.loc);
+        if (!variable.isDataseg() || variable.isThreadlocal())
+            reject(variable.loc, "A32 scalar globals must be non-TLS data-segment variables");
+        if (variable.resolvedLinkage() != LINK.c)
+            reject(variable.loc, "A32 scalar globals currently require extern(C) linkage");
+        return declarationName(variable, variable.loc);
+    }
+
+    void globalAddress(VarDeclaration variable)
+    {
+        const loadAt = code.loadLiteral();
+        code.instruction(0xE79F0000); // LDR r0,[pc,r0] through GOT
+        globalLiterals ~= GlobalLiteral(loadAt, globalName(variable));
+    }
+
     void condition(Expression expression_)
     {
         expression(expression_);
@@ -128,6 +153,16 @@ private struct LeafEmitter
 
     void address(Expression expression_)
     {
+        if (auto variable = expression_.isVarExp())
+        {
+            auto declaration = variable.var.isVarDeclaration();
+            if (!declaration)
+                reject(expression_.loc, "address target is not a variable");
+            if (declaration in homes)
+                reject(expression_.loc, "taking the address of an A32 stack local is not implemented");
+            globalAddress(declaration);
+            return;
+        }
         if (auto index = expression_.isIndexExp())
         {
             if (index.e1.type.toBasetype().ty != TY.Tpointer ||
@@ -159,8 +194,19 @@ private struct LeafEmitter
         {
             auto declaration = variable.var.isVarDeclaration();
             if (!declaration)
-                reject(destination.loc, "assignment target is not a local variable");
-            code.store(home(declaration));
+                reject(destination.loc, "assignment target is not a variable");
+            if (auto found = declaration in homes)
+            {
+                code.store(*found);
+                return;
+            }
+
+            const saved = temporary();
+            code.store(saved);
+            globalAddress(declaration);
+            code.load(saved, 1);
+            code.instruction(0xE5801000); // STR r1,[r0]
+            code.instruction(0xE1A00001); // MOV r0,r1
             return;
         }
         const saved = temporary();
@@ -235,7 +281,7 @@ private struct LeafEmitter
             code.loadStackOffset(outgoing + argumentHomes[i] * 4, i);
 
         const at = code.call();
-        relocations ~= Arm32Relocation(cast(uint)at, functionName(callee, call.loc));
+        relocations ~= Arm32Relocation(cast(uint)at, declarationName(callee, call.loc), ARM32_R_CALL);
         code.adjustStack(outgoing, false);
     }
 
@@ -279,7 +325,13 @@ private struct LeafEmitter
             auto declaration = variable.var.isVarDeclaration();
             if (!declaration)
                 reject(e.loc, "function values are outside the initial A32 slice");
-            code.load(home(declaration));
+            if (auto found = declaration in homes)
+                code.load(*found);
+            else
+            {
+                globalAddress(declaration);
+                code.instruction(0xE5900000); // LDR r0,[r0]
+            }
             return;
         }
         if (auto declaration = e.isDeclarationExp())
@@ -302,6 +354,11 @@ private struct LeafEmitter
                 reject(e.loc, "integer/float conversions are not implemented");
             requireWord(cast_.e1.type, e.loc);
             expression(cast_.e1);
+            return;
+        }
+        if (e.op == EXP.address)
+        {
+            address(e.isUnaExp().e1);
             return;
         }
         if (e.op == EXP.index || e.op == EXP.star)
@@ -421,7 +478,7 @@ private struct LeafEmitter
                 {
                     const helper = unsigned_ ? "__aeabi_uidiv" : "__aeabi_idiv";
                     const at = code.call();
-                    relocations ~= Arm32Relocation(cast(uint)at, helper);
+                    relocations ~= Arm32Relocation(cast(uint)at, helper, ARM32_R_CALL);
                 }
                 break;
             case EXP.mod:
@@ -431,7 +488,7 @@ private struct LeafEmitter
                 {
                     const helper = unsigned_ ? "__aeabi_uidivmod" : "__aeabi_idivmod";
                     const at = code.call();
-                    relocations ~= Arm32Relocation(cast(uint)at, helper);
+                    relocations ~= Arm32Relocation(cast(uint)at, helper, ARM32_R_CALL);
                     code.instruction(0xE1A00001);     // MOV r0,r1: EABI divmod remainder
                 }
                 break;
@@ -593,7 +650,7 @@ private struct LeafEmitter
         if (function_.parameters && function_.parameters.length > 64)
             reject(location, "more than 64 one-word parameters are outside the qualification range");
 
-        string name = functionName(function_, location);
+        string name = declarationName(function_, location);
 
         code.instruction(0xE92D4010); // PUSH {r4,lr}; 8 bytes keeps public SP alignment
         const prologue = code.bytes.length;
@@ -633,6 +690,21 @@ private struct LeafEmitter
         else
             code.instruction(0xE7F000F0); // unreachable fallthrough traps
 
+        if (globalLiterals.length)
+        {
+            dataOffsets ~= cast(uint)code.bytes.length;
+            foreach (literal; globalLiterals)
+            {
+                const literalAt = code.bytes.length;
+                code.patchLoadLiteral(literal.loadAt, literalAt);
+                const pcBase = literal.loadAt + 12; // second LDR uses architectural PC = instruction + 8
+                if (literalAt < pcBase)
+                    reject(location, "internal A32 GOT literal placement underflow");
+                code.instruction(cast(uint)(literalAt - pcBase));
+                relocations ~= Arm32Relocation(cast(uint)literalAt, literal.symbol, ARM32_R_GOT_PREL);
+            }
+        }
+
         const frame = (slots * 4 + 7) & ~7U;
         code.patchFrame(prologue, frame, true);
         foreach (at; returns)
@@ -640,7 +712,7 @@ private struct LeafEmitter
         foreach (load; stackParameterLoads)
             code.patchLoadStackOffset(load.at, frame + 8 + load.incomingOffset);
 
-        return Arm32Function(name, code.bytes, relocations);
+        return Arm32Function(name, code.bytes, relocations, dataOffsets);
     }
 }
 
