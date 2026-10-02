@@ -297,7 +297,12 @@ COND conditionCode(elem* e)
     int i;
     if (tyfloating(tym))
     {
-        i = 0;
+        // FCMP/FCMPE unordered (NaN) sets NZCV=0011. Integer LT/LE
+        // include that state, so they are not floating-point < / <=.
+        // Do not apply the integer zero-comparison shortcuts either.
+        immutable COND[6] floatingConditions =
+            [COND.ls, COND.gt, COND.mi, COND.ge, COND.eq, COND.ne];
+        return floatingConditions[op - OPle];
     }
     else if (tyuns(tym) || tyuns(e.E2.Ety))
         i = 1;
