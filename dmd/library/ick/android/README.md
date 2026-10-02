@@ -20,7 +20,8 @@ Defined now:
 - primitive, UTF-8 string and nullable UTF-8 string-array Parcel reads/writes plus Binder handles;
 - ParcelFileDescriptor read/write;
 - Java Binder conversion and Java-to-native Parcel conversion entry points;
-- Android log write.
+- Android log write;
+- the small Bionic process/PTY/pthread ABI surface required by Rish.
 
 The string declarations follow the modern NDK C ABI: AParcel_stringAllocator
 returns bool and receives an int32 length plus char** output buffer, while
@@ -47,6 +48,11 @@ The stable NDK also does **not** expose Java Binder's
 forwarding therefore needs a narrow framework/JNI or platform-libbinder bridge
 for the transparent transact/identity portion. These NDK declarations remain
 useful around that bridge; they are not evidence that the bridge can be omitted.
+
+The Bionic slice deliberately exposes only the process/PTY/pthread calls used by
+Rish: fd I/O, fork/exec/wait, PTY setup, termios/window sizing, signals and
+mutex/thread primitives. The ARM termios layout uses NCCS=19; pthread mutex
+storage follows Bionic's LP32/LP64 ABI split.
 
 JNI/Java framework bridges for Bundle, Intent,
 ComponentName, ContentProvider, Looper/Handler and older Android releases remain
