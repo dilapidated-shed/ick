@@ -87,6 +87,8 @@ struct Triple
     private const(char)[] source;
     CPU               cpu;
     bool              isX86_64;
+    bool              isARM32;
+    bool              isAndroid;
     bool              isLP64;
     Target.OS         os;
     ubyte             osMajor;
@@ -132,6 +134,11 @@ struct Triple
             cppenv = parseCPPEnv(_cppenv);
         else if (this.os == Target.OS.Windows)
             cppenv = TargetCPP.Runtime.Microsoft;
+
+        if (triple.length)
+            unknown(triple, "trailing target components");
+        if (isARM32 && (this.os != Target.OS.linux || !isAndroid))
+            unknown(_triple.toDString(), "ARM32 target (only Android armeabi-v7a is supported)");
     }
     private extern(D):
 
@@ -152,6 +159,12 @@ struct Triple
                 return false;
             arch = arch[str.length .. $];
             return true;
+        }
+
+        if (arch == "armv7a")
+        {
+            isARM32 = true;
+            return;
         }
 
         if (matches("x86_64"))
@@ -279,6 +292,20 @@ struct Triple
 
     TargetC.Runtime parseCEnv(const(char)[] cenv)
     {
+        import std.algorithm.searching : startsWith;
+
+        if (cenv.startsWith("androideabi"))
+        {
+            auto suffix = cenv["androideabi".length .. $];
+            const hadVersion = suffix.length != 0;
+            bool overflow;
+            const api = parseNumber(suffix, overflow);
+            if (!isARM32 || suffix.length || overflow || (hadVersion && api < 21))
+                unknown(cenv, "Android environment (armeabi-v7a, minimum API 21)");
+            isAndroid = true;
+            return TargetC.Runtime.Bionic;
+        }
+
         with (TargetC.Runtime) switch (cenv)
         {
             case "musl":         return Musl;
@@ -333,8 +360,11 @@ void setTargetBuildDefaults(ref Target target) @safe
 void setTriple(ref Target target, const ref Triple triple) @safe
 {
     target.cpu     = triple.cpu;
+    target.isAArch64 = false;
     target.isX86_64 = triple.isX86_64;
-    target.isX86    = !target.isX86_64;
+    target.isARM32  = triple.isARM32;
+    target.isAndroid = triple.isAndroid;
+    target.isX86    = !target.isX86_64 && !target.isARM32;
     target.isLP64  = triple.isLP64;
     target.os      = triple.os;
     target.osMajor = triple.osMajor;
