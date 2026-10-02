@@ -194,3 +194,93 @@ extern(C) double read_own_double_global()
 {
     return own_double_global;
 }
+
+extern(C) long long_add(long a, long b)
+{
+    return a + b;
+}
+
+extern(C) long long_sub(long a, long b)
+{
+    return a - b;
+}
+
+extern(C) long long_mul(long a, long b)
+{
+    return a * b;
+}
+
+extern(C) long long_div(long a, long b)
+{
+    return a / b;
+}
+
+extern(C) long long_mod(long a, long b)
+{
+    return a % b;
+}
+
+extern(C) ulong ulong_div(ulong a, ulong b)
+{
+    return a / b;
+}
+
+extern(C) ulong ulong_mod(ulong a, ulong b)
+{
+    return a % b;
+}
+
+extern(C) long long_neg(long a)
+{
+    return -a;
+}
+
+extern(C) int long_less(long a, long b)
+{
+    return a < b;
+}
+
+extern(C) int ulong_greater(ulong a, ulong b)
+{
+    return a > b;
+}
+
+extern(C) int long_truth(long a)
+{
+    return !!a;
+}
+
+extern(C) double double_add(double a, double b)
+{
+    return a + b;
+}
+
+extern(C) double double_sub(double a, double b)
+{
+    return a - b;
+}
+
+extern(C) double double_mul(double a, double b)
+{
+    return a * b;
+}
+
+extern(C) double double_div(double a, double b)
+{
+    return a / b;
+}
+
+extern(C) double double_neg(double a)
+{
+    return -a;
+}
+
+extern(C) int double_less(double a, double b)
+{
+    return a < b;
+}
+
+extern(C) int double_truth(double a)
+{
+    return !!a;
+}
