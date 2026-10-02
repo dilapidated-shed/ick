@@ -213,7 +213,7 @@ void check_e5m3_direct_arithmetic()
         {
             E5M3 result = E5M3.from_code(0x5a);
             bool accepted;
-            final switch (operation)
+            switch (operation)
             {
                 case 0:
                     accepted = E5M3.try_add(values[left], values[right], result);
