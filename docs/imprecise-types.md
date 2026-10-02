@@ -29,17 +29,22 @@ Raw payload access is explicit through the corresponding `*_from_code` and
 
 ## Arithmetic policy
 
-`Float16`, `E4M3`, `E5M2`, and `E3M2` follow the Idriç policy: decode to
-binary32, perform exactly one binary32 operation, then requantize to the
-destination format. ICK provides explicit add, subtract, multiply, and divide
-functions for those four types.
+`Float16` arithmetic is binary16 arithmetic. The portable reference follower
+operates on the 16-bit payload with integer significands, exponents, exact
+dyadic alignment and round-to-nearest/ties-to-even. It does **not** decode to
+binary32 to perform `+`, `-`, `*`, or `/`.
 
-This intentionally does not route through binary64.
+`E4M3`, `E5M2`, and `E3M2` still use the older reference policy for now:
+decode to binary32, perform one operation, then requantize. That remaining
+policy is intentionally separate from Float16 and E5M3.
 
-`E5M3` is different. It is the unsigned Ootomo-Naruse eight-bit storage
-format. It has explicit encode/decode operations but no scalar arithmetic
-contract. Because it is a distinct structure type, ordinary C arithmetic on it
-is rejected.
+`E5M3` keeps ordinary C operators unavailable because its unsigned storage
+domain cannot represent zero, negative results, underflow, or overflow.
+Checked `e5m3_add`, `e5m3_subtract`, and `e5m3_multiply` are provided
+instead. Addition/subtraction use an exact common fixed-point lattice.
+Multiplication widens only the integer significand product required by that
+one operation, then immediately requantizes to E5M3. None of those operations
+uses Float16 or binary32 arithmetic.
 
 ## Float16
 
@@ -48,8 +53,8 @@ round-to-nearest, ties-to-even, including subnormals and the normal overflow
 boundary at 65520. Infinities remain infinities and NaNs remain NaNs; NaN
 payloads are canonicalized by the storage conversion.
 
-This mirrors the source-level Float16 contract carried by Idriç PR #49 while
-giving ICK a concrete two-byte representation.
+The payload and exceptional-value behavior remain IEEE binary16; the arithmetic
+implementation is now independent of binary32 machine arithmetic.
 
 ## E4M3
 
@@ -78,14 +83,19 @@ ICK follows the Ootomo-Naruse unsigned storage format documented in the ARM
 Thumb backend. The published conversion applies to positive normal binary32
 inputs, so `e5m3_from_float` remains partial and returns failure for values
 outside that domain. `e5m3_to_float` implements the published midpoint
-reconstruction for every one of the 256 payload codes.
+reconstruction for every one of the 256 payload codes. Checked arithmetic
+preserves the output argument on any result that falls outside this domain.
 
 ## Source alignment
 
 The policy comes from the current Idriç work:
 
-- PR #49: Float16 binary32-carrier semantics
+- PR #49: original Float16 source surface
 - PR #120: first-class E4M3, E5M2, E3M2, and E5M3 source semantics
+
+ICK no longer adopts binary32 as the Float16 arithmetic carrier. That is an
+implementation-policy correction in this repository, not a storage-format
+change.
 
 The E3M2 and E5M3 storage references are also recorded in
 `isomorphisms/idric-arm-thumb`.
@@ -100,7 +110,9 @@ The host semantic probe checks:
 - all 64 E3M2 payloads;
 - all 256 E5M3 payloads;
 - representative overflow and tie boundaries;
-- the four arithmetic formats' requantization policy.
+- Float16 `+`, `-`, `*`, and `/` against the C/D semantic receipts;
+- exhaustive checked E5M3 `+`, `-`, and `*` result/domain behavior;
+- the remaining E4M3/E5M2/E3M2 requantization policy.
 
 The Android four-ABI matrix then compiles the same freestanding interface with
 ICK itself and verifies that no binary64 helper has entered the boundary.
