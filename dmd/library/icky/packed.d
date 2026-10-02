@@ -168,5 +168,5 @@ struct PackedView(Storage, Arithmetic, size_t Alignment = 1, uint AliasSet = 0)
     }
 }
 
-static assert(PackedValue!(E5M3, Float16).sizeof == E5M3.sizeof);
-static assert(PackedView!(E5M3, Float16, 1).sizeof <= 4 * size_t.sizeof);
+static assert(PackedValue!(UE5M3, Float16).sizeof == UE5M3.sizeof);
+static assert(PackedView!(UE5M3, Float16, 1).sizeof <= 4 * size_t.sizeof);
