@@ -8,6 +8,7 @@ E3M2[1] e3;
 E4M3[1] e4;
 ubyte[1] bytes;
 const(E5M3)[1] read_only;
+E5M3 direct_output;
 
 void accepts_widened_slice(Float16[] value) {}
 
@@ -19,6 +20,20 @@ static assert(!__traits(compiles,
     icky.packed_memory.compute_at!(Float16, "+")(bytes[], 0, e5[], 0)));
 static assert(!__traits(compiles,
     icky.packed_memory.compute_at!(Float16, "+")(e4[], 0, e5[], 0)));
+static assert(!__traits(compiles,
+    icky.packed_memory.compute_at!(Float16, "+")(e5[], 0, e5[], 0)));
+static assert(!__traits(compiles,
+    icky.packed_memory.compute_at!(Float16, "-")(e5[], 0, e5[], 0)));
+static assert(__traits(compiles,
+    icky.packed_memory.try_e5m3_at!("+")(e5[], 0, e5[], 0, direct_output)));
+static assert(__traits(compiles,
+    icky.packed_memory.try_e5m3_at!("-")(e5[], 0, e5[], 0, direct_output)));
+static assert(__traits(compiles,
+    icky.packed_memory.try_e5m3_at!("*")(e5[], 0, e5[], 0, direct_output)));
+static assert(!__traits(compiles,
+    icky.packed_memory.try_e5m3_at!("/")(e5[], 0, e5[], 0, direct_output)));
+static assert(!__traits(compiles,
+    icky.packed_memory.try_e5m3_at!("+")(e5[], 0, e3[], 0, direct_output)));
 static assert(!__traits(compiles, e5[0] + e5[0]));
 static assert(!__traits(compiles,
     icky.packed_memory.try_store_at(read_only[], 0, Float16.init)));
