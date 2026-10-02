@@ -66,3 +66,23 @@ extern(C) float call_float(float a, float b)
 {
     return add_float(a, b);
 }
+
+extern(C) int signed_div(int a, int b)
+{
+    return a / b;
+}
+
+extern(C) uint unsigned_div(uint a, uint b)
+{
+    return a / b;
+}
+
+extern(C) int signed_mod(int a, int b)
+{
+    return a % b;
+}
+
+extern(C) uint unsigned_mod(uint a, uint b)
+{
+    return a % b;
+}
