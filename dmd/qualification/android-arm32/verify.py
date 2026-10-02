@@ -90,6 +90,24 @@ def check_elf(path: Path) -> None:
     if struct.unpack_from("<I", data, own_offset)[0] != 7:
         raise RuntimeError("own_global initializer was not emitted as 7")
 
+    external_long = [s for s in symbols if s[0] == "external_long_global"]
+    if len(external_long) != 1 or external_long[0][5] != 0 or (external_long[0][3] & 0xF) != 1:
+        raise RuntimeError("external_long_global must be one undefined ELF object symbol")
+
+    own_long = [s for s in symbols if s[0] == "own_long_global"]
+    if len(own_long) != 1 or own_long[0][5] != data_index or own_long[0][2] != 8 or own_long[0][1] % 8:
+        raise RuntimeError("own_long_global must be one aligned eight-byte .data object")
+    own_long_offset = data_section[4] + own_long[0][1]
+    if struct.unpack_from("<Q", data, own_long_offset)[0] != 0x0102030405060708:
+        raise RuntimeError("own_long_global initializer mismatch")
+
+    own_double = [s for s in symbols if s[0] == "own_double_global"]
+    if len(own_double) != 1 or own_double[0][5] != data_index or own_double[0][2] != 8 or own_double[0][1] % 8:
+        raise RuntimeError("own_double_global must be one aligned eight-byte .data object")
+    own_double_offset = data_section[4] + own_double[0][1]
+    if struct.unpack_from("<Q", data, own_double_offset)[0] != 0x400C000000000000:
+        raise RuntimeError("own_double_global initializer mismatch")
+
     call_targets = []
     got_targets = []
     for at in range(rel[4], rel[4] + rel[5], 8):
@@ -122,7 +140,13 @@ def check_elf(path: Path) -> None:
     if Counter(call_targets) != expected_calls:
         raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(call_targets)}")
 
-    expected_got = Counter({"own_global": 3, "external_global": 2})
+    expected_got = Counter({
+        "own_global": 3,
+        "external_global": 2,
+        "own_long_global": 2,
+        "external_long_global": 2,
+        "own_double_global": 1,
+    })
     if Counter(got_targets) != expected_got:
         raise RuntimeError(f"unexpected R_ARM_GOT_PREL targets: {Counter(got_targets)}")
 
@@ -151,6 +175,13 @@ def harness() -> str:
 external_global:
     .word 11
 .size external_global,4
+
+.p2align 3
+.global external_long_global
+.type external_long_global,%object
+external_long_global:
+    .quad 0x2233445566778899
+.size external_long_global,8
 
 .text
 
@@ -538,6 +569,70 @@ _start:
     cmp sp, r11
     bne fail
 
+    bl read_own_long_global
+    movw r2, #0x0708
+    movt r2, #0x0506
+    cmp r0, r2
+    bne fail
+    movw r2, #0x0304
+    movt r2, #0x0102
+    cmp r1, r2
+    bne fail
+
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x1122
+    bl set_own_long_global
+    bl read_own_long_global
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+    movw r2, #0x3344
+    movt r2, #0x1122
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    bl read_external_long_global
+    movw r2, #0x8899
+    movt r2, #0x6677
+    cmp r0, r2
+    bne fail
+    movw r2, #0x4455
+    movt r2, #0x2233
+    cmp r1, r2
+    bne fail
+
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x1122
+    bl set_external_long_global
+    bl read_external_long_global
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+    movw r2, #0x3344
+    movt r2, #0x1122
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    bl read_own_double_global
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0x400c
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
     mov r0, #0
     mov r7, #1
     svc #0
@@ -585,7 +680,7 @@ def main() -> None:
     run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
-    print("PASS: A32 base PCS softfp: calls, GOT globals, EABI helpers, and aligned 64-bit scalar arguments/results")
+    print("PASS: A32 base PCS softfp: calls, GOT one/two-word globals, EABI helpers, aligned 64-bit scalar ABI")
 
 
 if __name__ == "__main__":
