@@ -1,5 +1,7 @@
 module icky_unicode_acceptance;
 
+import std.math : pow;
+
 extern(C) int main()
 {
     int left;
