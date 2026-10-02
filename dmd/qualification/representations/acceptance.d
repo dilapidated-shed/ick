@@ -252,6 +252,8 @@ void check_e5m3_direct_arithmetic()
                 case 2:
                     accepted = E5M3.try_multiply(values[left], values[right], result);
                     break;
+                default:
+                    assert(0);
             }
             const expected = oracle_e5m3_operation(operation, left, right);
             assert(accepted == (expected != 0x10000u));
