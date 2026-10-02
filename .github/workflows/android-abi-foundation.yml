@@ -65,6 +65,13 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Check four-lane FFT butterfly semantics
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cc -std=c11 -Wall -Wextra -Werror -O2             qualification/android-boundary/ick-armv7-neon-fft.c             qualification/android-boundary/ick-armv7-neon-fft-semantic.c             -o /tmp/ick-armv7-neon-fft-semantic
+          /tmp/ick-armv7-neon-fft-semantic
+
   qualify:
     name: ${{ matrix.abi }} source and boundary
     needs: imprecise-semantics
