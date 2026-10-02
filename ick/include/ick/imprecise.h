@@ -355,8 +355,10 @@ ick_half_divide_codes(ick_u16 left, ick_u16 right)
     int sign = ick_half_sign(left) != ick_half_sign(right);
     ick_u16 signed_zero = sign ? 0x8000u : 0u;
     ick_u16 signed_infinity = (ick_u16)(signed_zero | 0x7c00u);
-    ick_u64 numerator;
-    ick_u64 denominator;
+    ick_u64 left_significand;
+    ick_u64 right_significand;
+    ick_u32 numerator;
+    ick_u32 denominator;
     int left_exponent;
     int right_exponent;
     int exponent;
@@ -375,8 +377,10 @@ ick_half_divide_codes(ick_u16 left, ick_u16 right)
     if (ick_half_is_zero(left))
         return signed_zero;
 
-    ick_half_decode_finite(left, &numerator, &left_exponent);
-    ick_half_decode_finite(right, &denominator, &right_exponent);
+    ick_half_decode_finite(left, &left_significand, &left_exponent);
+    ick_half_decode_finite(right, &right_significand, &right_exponent);
+    numerator = (ick_u32)left_significand;
+    denominator = (ick_u32)right_significand;
     exponent = left_exponent - right_exponent;
 
     while (numerator < denominator) {
@@ -389,10 +393,10 @@ ick_half_divide_codes(ick_u16 left, ick_u16 right)
     }
 
     if (exponent >= -14) {
-        ick_u64 scaled = numerator << 10;
-        ick_u64 quotient = scaled / denominator;
-        ick_u64 remainder = scaled % denominator;
-        ick_u64 twice_remainder = remainder << 1;
+        ick_u32 scaled = numerator << 10;
+        ick_u32 quotient = scaled / denominator;
+        ick_u32 remainder = scaled % denominator;
+        ick_u32 twice_remainder = remainder << 1;
         if (twice_remainder > denominator
             || (twice_remainder == denominator && (quotient & 1u) != 0))
             ++quotient;
@@ -410,11 +414,11 @@ ick_half_divide_codes(ick_u16 left, ick_u16 right)
 
     {
         int shift = exponent + 24;
-        ick_u64 scaled_numerator = numerator;
-        ick_u64 scaled_denominator = denominator;
-        ick_u64 mantissa;
-        ick_u64 remainder;
-        ick_u64 twice_remainder;
+        ick_u32 scaled_numerator = numerator;
+        ick_u32 scaled_denominator = denominator;
+        ick_u32 mantissa;
+        ick_u32 remainder;
+        ick_u32 twice_remainder;
 
         if (shift >= 0)
             scaled_numerator <<= (unsigned)shift;
