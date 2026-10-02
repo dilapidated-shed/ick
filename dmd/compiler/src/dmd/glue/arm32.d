@@ -93,7 +93,12 @@ private struct LeafEmitter
 {
     Arm32Code code;
     Arm32Relocation[] relocations;
-    uint[VarDeclaration] homes;
+    struct Home
+    {
+        VarDeclaration variable;
+        uint slot;
+    }
+    Home[] homes;
     uint slots;
     size_t[] returns;
 
@@ -154,12 +159,28 @@ private struct LeafEmitter
         return temporaryWords(words);
     }
 
+    bool hasHome(VarDeclaration variable)
+    {
+        foreach (ref entry; homes)
+            if (entry.variable is variable)
+                return true;
+        return false;
+    }
+
     uint home(VarDeclaration variable)
     {
-        auto found = variable in homes;
-        if (!found)
-            reject(variable.loc, "global, captured, or uninitialised variable is outside the initial A32 slice");
-        return *found;
+        foreach (ref entry; homes)
+            if (entry.variable is variable)
+                return entry.slot;
+        reject(variable.loc, "global, captured, or uninitialised variable is outside the initial A32 slice");
+        assert(0);
+    }
+
+    void bindHome(VarDeclaration variable, uint slot)
+    {
+        if (hasHome(variable))
+            reject(variable.loc, "duplicate A32 variable home");
+        homes ~= Home(variable, slot);
     }
 
     void requireWord(Type t, Loc loc)
@@ -229,7 +250,7 @@ private struct LeafEmitter
             auto declaration = variable.var.isVarDeclaration();
             if (!declaration)
                 reject(expression_.loc, "address target is not a variable");
-            if (declaration in homes)
+            if (hasHome(declaration))
                 reject(expression_.loc, "taking the address of an A32 stack local is not implemented");
             globalAddress(declaration);
             return;
@@ -266,9 +287,9 @@ private struct LeafEmitter
             auto declaration = variable.var.isVarDeclaration();
             if (!declaration)
                 reject(destination.loc, "assignment target is not a variable");
-            if (auto found = declaration in homes)
+            if (hasHome(declaration))
             {
-                storeValue(declaration.type, *found);
+                storeValue(declaration.type, home(declaration));
                 return;
             }
 
@@ -304,7 +325,7 @@ private struct LeafEmitter
         requireScalar(variable.type, variable.loc);
         if (variable.storage_class & (STC.static_ | STC.ref_ | STC.out_ | STC.lazy_))
             reject(variable.loc, "static and by-reference locals are outside the scalar A32 slice");
-        homes[variable] = temporary(variable.type);
+        bindHome(variable, temporary(variable.type));
         auto initializer = variable._init ? variable._init.isExpInitializer() : null;
         if (!initializer)
             reject(variable.loc, "local requires an expression initializer");
@@ -670,8 +691,8 @@ private struct LeafEmitter
             auto declaration = variable.var.isVarDeclaration();
             if (!declaration)
                 reject(e.loc, "function values are outside the initial A32 slice");
-            if (auto found = declaration in homes)
-                loadValue(declaration.type, *found);
+            if (hasHome(declaration))
+                loadValue(declaration.type, home(declaration));
             else
             {
                 globalAddress(declaration);
@@ -1125,16 +1146,17 @@ private struct LeafEmitter
                     stackWords += words;
                 }
 
-                homes[parameter] = temporary(parameter.type);
+                const parameterHome = temporary(parameter.type);
+                bindHome(parameter, parameterHome);
                 if (loc.reg >= 0)
                 {
-                    storeValue(parameter.type, homes[parameter], cast(uint)loc.reg);
+                    storeValue(parameter.type, parameterHome, cast(uint)loc.reg);
                 }
                 else if (words == 1)
                 {
                     const at = code.loadStackOffset(0, 0);
                     stackParameterLoads ~= StackParameterLoad(at, loc.stackWord * 4, 0);
-                    code.store(homes[parameter], 0);
+                    code.store(parameterHome, 0);
                 }
                 else
                 {
@@ -1142,7 +1164,7 @@ private struct LeafEmitter
                     const high = code.loadStackOffset(0, 1);
                     stackParameterLoads ~= StackParameterLoad(low, loc.stackWord * 4, 0);
                     stackParameterLoads ~= StackParameterLoad(high, loc.stackWord * 4 + 4, 1);
-                    code.storePair(homes[parameter], 0);
+                    code.storePair(parameterHome, 0);
                 }
             }
         }
