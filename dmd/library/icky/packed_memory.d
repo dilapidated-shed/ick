@@ -1,9 +1,10 @@
 /**
  * Representation-aware scalar operations over packed coordinate slices.
  *
- * Storage remains E5M3 or E3M2.  The arithmetic carrier for this first
- * implementation is Float16, and conversion happens only for the coordinates
- * consumed by the current operation.
+ * Storage remains E5M3 or E3M2. E5M3 +, - and narrow * have a direct
+ * checked path that never widens through Float16 or binary32. Explicit
+ * Float16 computation remains available where the caller actually requests
+ * a wider result.
  */
 module icky.packed_memory;
 
@@ -17,6 +18,17 @@ extern(C) void abort() nothrow @nogc;
 private enum supported_storage(T) =
     is(T == E5M3) || is(T == E3M2) ||
     is(T == const(E5M3)) || is(T == const(E3M2));
+
+private enum both_e5m3(Left, Right) =
+    (is(Left == E5M3) || is(Left == const(E5M3))) &&
+    (is(Right == E5M3) || is(Right == const(E5M3)));
+
+private enum float16_operation_allowed(string operation, Left, Right) =
+    (operation == "+" || operation == "-" || operation == "*" || operation == "/") &&
+    !(both_e5m3!(Left, Right) && (operation == "+" || operation == "-"));
+
+private enum direct_e5m3_operation(string operation) =
+    operation == "+" || operation == "-" || operation == "*";
 
 /* A precondition failure has no allocation and cannot perform a packed read.
  * The public store operation has a boolean failure result; compute_at has the
@@ -57,7 +69,7 @@ private Float16 packed_compute_at(string operation, Left, Right)(
     const(Left)[] left, size_t leftIndex,
     const(Right)[] right, size_t rightIndex)
     if (supported_storage!Left && supported_storage!Right &&
-        (operation == "+" || operation == "-" || operation == "*" || operation == "/"))
+        float16_operation_allowed!(operation, Left, Right))
 {
     if (leftIndex >= left.length || rightIndex >= right.length)
         return invalid_compute_index();
@@ -86,13 +98,48 @@ Float16 compute_at(Arithmetic, string operation, Left, Right)(
     const(Right)[] right, size_t rightIndex)
     if (is(Arithmetic == Float16) && supported_storage!Left &&
         supported_storage!Right &&
-        (operation == "+" || operation == "-" || operation == "*" || operation == "/"))
+        float16_operation_allowed!(operation, Left, Right))
 {
     // Validate both indices before passing the call to the representation
     // follower or touching either packed element.
     if (leftIndex >= left.length || rightIndex >= right.length)
         return invalid_compute_index();
     return packed_compute_at!operation(left, leftIndex, right, rightIndex);
+}
+
+/**
+ * Compute one checked E5M3 result without widening either operand.
+ *
+ * Bounds or representation-domain failure returns false and preserves output.
+ * Addition/subtraction use the exact common E5M3 dyadic lattice. Multiplication
+ * widens only the integer significand product needed for that one operation,
+ * then immediately requantizes to E5M3.
+ */
+pragma(inline, false)
+bool try_e5m3_at(string operation)(
+    const(E5M3)[] left, size_t leftIndex,
+    const(E5M3)[] right, size_t rightIndex,
+    ref E5M3 output)
+    if (direct_e5m3_operation!operation)
+{
+    if (leftIndex >= left.length || rightIndex >= right.length)
+        return false;
+
+    const leftValue = left[leftIndex];
+    const rightValue = right[rightIndex];
+    E5M3 candidate;
+    bool accepted;
+    static if (operation == "+")
+        accepted = E5M3.try_add(leftValue, rightValue, candidate);
+    else static if (operation == "-")
+        accepted = E5M3.try_subtract(leftValue, rightValue, candidate);
+    else
+        accepted = E5M3.try_multiply(leftValue, rightValue, candidate);
+
+    if (!accepted)
+        return false;
+    output = candidate;
+    return true;
 }
 
 /** Scalar compiler-seam body for one checked packed store. */
