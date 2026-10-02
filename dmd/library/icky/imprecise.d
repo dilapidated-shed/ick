@@ -192,12 +192,14 @@ private ushort half_divide_codes(ushort left, ushort right)
     if (half_is_zero(right)) return signedInfinity;
     if (half_is_zero(left)) return signedZero;
 
-    ulong numerator;
-    ulong denominator;
+    ulong leftSignificand;
+    ulong rightSignificand;
     int leftExponent;
     int rightExponent;
-    half_decode_finite(left, numerator, leftExponent);
-    half_decode_finite(right, denominator, rightExponent);
+    half_decode_finite(left, leftSignificand, leftExponent);
+    half_decode_finite(right, rightSignificand, rightExponent);
+    uint numerator = cast(uint)leftSignificand;
+    uint denominator = cast(uint)rightSignificand;
     int exponent = leftExponent - rightExponent;
 
     while (numerator < denominator)
@@ -213,12 +215,12 @@ private ushort half_divide_codes(ushort left, ushort right)
 
     if (exponent >= -14)
     {
-        const ulong scaled = numerator << 10;
-        ulong quotient = scaled / denominator;
-        const ulong remainder = scaled % denominator;
-        const ulong twiceRemainder = remainder << 1;
+        const uint scaled = numerator << 10;
+        uint quotient = scaled / denominator;
+        const uint remainder = scaled % denominator;
+        const uint twiceRemainder = remainder << 1;
         if (twiceRemainder > denominator ||
-            (twiceRemainder == denominator && (quotient & 1UL) != 0))
+            (twiceRemainder == denominator && (quotient & 1u) != 0))
             ++quotient;
         if (quotient >= 2048)
         {
@@ -234,16 +236,16 @@ private ushort half_divide_codes(ushort left, ushort right)
     }
 
     const int shift = exponent + 24;
-    ulong scaledNumerator = numerator;
-    ulong scaledDenominator = denominator;
+    uint scaledNumerator = numerator;
+    uint scaledDenominator = denominator;
     if (shift >= 0) scaledNumerator <<= cast(uint)shift;
     else scaledDenominator <<= cast(uint)(-shift);
 
-    ulong mantissa = scaledNumerator / scaledDenominator;
-    const ulong remainder = scaledNumerator % scaledDenominator;
-    const ulong twiceRemainder = remainder << 1;
+    uint mantissa = scaledNumerator / scaledDenominator;
+    const uint remainder = scaledNumerator % scaledDenominator;
+    const uint twiceRemainder = remainder << 1;
     if (twiceRemainder > scaledDenominator ||
-        (twiceRemainder == scaledDenominator && (mantissa & 1UL) != 0))
+        (twiceRemainder == scaledDenominator && (mantissa & 1u) != 0))
         ++mantissa;
     if (mantissa == 0) return signedZero;
     if (mantissa >= 1024)
