@@ -138,6 +138,9 @@ def check_elf(path: Path) -> None:
         "echo_double": 1,
         "__aeabi_ldivmod": 2,
         "__aeabi_uldivmod": 2,
+        "__aeabi_llsl": 1,
+        "__aeabi_lasr": 1,
+        "__aeabi_llsr": 1,
     })
     if Counter(call_targets) != expected_calls:
         raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(call_targets)}")
@@ -298,6 +301,75 @@ __aeabi_uldivmod:
     mov r1, #0
     mov r2, #99
     mov r3, #0
+    bx lr
+
+.global __aeabi_llsl
+.type __aeabi_llsl,%function
+__aeabi_llsl:
+    movw r12, #0x7788
+    movt r12, #0x5566
+    cmp r0, r12
+    bne .Lllsl_bad
+    movw r12, #0x3344
+    movt r12, #0x1122
+    cmp r1, r12
+    bne .Lllsl_bad
+    cmp r2, #4
+    bne .Lllsl_bad
+    movw r0, #0x1111
+    movt r0, #0x1111
+    movw r1, #0x2222
+    movt r1, #0x2222
+    bx lr
+.Lllsl_bad:
+    mov r0, #99
+    mov r1, #0
+    bx lr
+
+.global __aeabi_lasr
+.type __aeabi_lasr,%function
+__aeabi_lasr:
+    movw r12, #0x7788
+    movt r12, #0x5566
+    cmp r0, r12
+    bne .Llasr_bad
+    movw r12, #0x3344
+    movt r12, #0x8122
+    cmp r1, r12
+    bne .Llasr_bad
+    cmp r2, #5
+    bne .Llasr_bad
+    movw r0, #0x5555
+    movt r0, #0x5555
+    movw r1, #0xaaaa
+    movt r1, #0xaaaa
+    bx lr
+.Llasr_bad:
+    mov r0, #99
+    mov r1, #0
+    bx lr
+
+.global __aeabi_llsr
+.type __aeabi_llsr,%function
+__aeabi_llsr:
+    movw r12, #0x7788
+    movt r12, #0x5566
+    cmp r0, r12
+    bne .Lllsr_bad
+    movw r12, #0x3344
+    movt r12, #0x8122
+    cmp r1, r12
+    bne .Lllsr_bad
+    cmp r2, #6
+    bne .Lllsr_bad
+    movw r0, #0x6666
+    movt r0, #0x6666
+    movw r1, #0xbbbb
+    movt r1, #0xbbbb
+    bx lr
+.Lllsr_bad:
+    mov r0, #99
+    mov r1, #0
     bx lr
 
 .global _start
@@ -901,6 +973,120 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #61
+    mov r0, #3
+    mov r1, #4
+    bl shl32
+    cmp r0, #48
+    bne fail
+
+    mov r10, #62
+    mvn r0, #15
+    mov r1, #2
+    bl sar32
+    mvn r1, #3
+    cmp r0, r1
+    bne fail
+
+    mov r10, #63
+    mov r0, #0x80000000
+    mov r1, #1
+    bl shr32
+    mov r1, #0x40000000
+    cmp r0, r1
+    bne fail
+
+    mov r10, #64
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x1122
+    mov r2, #4
+    bl shl64
+    movw r2, #0x1111
+    movt r2, #0x1111
+    cmp r0, r2
+    bne fail
+    movw r2, #0x2222
+    movt r2, #0x2222
+    cmp r1, r2
+    bne fail
+
+    mov r10, #65
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x8122
+    mov r2, #5
+    bl sar64
+    movw r2, #0x5555
+    movt r2, #0x5555
+    cmp r0, r2
+    bne fail
+    movw r2, #0xaaaa
+    movt r2, #0xaaaa
+    cmp r1, r2
+    bne fail
+
+    mov r10, #66
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x8122
+    mov r2, #6
+    bl shr64
+    movw r2, #0x6666
+    movt r2, #0x6666
+    cmp r0, r2
+    bne fail
+    movw r2, #0xbbbb
+    movt r2, #0xbbbb
+    cmp r1, r2
+    bne fail
+
+    mov r10, #67
+    mvn r0, #1
+    bl widen_signed
+    mvn r2, #1
+    cmp r0, r2
+    bne fail
+    mvn r2, #0
+    cmp r1, r2
+    bne fail
+
+    mov r10, #68
+    mvn r0, #1
+    bl widen_unsigned
+    mvn r2, #1
+    cmp r0, r2
+    bne fail
+    cmp r1, #0
+    bne fail
+
+    mov r10, #69
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x1122
+    bl narrow_signed
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+
+    mov r10, #70
+    movw r0, #0x8899
+    movt r0, #0x6677
+    movw r1, #0x4455
+    movt r1, #0x2233
+    bl narrow_unsigned
+    movw r2, #0x8899
+    movt r2, #0x6677
+    cmp r0, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
     mov r0, #0
     mov r7, #1
     svc #0
@@ -948,7 +1134,7 @@ def main() -> None:
     run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
-    print("PASS: A32 base PCS softfp: calls, GOT globals, EABI helpers, 64-bit integer/double ABI and arithmetic")
+    print("PASS: A32 scalar base PCS: calls, PIC globals, 32/64 arithmetic, shifts, casts, softfp float/double")
 
 
 if __name__ == "__main__":
