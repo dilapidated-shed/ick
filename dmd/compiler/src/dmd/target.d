@@ -827,9 +827,9 @@ extern (C++) struct Target
             switch (op)
             {
             case EXP.uadd:
-            case EXP.add, EXP.addAssign:
-            case EXP.min, EXP.minAssign:
-            case EXP.mul, EXP.mulAssign:
+            case EXP.add:
+            case EXP.min:
+            case EXP.mul:
                 return true;
             default:
                 return false;
