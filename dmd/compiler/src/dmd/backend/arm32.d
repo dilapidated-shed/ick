@@ -17,6 +17,7 @@ enum ARM32_R_GOT_PREL = 96;
 struct Arm32Code
 {
     ubyte[] bytes;
+    bool usesNeon;
 
     void instruction(uint value)
     {
@@ -117,6 +118,58 @@ struct Arm32Code
         storeStackOffset(slot * 4 + 4, reg + 1);
     }
 
+    void stackAddress(uint offset, uint reg = 12)
+    {
+        enforce(offset <= 504 && reg < 15 && reg != 13,
+                "A32 stack address requires a core register and <= 504-byte offset");
+        if (!offset)
+        {
+            instruction(0xE1A0000D | reg << 12); // MOV Rd,sp
+            return;
+        }
+
+        const first = offset > 252 ? 252U : offset;
+        const second = offset - first;
+        instruction(0xE28D0000 | reg << 12 | first); // ADD Rd,sp,#imm8
+        if (second)
+            instruction(0xE2800000 | reg << 16 | reg << 12 | second); // ADD Rd,Rd,#imm8
+    }
+
+    void neonLoadF32x4(uint q, uint baseReg)
+    {
+        enforce(q < 8 && baseReg < 15, "A32 NEON load requires q0-q7 and a core base register");
+        usesNeon = true;
+        instruction(0xF4200A8F | baseReg << 16 | q << 13); // VLD1.32 {qN},[Rm]
+    }
+
+    void neonStoreF32x4(uint q, uint baseReg)
+    {
+        enforce(q < 8 && baseReg < 15, "A32 NEON store requires q0-q7 and a core base register");
+        usesNeon = true;
+        instruction(0xF4000A8F | baseReg << 16 | q << 13); // VST1.32 {qN},[Rm]
+    }
+
+    void neonAddF32x4(uint destination, uint left, uint right)
+    {
+        enforce(destination < 8 && left < 8 && right < 8, "A32 NEON add requires q0-q7");
+        usesNeon = true;
+        instruction(0xF2000D40 | destination << 13 | left << 17 | right << 1);
+    }
+
+    void neonSubF32x4(uint destination, uint left, uint right)
+    {
+        enforce(destination < 8 && left < 8 && right < 8, "A32 NEON subtract requires q0-q7");
+        usesNeon = true;
+        instruction(0xF2200D40 | destination << 13 | left << 17 | right << 1);
+    }
+
+    void neonMulF32x4(uint destination, uint left, uint right)
+    {
+        enforce(destination < 8 && left < 8 && right < 8, "A32 NEON multiply requires q0-q7");
+        usesNeon = true;
+        instruction(0xF3000D50 | destination << 13 | left << 17 | right << 1);
+    }
+
     void adjustStack(uint amount, bool subtract)
     {
         enforce(!(amount & 7) && amount <= 504,
@@ -194,6 +247,7 @@ struct Arm32Function
     ubyte[] code;
     Arm32Relocation[] relocations;
     uint[] dataOffsets;
+    bool usesNeon;
 }
 
 struct Arm32Global
@@ -332,9 +386,17 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
         word(relText, (*index << 8) | relocation.type);
     }
 
-    // aeabi: v7-A, ARM ISA, no Thumb requirement, VFPv3-D16,
-    // 8-byte public stack alignment, base PCS (softfp arguments).
-    ubyte[] tags = [6, 10, 7, 65, 8, 1, 9, 0, 10, 4, 24, 1, 25, 1, 28, 0];
+    bool usesNeon;
+    foreach (function_; functions)
+        usesNeon = usesNeon || function_.usesNeon;
+
+    // aeabi: v7-A, ARM ISA, no Thumb requirement, 8-byte public stack
+    // alignment, and base PCS (softfp arguments). A module that actually
+    // emits NEON advertises VFPv3 + NEONv1; scalar-only modules retain
+    // the narrower VFPv3-D16 attribute.
+    ubyte[] tags = usesNeon
+        ? [6, 10, 7, 65, 8, 1, 9, 0, 10, 3, 12, 1, 24, 1, 25, 1, 28, 0]
+        : [6, 10, 7, 65, 8, 1, 9, 0, 10, 4, 24, 1, 25, 1, 28, 0];
     ubyte[] attributes = [cast(ubyte)'A'];
     word(attributes, cast(uint)(4 + 6 + 5 + tags.length));
     attributes ~= cast(const(ubyte)[])"aeabi\0";
