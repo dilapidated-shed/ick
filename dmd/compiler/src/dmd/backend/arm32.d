@@ -137,35 +137,35 @@ struct Arm32Code
 
     void neonLoadF32x4(uint q, uint baseReg)
     {
-        enforce(q < 8 && baseReg < 15, "A32 NEON load requires q0-q7 and a core base register");
+        enforce(q < 4 && baseReg < 15, "A32 NEON load requires q0-q3 and a core base register");
         usesNeon = true;
         instruction(0xF4200A8F | baseReg << 16 | q << 13); // VLD1.32 {qN},[Rm]
     }
 
     void neonStoreF32x4(uint q, uint baseReg)
     {
-        enforce(q < 8 && baseReg < 15, "A32 NEON store requires q0-q7 and a core base register");
+        enforce(q < 4 && baseReg < 15, "A32 NEON store requires q0-q3 and a core base register");
         usesNeon = true;
         instruction(0xF4000A8F | baseReg << 16 | q << 13); // VST1.32 {qN},[Rm]
     }
 
     void neonAddF32x4(uint destination, uint left, uint right)
     {
-        enforce(destination < 8 && left < 8 && right < 8, "A32 NEON add requires q0-q7");
+        enforce(destination < 4 && left < 4 && right < 4, "A32 NEON add requires q0-q3");
         usesNeon = true;
         instruction(0xF2000D40 | destination << 13 | left << 17 | right << 1);
     }
 
     void neonSubF32x4(uint destination, uint left, uint right)
     {
-        enforce(destination < 8 && left < 8 && right < 8, "A32 NEON subtract requires q0-q7");
+        enforce(destination < 4 && left < 4 && right < 4, "A32 NEON subtract requires q0-q3");
         usesNeon = true;
         instruction(0xF2200D40 | destination << 13 | left << 17 | right << 1);
     }
 
     void neonMulF32x4(uint destination, uint left, uint right)
     {
-        enforce(destination < 8 && left < 8 && right < 8, "A32 NEON multiply requires q0-q7");
+        enforce(destination < 4 && left < 4 && right < 4, "A32 NEON multiply requires q0-q3");
         usesNeon = true;
         instruction(0xF3000D50 | destination << 13 | left << 17 | right << 1);
     }
