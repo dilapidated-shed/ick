@@ -62,6 +62,14 @@ extern(C) struct BionicPthreadMutex {
     }
 }
 
+static assert(BionicWinSize.sizeof == 8);
+static if (size_t.sizeof == 4) {
+    static assert(BionicTermios.sizeof == 36);
+    static assert(BionicPthreadMutex.sizeof == 4);
+} else {
+    static assert(BionicPthreadMutex.sizeof == 40);
+}
+
 alias BionicThreadStart =
     extern(C) void* function(void* arg) nothrow @nogc;
 alias BionicSignalHandler =
@@ -118,7 +126,7 @@ int sigemptyset(sigset_t* set);
 int sigaddset(sigset_t* set, int signal_number);
 BionicSignalHandler signal(int signal_number, BionicSignalHandler handler);
 
-pure nothrow @nogc int bionic_errno()
+nothrow @nogc int bionic_errno()
 {
     auto p = __errno();
     return p is null ? 0 : *p;
