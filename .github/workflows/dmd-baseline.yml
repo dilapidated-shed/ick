@@ -48,7 +48,10 @@ jobs:
           test "$upstream_tag" = v2.113.0
           test "$upstream_commit" = 74917954b53f7f35b13e61b4438c7253834929ed
           test "$upstream_compiler_src_dmd_tree" = 609b890e7cfc65474e5fdebd001c580e174cd22b
-          test "$(find dmd/compiler/src/dmd -type f | wc -l | tr -d ' ')" = 329
+          test "$(find dmd/compiler/src/dmd -type f \
+            ! -path 'dmd/compiler/src/dmd/backend/arm32.d' \
+            ! -path 'dmd/compiler/src/dmd/glue/arm32.d' \
+            | wc -l | tr -d ' ')" = 329
           test -x dmd/compiler/src/build.d
           test -x dmd/compiler/src/bootstrap.sh
           test ! -e dmd/druntime
@@ -59,7 +62,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential ldc
+          sudo apt-get install -y build-essential ldc binutils python3 qemu-user-static clang lld
           command -v ldmd2
           c++ --version
           ldmd2 --version
@@ -86,6 +89,44 @@ jobs:
           test -s /tmp/dmd-baseline-smoke.o
           file /tmp/dmd-baseline-smoke.o
 
+      - name: Qualify Android ARM32 target when present
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          verify=dmd/qualification/android-arm32/verify.py
+          smoke=dmd/qualification/android-arm32/smoke.d
+          if test ! -f "$verify"; then
+            echo "Android ARM32 qualification not present on this candidate."
+            exit 0
+          fi
+          test -f "$smoke"
+
+          mkdir -p /tmp/dmd-arm32-bootstrap /tmp/dmd-arm32-qualification
+          curl --fail --location --retry 3             https://github.com/dlang/dmd/releases/download/v2.113.0/dmd.2.113.0.linux.tar.xz             -o /tmp/dmd-arm32-bootstrap.tar.xz
+          echo 'b342ab8bd40cc0c46407692b31d7cd69661ff01da686234f426949e881727294  /tmp/dmd-arm32-bootstrap.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/dmd-arm32-bootstrap.tar.xz -C /tmp/dmd-arm32-bootstrap
+
+          dmd_bin=$(find dmd/generated -type f -name dmd -perm -u+x -print -quit)
+          test -x "$dmd_bin"
+          python3 "$verify"             --compiler "$dmd_bin"             --imports /tmp/dmd-arm32-bootstrap/dmd2/src/druntime/import             --output /tmp/dmd-arm32-qualification
+
+      - name: Qualify AArch64 floating comparisons when present
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          verify=dmd/qualification/aarch64-fcmp/verify.py
+          if test ! -f "$verify"; then
+            echo "AArch64 floating-comparison regression not present on this candidate."
+            exit 0
+          fi
+          dmd_bin=$(find dmd/generated -type f -name dmd -perm -u+x -print -quit)
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          test -x "$dmd_bin"
+          test -f "$runtime_import/object.d"
+          python3 "$verify" --compiler "$dmd_bin" --imports "$runtime_import" --output /tmp/aarch64-fcmp
+
       - name: Record boundary
         if: steps.source.outputs.loaded == 'true'
         shell: bash
@@ -95,5 +136,9 @@ jobs:
 
           PASS: the resulting compiler started and produced a BetterC object.
 
-          OUT OF SCOPE: druntime, Phobos, upstream tests, and Icky D Unicode syntax.
+          If the candidate carries the owned Android ARM32 qualification, that
+          target is compiled, inspected, linked with an external A32 harness,
+          and executed under qemu-arm.
+
+          OUT OF SCOPE: druntime, Phobos, full upstream tests, and all IDK-specific syntax or representation policy.
           EOF
