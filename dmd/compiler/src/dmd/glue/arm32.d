@@ -209,6 +209,7 @@ private struct LeafEmitter
 
     void condition(Expression expression_)
     {
+        requireWord(expression_.type, expression_.loc);
         expression(expression_);
         if (floating(expression_.type))
             code.instruction(0xE1A00080); // MOV r0,r0,LSL #1: +0/-0 -> 0, NaN stays nonzero
@@ -412,26 +413,43 @@ private struct LeafEmitter
         scope(exit) --depth;
 
         if (e.type && e.type.toBasetype().ty != TY.Tvoid && e.op != EXP.declaration)
-            requireWord(e.type, e.loc);
+            requireScalar(e.type, e.loc);
 
         if (auto integer = e.isIntegerExp())
         {
-            code.constant(cast(uint)integer.value);
+            if (pairType(e.type))
+                code.constant64(cast(ulong)integer.value);
+            else
+                code.constant(cast(uint)integer.value);
             return;
         }
         if (auto realConstant = e.isRealExp())
         {
-            if (!floating(e.type))
-                reject(e.loc, "only binary32 floating constants are implemented");
-            union Payload
+            if (floating(e.type))
             {
-                float value;
-                uint bits;
+                union Payload32
+                {
+                    float value;
+                    uint bits;
+                }
+                Payload32 payload;
+                payload.value = cast(float)realConstant.value;
+                code.constant(payload.bits);
+                return;
             }
-            Payload payload;
-            payload.value = cast(float)realConstant.value;
-            code.constant(payload.bits);
-            return;
+            if (e.type.toBasetype().ty == TY.Tfloat64)
+            {
+                union Payload64
+                {
+                    double value;
+                    ulong bits;
+                }
+                Payload64 payload;
+                payload.value = cast(double)realConstant.value;
+                code.constant64(payload.bits);
+                return;
+            }
+            reject(e.loc, "floating constant is outside the float/double A32 scalar subset");
         }
         if (e.op == EXP.null_)
         {
@@ -454,7 +472,7 @@ private struct LeafEmitter
             if (!declaration)
                 reject(e.loc, "function values are outside the initial A32 slice");
             if (auto found = declaration in homes)
-                code.load(*found);
+                loadValue(declaration.type, *found);
             else
             {
                 globalAddress(declaration);
@@ -478,6 +496,20 @@ private struct LeafEmitter
                 code.booleanResult(1); // NE
                 return;
             }
+            const sourceWords = scalarWords(cast_.e1.type);
+            const targetWords = scalarWords(cast_.type);
+            if (sourceWords == 2 || targetWords == 2)
+            {
+                const sourceTy = cast_.e1.type.toBasetype().ty;
+                const targetTy = cast_.type.toBasetype().ty;
+                const bothIntegerPairs =
+                    (sourceTy == TY.Tint64 || sourceTy == TY.Tuns64) &&
+                    (targetTy == TY.Tint64 || targetTy == TY.Tuns64);
+                if (!bothIntegerPairs && sourceTy != targetTy)
+                    reject(e.loc, "64-bit integer/floating conversions are not implemented");
+                expression(cast_.e1);
+                return;
+            }
             if (floating(cast_.type) != floating(cast_.e1.type))
                 reject(e.loc, "integer/float conversions are not implemented");
             requireWord(cast_.e1.type, e.loc);
@@ -498,6 +530,15 @@ private struct LeafEmitter
         if (e.op == EXP.negate || e.op == EXP.uadd || e.op == EXP.not)
         {
             auto operand = e.isUnaExp().e1;
+            if (pairType(operand.type))
+            {
+                if (e.op == EXP.uadd)
+                {
+                    expression(operand);
+                    return;
+                }
+                reject(e.loc, "64-bit unary arithmetic is not implemented yet");
+            }
             if (e.op == EXP.not)
             {
                 condition(operand);
@@ -568,6 +609,9 @@ private struct LeafEmitter
             code.resolve(done, code.bytes.length);
             return;
         }
+
+        if (scalarWords(binary.e1.type) == 2 || scalarWords(binary.e2.type) == 2)
+            reject(e.loc, "64-bit binary arithmetic/comparisons are not implemented yet");
 
         expression(binary.e1);
         const saved = temporary();
