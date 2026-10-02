@@ -199,7 +199,8 @@ struct Arm32Function
 struct Arm32Global
 {
     string name;
-    uint value;
+    ulong value;
+    uint words;
     bool defined;
 }
 
@@ -254,10 +255,14 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
     {
         if (!global_.defined)
             continue;
-        while (data.length & 3)
+        enforce(global_.words == 1 || global_.words == 2, "A32 scalar global must be one or two words");
+        const alignment = global_.words == 2 ? 8U : 4U;
+        while (data.length % alignment)
             data ~= 0;
         globalOffsets[global_.name] = cast(uint)data.length;
-        word(data, global_.value);
+        word(data, cast(uint)global_.value);
+        if (global_.words == 2)
+            word(data, cast(uint)(global_.value >> 32));
     }
 
     ubyte[] strings = [0];
@@ -302,7 +307,8 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
         enforce(global_.name !in symbolIndex, "duplicate A32 data symbol");
         const section = cast(ushort)(global_.defined ? 3 : 0);
         const value = global_.defined ? globalOffsets[global_.name] : 0U;
-        const index = symbol(name(global_.name), value, global_.defined ? 4U : 0U,
+        const index = symbol(name(global_.name), value,
+                             global_.defined ? global_.words * 4 : 0U,
                              0x11, section); // GLOBAL OBJECT
         symbolIndex[global_.name] = index;
     }
