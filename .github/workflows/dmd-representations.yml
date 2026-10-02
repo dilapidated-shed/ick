@@ -184,7 +184,9 @@ jobs:
               ".representation-build/packed-memory-$mode-trace.txt"
             grep -F "operation=* rounding=Float16-per-operation" \
               ".representation-build/packed-memory-$mode-trace.txt"
-            grep -F "destination-storage=E5M3 domain=partial-reject-preserve-destination" \
+            grep -F "operation=- rounding=E5M3-per-operation" \
+              ".representation-build/packed-memory-$mode-trace.txt"
+            grep -F "destination-storage=UE5M3 domain=partial-reject-preserve-destination" \
               ".representation-build/packed-memory-$mode-trace.txt"
             grep -F "follower=ordinary-scalar-body follower-executed=true" \
               ".representation-build/packed-memory-$mode-trace.txt"
@@ -242,7 +244,7 @@ jobs:
           PASS: debug and optimized output agree with the existing C oracle.
           PASS: scalar payloads, midpoint neighbours, domain rejection and requantization.
           PASS: Circle96 oracle and finite geometry laws at 96/192/240/360/720 positions.
-          PASS: invalid arithmetic, direct E5M3 arithmetic, and mixed categories fail source type checking.
+          PASS: unsupported arithmetic formats, direct UE5M3 arithmetic, and mixed categories fail source type checking.
 
           This proves native D value-type support on the host. It does not prove
           new primitive compiler types, representation-aware backend IR, geometric
