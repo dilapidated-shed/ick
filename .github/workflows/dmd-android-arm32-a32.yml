@@ -96,6 +96,7 @@ jobs:
           arguments, softfp binary32 arguments/results, 8-byte public stack restoration,
           and execution of the generated code under qemu-arm.
 
-          CURRENT LOWERING BOUNDARY: BetterC scalar A32 functions. Calls, relocatable globals,
-          aggregates, variadics, integer helper calls, and druntime/Phobos remain future work.
+          CURRENT LOWERING BOUNDARY: BetterC scalar A32 functions with direct extern(C)
+          calls and EABI integer divide/remainder helpers. Relocatable globals, aggregates,
+          variadics, and druntime/Phobos remain future work.
           EOF
