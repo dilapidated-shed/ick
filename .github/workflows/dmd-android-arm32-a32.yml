@@ -97,6 +97,8 @@ jobs:
           and execution of the generated code under qemu-arm.
 
           CURRENT LOWERING BOUNDARY: BetterC scalar A32 functions with direct extern(C)
-          calls, EABI integer divide/remainder helpers, and PIC scalar extern(C) globals.
-          Aggregates, variadics, TLS/read-only aggregate data, and druntime/Phobos remain future work.
+          calls, EABI integer divide/remainder helpers, PIC one-word extern(C) globals,
+          and AAPCS32 transport/returns for 64-bit long/ulong/double scalars.
+          64-bit arithmetic/globals, aggregates, variadics, TLS/read-only aggregate data,
+          and druntime/Phobos remain future work.
           EOF
