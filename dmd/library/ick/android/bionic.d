@@ -89,6 +89,7 @@ int close(int fd);
 int pipe2(int* pipe_fds, int flags);
 int open(const(char)* path, int flags, ...);
 
+uint getuid();
 pid_t fork();
 pid_t setsid();
 int access(const(char)* path, int mode);
