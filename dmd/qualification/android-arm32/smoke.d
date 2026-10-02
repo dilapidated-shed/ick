@@ -7,6 +7,8 @@ version (CRuntime_Bionic) {} else static assert(0, "Bionic C runtime must be sel
 
 static assert(size_t.sizeof == 4);
 static assert(real.sizeof == 8);
+static assert(long.sizeof == 8);
+static assert(double.sizeof == 8);
 
 extern(C) int external_twice(int x);
 
@@ -115,4 +117,49 @@ extern(C) int set_external_global(int x)
 extern(C) int* own_global_address()
 {
     return &own_global;
+}
+
+extern(C) long echo_long(long x)
+{
+    return x;
+}
+
+extern(C) double echo_double(double x)
+{
+    return x;
+}
+
+extern(C) long aligned_long(int a, long b, int c)
+{
+    return b;
+}
+
+extern(C) long stacked_long(int a, int b, int c, long d)
+{
+    return d;
+}
+
+extern(C) long call_aligned_long(long x)
+{
+    return aligned_long(1, x, 3);
+}
+
+extern(C) long call_stacked_long(long x)
+{
+    return stacked_long(1, 2, 3, x);
+}
+
+extern(C) double call_echo_double(double x)
+{
+    return echo_double(x);
+}
+
+extern(C) long long_constant()
+{
+    return 0x1122334455667788L;
+}
+
+extern(C) double double_constant()
+{
+    return 3.5;
 }
