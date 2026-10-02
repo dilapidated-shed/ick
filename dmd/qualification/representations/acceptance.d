@@ -148,6 +148,34 @@ void check_storage()
     }
 }
 
+void check_float16_random_operations()
+{
+    uint state = 0x91e10da5u;
+    foreach (uint sample; 0 .. 65536)
+    {
+        state = state * 1664525u + 1013904223u;
+        const ushort leftCode = cast(ushort)(state >> 16);
+        state = state * 1664525u + 1013904223u;
+        const ushort rightCode = cast(ushort)(state >> 16);
+        auto left = Float16.from_code(leftCode);
+        auto right = Float16.from_code(rightCode);
+        Float16[4] results = [
+            left + right,
+            left - right,
+            left * right,
+            left / right
+        ];
+        foreach (uint operation; 0 .. 4)
+        {
+            const expected = oracle_operation(0, operation, leftCode, rightCode);
+            if (nan_bits(oracle_decode(0, expected)))
+                assert(nan_bits(bits_of(results[operation].to_float())));
+            else
+                assert(results[operation].code() == expected);
+        }
+    }
+}
+
 void check_float16_rounding_chain()
 {
     auto left = Float16.from_float(1.0f);
@@ -473,6 +501,7 @@ extern(C) int main()
 {
     check_packed_memory_surface();
     check_e5m3_direct_arithmetic();
+    check_float16_random_operations();
     check_float16_rounding_chain();
     check_packed_memory();
     check_format!(Float16, 0, 65536)();
