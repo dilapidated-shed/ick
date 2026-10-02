@@ -807,6 +807,7 @@ _start:
     cmp r0, #0
     bne fail
 
+    mov r10, #51
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x3ff8
@@ -821,6 +822,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #52
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x3ff8
@@ -835,6 +837,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #53
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x3ff8
@@ -849,6 +852,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #54
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x4000
@@ -863,6 +867,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #55
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x3ff8
@@ -874,6 +879,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #56
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x3ff8
@@ -884,6 +890,7 @@ _start:
     cmp r0, #1
     bne fail
 
+    mov r10, #57
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x8000
