@@ -57,9 +57,25 @@ private bool floating(Type t)
     return t && t.toBasetype().ty == TY.Tfloat32;
 }
 
+private string functionName(FuncDeclaration function_, Loc loc)
+{
+    string name = function_.mangleOverride.length ? function_.mangleOverride.idup :
+                  function_.ident.toString().idup;
+    foreach (i, ch; name)
+    {
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' ||
+              (i > 0 && ch >= '0' && ch <= '9')))
+            reject(loc, "ELF symbol must be a nonempty ASCII C identifier");
+    }
+    if (!name.length)
+        reject(loc, "empty A32 symbol");
+    return name;
+}
+
 private struct LeafEmitter
 {
     Arm32Code code;
+    Arm32Relocation[] relocations;
     uint[VarDeclaration] homes;
     uint slots;
     size_t[] returns;
@@ -166,6 +182,61 @@ private struct LeafEmitter
             reject(variable.loc, "local requires an expression initializer");
         expression(initializer.exp);
         code.store(home(variable));
+    }
+
+    void directCall(CallExp call)
+    {
+        auto callee = call.f;
+        if (!callee)
+            reject(call.loc, "indirect/function-pointer calls are not implemented");
+        if (callee.resolvedLinkage() != LINK.c || callee.isNested() || callee.isMember())
+            reject(call.loc, "A32 direct calls currently require top-level extern(C) functions");
+
+        auto signature = callee.type.toTypeFunction();
+        if (signature.parameterList.varargs != VarArg.none || signature.isRef)
+            reject(call.loc, "variadic or ref-return calls are not implemented");
+        if (signature.next.toBasetype().ty != TY.Tvoid)
+            requireWord(signature.next, call.loc);
+
+        const count = call.arguments ? cast(uint)call.arguments.length : 0U;
+        if (count > 64)
+            reject(call.loc, "more than 64 one-word call arguments are outside the qualification range");
+
+        if (callee.parameters)
+        {
+            foreach (parameter; *callee.parameters)
+                if (parameter.storage_class & (STC.ref_ | STC.out_ | STC.lazy_))
+                    reject(call.loc, "ref/out/lazy call parameters are not implemented");
+        }
+
+        uint[] argumentHomes;
+        argumentHomes.length = count;
+        if (call.arguments)
+        {
+            foreach (i, argument; *call.arguments)
+            {
+                requireWord(argument.type, argument.loc);
+                expression(argument);
+                argumentHomes[i] = temporary();
+                code.store(argumentHomes[i]);
+            }
+        }
+
+        const stackWords = count > 4 ? count - 4 : 0U;
+        const outgoing = (stackWords * 4 + 7) & ~7U;
+        code.adjustStack(outgoing, true);
+
+        foreach (i; 4 .. count)
+        {
+            code.loadStackOffset(outgoing + argumentHomes[i] * 4, 0);
+            code.storeStackOffset((i - 4) * 4, 0);
+        }
+        foreach (i; 0 .. (count < 4 ? count : 4))
+            code.loadStackOffset(outgoing + argumentHomes[i] * 4, i);
+
+        const at = code.call();
+        relocations ~= Arm32Relocation(cast(uint)at, functionName(callee, call.loc));
+        code.adjustStack(outgoing, false);
     }
 
     void expression(Expression e)
@@ -278,9 +349,15 @@ private struct LeafEmitter
             return;
         }
 
+        if (auto call = e.isCallExp())
+        {
+            directCall(call);
+            return;
+        }
+
         auto binary = e.isBinExp();
         if (!binary)
-            reject(e.loc, "unsupported expression (calls, allocation and runtime operations are not implemented)");
+            reject(e.loc, "unsupported expression (allocation and other runtime operations are not implemented)");
 
         if (e.op == EXP.comma)
         {
@@ -418,7 +495,7 @@ private struct LeafEmitter
             returns ~= code.bytes.length;
             code.instruction(0xE1A00000); // patched ADD sp,sp,#...
             code.instruction(0xE1A00000);
-            code.instruction(0xE12FFF1E); // BX lr
+            code.instruction(0xE8BD8010); // POP {r4,pc}
             return;
         }
         if (auto branch = s.isIfStatement())
@@ -500,17 +577,9 @@ private struct LeafEmitter
         if (function_.parameters && function_.parameters.length > 64)
             reject(location, "more than 64 one-word parameters are outside the qualification range");
 
-        string name = function_.mangleOverride.length ? function_.mangleOverride.idup :
-                      function_.ident.toString().idup;
-        foreach (i, ch; name)
-        {
-            if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' ||
-                  (i > 0 && ch >= '0' && ch <= '9')))
-                reject(location, "ELF symbol must be a nonempty ASCII C identifier");
-        }
-        if (!name.length)
-            reject(location, "empty A32 symbol");
+        string name = functionName(function_, location);
 
+        code.instruction(0xE92D4010); // PUSH {r4,lr}; 8 bytes keeps public SP alignment
         const prologue = code.bytes.length;
         code.instruction(0xE1A00000); // patched SUB sp,sp,#...
         code.instruction(0xE1A00000);
@@ -543,7 +612,7 @@ private struct LeafEmitter
             returns ~= code.bytes.length;
             code.instruction(0xE1A00000);
             code.instruction(0xE1A00000);
-            code.instruction(0xE12FFF1E);
+            code.instruction(0xE8BD8010); // POP {r4,pc}
         }
         else
             code.instruction(0xE7F000F0); // unreachable fallthrough traps
@@ -553,9 +622,9 @@ private struct LeafEmitter
         foreach (at; returns)
             code.patchFrame(at, frame, false);
         foreach (load; stackParameterLoads)
-            code.patchLoadStackOffset(load.at, frame + load.incomingOffset);
+            code.patchLoadStackOffset(load.at, frame + 8 + load.incomingOffset);
 
-        return Arm32Function(name, code.bytes);
+        return Arm32Function(name, code.bytes, relocations);
     }
 }
 
