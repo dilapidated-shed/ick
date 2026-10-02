@@ -84,26 +84,35 @@ static float oracle_packed_decode(unsigned format, unsigned code)
     }
 }
 
-/* Independent packed-memory oracle:
- * decode storage -> convert each operand to Float16 -> recover its binary32
- * semantic value -> perform one binary32 operation -> Float16 quantize.
+/* Packed-memory oracle:
+ * decode storage -> explicitly convert each operand to Float16 -> perform one
+ * binary16 semantic operation. The Float16 implementation itself does not use
+ * binary32 as an arithmetic carrier.
  */
 unsigned oracle_packed_operation(unsigned left_format, unsigned right_format,
                                  unsigned operation, unsigned left, unsigned right)
 {
     Float16 left_half = float16_from_float(oracle_packed_decode(left_format, left));
     Float16 right_half = float16_from_float(oracle_packed_decode(right_format, right));
-    volatile float left_value = float16_to_float(left_half);
-    volatile float right_value = float16_to_float(right_half);
-    float result;
+    if (operation > 3)
+        return 0x10000u;
+    return float16_code(oracle_float16_binary(
+        operation, left_half, right_half));
+}
+
+unsigned oracle_e5m3_operation(unsigned operation, unsigned left, unsigned right)
+{
+    E5M3 a = e5m3_from_code((ick_byte)left);
+    E5M3 b = e5m3_from_code((ick_byte)right);
+    E5M3 output = e5m3_from_code(0x5au);
+    int accepted;
     switch (operation) {
-    case 0: result = left_value + right_value; break;
-    case 1: result = left_value - right_value; break;
-    case 2: result = left_value * right_value; break;
-    case 3: result = left_value / right_value; break;
+    case 0: accepted = e5m3_add(a, b, &output); break;
+    case 1: accepted = e5m3_subtract(a, b, &output); break;
+    case 2: accepted = e5m3_multiply(a, b, &output); break;
     default: return 0x10000u;
     }
-    return float16_code(float16_from_float(result));
+    return accepted ? e5m3_code(output) : 0x10000u;
 }
 
 int oracle_circle(unsigned operation, int first, int second)
