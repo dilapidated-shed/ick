@@ -62,7 +62,11 @@ private bool vectorFloat4(Type t)
     if (!t)
         return false;
     auto vector = t.toBasetype().isTypeVector();
-    return vector && vector.basetype.size() == 16 &&
+    if (!vector)
+        return false;
+    auto array = vector.basetype.toBasetype().isTypeSArray();
+    auto dim = array ? array.dim.isIntegerExp() : null;
+    return dim && dim.getInteger() == 4 &&
            vector.elementType().ty == TY.Tfloat32;
 }
 
