@@ -684,6 +684,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #41
     mvn r0, #0
     mov r1, #1
     mov r2, #2
@@ -694,6 +695,7 @@ _start:
     cmp r1, #2
     bne fail
 
+    mov r10, #42
     mov r0, #1
     mov r1, #2
     mov r2, #2
@@ -705,6 +707,7 @@ _start:
     cmp r1, #1
     bne fail
 
+    mov r10, #43
     mov r0, #2
     mov r1, #1
     mov r2, #3
@@ -715,6 +718,7 @@ _start:
     cmp r1, #3
     bne fail
 
+    mov r10, #44
     mvn r0, #19
     mvn r1, #0
     mov r2, #6
@@ -727,6 +731,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #45
     mvn r0, #19
     mvn r1, #0
     mov r2, #6
@@ -739,6 +744,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #46
     mov r0, #5
     mov r1, #2
     mov r2, #3
@@ -751,6 +757,7 @@ _start:
     cmp r1, #0
     bne fail
 
+    mov r10, #47
     mov r0, #5
     mov r1, #2
     mov r2, #3
@@ -761,6 +768,7 @@ _start:
     cmp r1, #0
     bne fail
 
+    mov r10, #48
     mov r0, #0
     mov r1, #1
     bl long_neg
@@ -770,6 +778,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #49
     mvn r0, #0
     mvn r1, #0
     mov r2, #0
@@ -778,6 +787,7 @@ _start:
     cmp r0, #1
     bne fail
 
+    mov r10, #50
     mov r0, #0
     mov r1, #1
     mvn r2, #0
@@ -887,7 +897,7 @@ _start:
     mov r7, #1
     svc #0
 fail:
-    mov r0, #1
+    mov r0, r10
     mov r7, #1
     svc #0
 """
