@@ -6622,13 +6622,23 @@ private bool isPackedImpreciseType(Type type, const(char)* expectedName)
 
 private bool isPackedStorageType(Type type)
 {
-    return isPackedImpreciseType(type, "E5M3") ||
+    return isPackedImpreciseType(type, "UE5M3") ||
            isPackedImpreciseType(type, "Quantized!(ScalarFormat.e3m2)");
 }
 
 private bool isPackedFloat16Type(Type type)
 {
     return isPackedImpreciseType(type, "Quantized!(ScalarFormat.binary16)");
+}
+
+private bool isPackedE5M3Type(Type type)
+{
+    return isPackedImpreciseType(type, "E5M3");
+}
+
+private bool isPackedArithmeticType(Type type)
+{
+    return isPackedFloat16Type(type) || isPackedE5M3Type(type);
 }
 
 private const(char)* packedTypeChars(Type type)
@@ -6675,6 +6685,7 @@ private const(char)* packedRoundingChars(PackedMemoryRounding rounding)
     {
         case PackedMemoryRounding.none: return "none";
         case PackedMemoryRounding.float16_per_operation: return "Float16-per-operation";
+        case PackedMemoryRounding.e5m3_per_operation: return "E5M3-per-operation";
     }
 }
 
@@ -6825,8 +6836,9 @@ private bool packedSemanticSignatureMatches(FuncDeclaration fd, CallExp ce,
         auto arithmeticTemplate = packedTemplateType(fd, 0, 4);
         auto leftTemplate = packedTemplateType(fd, 2, 4);
         auto rightTemplate = packedTemplateType(fd, 3, 4);
-        return isPackedFloat16Type(functionType.nextOf()) &&
-               isPackedFloat16Type(arithmeticTemplate) &&
+        return isPackedArithmeticType(functionType.nextOf()) &&
+               isPackedArithmeticType(arithmeticTemplate) &&
+               functionType.nextOf().mutableOf().equals(arithmeticTemplate.mutableOf()) &&
                isPackedStorageType(leftStorage) && isPackedStorageType(rightStorage) &&
                leftTemplate && rightTemplate &&
                leftTemplate.mutableOf().equals(leftStorage) &&
@@ -6838,14 +6850,17 @@ private bool packedSemanticSignatureMatches(FuncDeclaration fd, CallExp ce,
     }
 
     auto destinationStorage = packedElementType((*ce.arguments)[0]);
-    auto storageTemplate = packedTemplateType(fd, 0, 1);
+    auto storageTemplate = packedTemplateType(fd, 0, 2);
+    auto arithmeticTemplate = packedTemplateType(fd, 1, 2);
     auto valueType = functionType.parameterList[2].type;
     return functionType.nextOf().toBasetype().ty == Tbool &&
            isPackedStorageType(destinationStorage) && storageTemplate &&
            storageTemplate.mutableOf().equals(destinationStorage) &&
+           arithmeticTemplate && isPackedArithmeticType(arithmeticTemplate) &&
+           arithmeticTemplate.mutableOf().equals(valueType.mutableOf()) &&
            packedArrayMatches(functionType.parameterList[0].type, destinationStorage) &&
            functionType.parameterList[1].type.equals(Type.tsize_t) &&
-           isPackedFloat16Type(valueType);
+           isPackedArithmeticType(valueType);
 }
 
 private bool packedScalarFallbackSupports(PackedMemoryOperation operation)
@@ -6871,13 +6886,22 @@ private bool packedScalarFallbackSupports(PackedMemoryOperation operation)
             case PackedMemoryArithmetic.none:
                 return false;
         }
+        if (isPackedE5M3Type(operation.arithmeticRepresentation) &&
+            operation.arithmeticOperation != PackedMemoryArithmetic.add &&
+            operation.arithmeticOperation != PackedMemoryArithmetic.subtract)
+            return false;
+        const roundingMatches =
+            (isPackedFloat16Type(operation.arithmeticRepresentation) &&
+             operation.rounding == PackedMemoryRounding.float16_per_operation) ||
+            (isPackedE5M3Type(operation.arithmeticRepresentation) &&
+             operation.rounding == PackedMemoryRounding.e5m3_per_operation);
         return operation.publicSurface && operation.stageMask == stages &&
                operation.effect == PackedMemoryEffect.read &&
                operation.domain == PackedMemoryDomain.total_quantization &&
-               operation.rounding == PackedMemoryRounding.float16_per_operation &&
+               roundingMatches &&
                isPackedStorageType(operation.leftStorage) &&
                isPackedStorageType(operation.rightStorage) &&
-               isPackedFloat16Type(operation.arithmeticRepresentation) &&
+               isPackedArithmeticType(operation.arithmeticRepresentation) &&
                operation.baseAddress && operation.byteLength && operation.elementIndex &&
                operation.leftBase && operation.leftLength && operation.leftIndex &&
                operation.rightBase && operation.rightLength && operation.rightIndex &&
@@ -6891,8 +6915,8 @@ private bool packedScalarFallbackSupports(PackedMemoryOperation operation)
     if (operation.kind == PackedMemoryOperationKind.checked_scalar_store)
     {
         const stages = PackedMemoryStage.encode | PackedMemoryStage.store_packed;
-        const isE5M3 = isPackedImpreciseType(operation.destinationStorage, "E5M3");
-        const expectedDomain = isE5M3
+        const isUE5M3 = isPackedImpreciseType(operation.destinationStorage, "UE5M3");
+        const expectedDomain = isUE5M3
             ? PackedMemoryDomain.partial_reject_preserve_destination
             : PackedMemoryDomain.total_quantization;
         return operation.publicSurface && operation.stageMask == stages &&
@@ -6900,7 +6924,7 @@ private bool packedScalarFallbackSupports(PackedMemoryOperation operation)
                operation.domain == expectedDomain &&
                operation.rounding == PackedMemoryRounding.none &&
                isPackedStorageType(operation.destinationStorage) &&
-               isPackedFloat16Type(operation.arithmeticRepresentation) &&
+               isPackedArithmeticType(operation.arithmeticRepresentation) &&
                operation.baseAddress && operation.byteLength && operation.elementIndex &&
                operation.destinationBase && operation.destinationLength &&
                operation.destinationIndex && operation.storedValue &&
@@ -6996,8 +7020,11 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
         operation.kind = isCompute ? PackedMemoryOperationKind.scalar_compute :
                                      PackedMemoryOperationKind.checked_scalar_store;
         operation.action = isCompute ? PackedMemoryAction.arithmetic : PackedMemoryAction.store;
-        operation.rounding = isCompute ? PackedMemoryRounding.float16_per_operation :
-                                         PackedMemoryRounding.none;
+        operation.rounding = isCompute
+            ? (isPackedE5M3Type(ce.type)
+                ? PackedMemoryRounding.e5m3_per_operation
+                : PackedMemoryRounding.float16_per_operation)
+            : PackedMemoryRounding.none;
         operation.boundedTemporary = true;
         operation.disjointProven = false;
         operation.publicSurface = isPublicSurface;
@@ -7055,7 +7082,7 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
             operation.destinationStride = operation.byteStride;
             operation.stageMask = PackedMemoryStage.encode | PackedMemoryStage.store_packed;
             operation.effect = PackedMemoryEffect.write;
-            operation.domain = isPackedImpreciseType(operation.destinationStorage, "E5M3")
+            operation.domain = isPackedImpreciseType(operation.destinationStorage, "UE5M3")
                 ? PackedMemoryDomain.partial_reject_preserve_destination
                 : PackedMemoryDomain.total_quantization;
             operation.storageBytes = operation.destinationStrideBytes;
@@ -7094,8 +7121,8 @@ private PackedMemoryOperation makePackedMemoryOperation(FuncDeclaration fd, Call
     }
 
     auto arithmeticTemplate = packedTemplateType(fd, 1, 4);
-    if (!isPackedStorageType(storageType) || !isPackedFloat16Type(arithmeticType) ||
-        !arithmeticTemplate || !isPackedFloat16Type(arithmeticTemplate) ||
+    if (!isPackedStorageType(storageType) || !isPackedArithmeticType(arithmeticType) ||
+        !arithmeticTemplate || !isPackedArithmeticType(arithmeticTemplate) ||
         !arithmeticTemplate.mutableOf().equals(arithmeticType.mutableOf()) ||
         !packedByteAccessSignatureMatches(fd, ce, isRead, storageType))
         return PackedMemoryOperation.init;
