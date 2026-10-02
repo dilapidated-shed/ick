@@ -261,10 +261,11 @@ private struct LeafEmitter
                 reject(destination.loc, "assignment target is not a variable");
             if (auto found = declaration in homes)
             {
-                code.store(*found);
+                storeValue(declaration.type, *found);
                 return;
             }
 
+            requireWord(declaration.type, destination.loc);
             const saved = temporary();
             code.store(saved);
             globalAddress(declaration);
@@ -283,15 +284,15 @@ private struct LeafEmitter
 
     void declare(VarDeclaration variable)
     {
-        requireWord(variable.type, variable.loc);
+        requireScalar(variable.type, variable.loc);
         if (variable.storage_class & (STC.static_ | STC.ref_ | STC.out_ | STC.lazy_))
-            reject(variable.loc, "static and by-reference locals are outside the initial A32 slice");
-        homes[variable] = temporary();
+            reject(variable.loc, "static and by-reference locals are outside the scalar A32 slice");
+        homes[variable] = temporary(variable.type);
         auto initializer = variable._init ? variable._init.isExpInitializer() : null;
         if (!initializer)
             reject(variable.loc, "local requires an expression initializer");
         expression(initializer.exp);
-        code.store(home(variable));
+        storeValue(variable.type, home(variable));
     }
 
     void directCall(CallExp call)
@@ -306,11 +307,11 @@ private struct LeafEmitter
         if (signature.parameterList.varargs != VarArg.none || signature.isRef)
             reject(call.loc, "variadic or ref-return calls are not implemented");
         if (signature.next.toBasetype().ty != TY.Tvoid)
-            requireWord(signature.next, call.loc);
+            requireScalar(signature.next, call.loc);
 
         const count = call.arguments ? cast(uint)call.arguments.length : 0U;
         if (count > 64)
-            reject(call.loc, "more than 64 one-word call arguments are outside the qualification range");
+            reject(call.loc, "more than 64 scalar call arguments are outside the qualification range");
 
         if (callee.parameters)
         {
@@ -320,29 +321,82 @@ private struct LeafEmitter
         }
 
         uint[] argumentHomes;
+        uint[] argumentWords;
+        ArgumentLocation[] locations;
         argumentHomes.length = count;
+        argumentWords.length = count;
+        locations.length = count;
+
         if (call.arguments)
         {
             foreach (i, argument; *call.arguments)
             {
-                requireWord(argument.type, argument.loc);
+                requireScalar(argument.type, argument.loc);
                 expression(argument);
-                argumentHomes[i] = temporary();
-                code.store(argumentHomes[i]);
+                argumentWords[i] = scalarWords(argument.type);
+                argumentHomes[i] = temporary(argument.type);
+                storeValue(argument.type, argumentHomes[i]);
             }
         }
 
-        const stackWords = count > 4 ? count - 4 : 0U;
+        uint ncrn;
+        uint stackWords;
+        foreach (i; 0 .. count)
+        {
+            const words = argumentWords[i];
+            if (words == 2 && (ncrn & 1))
+                ++ncrn; // AAPCS32 C.3: double-word values start in an even core register.
+
+            locations[i].words = words;
+            if (ncrn < 4 && words <= 4 - ncrn)
+            {
+                locations[i].reg = cast(int)ncrn;
+                ncrn += words;
+            }
+            else
+            {
+                ncrn = 4;
+                if (words == 2 && (stackWords & 1))
+                    ++stackWords; // AAPCS32 C.7: double-word stack arguments are 8-byte aligned.
+                locations[i].stackWord = stackWords;
+                stackWords += words;
+            }
+        }
+
         const outgoing = (stackWords * 4 + 7) & ~7U;
         code.adjustStack(outgoing, true);
 
-        foreach (i; 4 .. count)
+        foreach (i; 0 .. count)
         {
-            code.loadStackOffset(outgoing + argumentHomes[i] * 4, 0);
-            code.storeStackOffset((i - 4) * 4, 0);
+            const source = outgoing + argumentHomes[i] * 4;
+            auto loc = locations[i];
+            if (loc.reg >= 0)
+                continue;
+            if (loc.words == 1)
+            {
+                code.loadStackOffset(source, 0);
+                code.storeStackOffset(loc.stackWord * 4, 0);
+            }
+            else
+            {
+                code.loadStackOffset(source, 0);
+                code.loadStackOffset(source + 4, 1);
+                code.storeStackOffset(loc.stackWord * 4, 0);
+                code.storeStackOffset(loc.stackWord * 4 + 4, 1);
+            }
         }
-        foreach (i; 0 .. (count < 4 ? count : 4))
-            code.loadStackOffset(outgoing + argumentHomes[i] * 4, i);
+
+        foreach (i; 0 .. count)
+        {
+            auto loc = locations[i];
+            if (loc.reg < 0)
+                continue;
+            const source = outgoing + argumentHomes[i] * 4;
+            const reg = cast(uint)loc.reg;
+            code.loadStackOffset(source, reg);
+            if (loc.words == 2)
+                code.loadStackOffset(source + 4, reg + 1);
+        }
 
         const at = code.call();
         relocations ~= Arm32Relocation(cast(uint)at, declarationName(callee, call.loc), ARM32_R_CALL);
