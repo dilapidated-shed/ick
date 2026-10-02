@@ -79,6 +79,10 @@ extern(C) nothrow @nogc:
 
 int* __errno();
 
+void* malloc(size_t size);
+void free(void* pointer);
+void exit(int status);
+
 ssize_t read(int fd, void* buffer, size_t count);
 ssize_t write(int fd, const(void)* buffer, size_t count);
 int close(int fd);
