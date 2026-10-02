@@ -89,7 +89,16 @@ def check_elf(path: Path) -> None:
             raise RuntimeError("relocation symbol index outside .symtab")
         relocation_targets.append(symbols[symbol_number][0])
 
-    expected = Counter({"add_int": 3, "sum5": 1, "add_float": 1, "external_twice": 1})
+    expected = Counter({
+        "add_int": 3,
+        "sum5": 1,
+        "add_float": 1,
+        "external_twice": 1,
+        "__aeabi_idiv": 1,
+        "__aeabi_uidiv": 1,
+        "__aeabi_idivmod": 1,
+        "__aeabi_uidivmod": 1,
+    })
     if Counter(relocation_targets) != expected:
         raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(relocation_targets)}")
 
@@ -117,6 +126,64 @@ def harness() -> str:
 .type external_twice,%function
 external_twice:
     add r0, r0, r0
+    bx lr
+
+.global __aeabi_idiv
+.type __aeabi_idiv,%function
+__aeabi_idiv:
+    mvn r2, #19
+    cmp r0, r2
+    bne .Lidiv_bad
+    cmp r1, #6
+    bne .Lidiv_bad
+    mvn r0, #2
+    bx lr
+.Lidiv_bad:
+    mov r0, #99
+    bx lr
+
+.global __aeabi_uidiv
+.type __aeabi_uidiv,%function
+__aeabi_uidiv:
+    cmp r0, #20
+    bne .Luidiv_bad
+    cmp r1, #6
+    bne .Luidiv_bad
+    mov r0, #3
+    bx lr
+.Luidiv_bad:
+    mov r0, #99
+    bx lr
+
+.global __aeabi_idivmod
+.type __aeabi_idivmod,%function
+__aeabi_idivmod:
+    mvn r2, #19
+    cmp r0, r2
+    bne .Lidivmod_bad
+    cmp r1, #6
+    bne .Lidivmod_bad
+    mvn r0, #2
+    mvn r1, #1
+    bx lr
+.Lidivmod_bad:
+    mov r0, #99
+    mov r1, #99
+    bx lr
+
+.global __aeabi_uidivmod
+.type __aeabi_uidivmod,%function
+__aeabi_uidivmod:
+    cmp r0, #20
+    bne .Luidivmod_bad
+    cmp r1, #6
+    bne .Luidivmod_bad
+    mov r0, #3
+    mov r1, #2
+    bx lr
+.Luidivmod_bad:
+    mov r0, #99
+    mov r1, #99
     bx lr
 
 .global _start
@@ -230,6 +297,40 @@ _start:
     cmp sp, r11
     bne fail
 
+    mvn r0, #19
+    mov r1, #6
+    bl signed_div
+    mvn r1, #2
+    cmp r0, r1
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mov r0, #20
+    mov r1, #6
+    bl unsigned_div
+    cmp r0, #3
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mvn r0, #19
+    mov r1, #6
+    bl signed_mod
+    mvn r1, #1
+    cmp r0, r1
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mov r0, #20
+    mov r1, #6
+    bl unsigned_mod
+    cmp r0, #2
+    bne fail
+    cmp sp, r11
+    bne fail
+
     mov r0, #0
     mov r7, #1
     svc #0
@@ -277,7 +378,7 @@ def main() -> None:
     run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
-    print("PASS: ELF32 EM_ARM A32, R_ARM_CALL, internal/external calls, base PCS softfp, r0-r3 + stack arguments")
+    print("PASS: ELF32 EM_ARM A32, R_ARM_CALL, internal/external calls, EABI integer helpers, base PCS softfp")
 
 
 if __name__ == "__main__":
