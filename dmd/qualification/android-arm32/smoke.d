@@ -86,3 +86,33 @@ extern(C) uint unsigned_mod(uint a, uint b)
 {
     return a % b;
 }
+
+extern(C) __gshared int own_global = 7;
+extern(C) extern __gshared int external_global;
+
+extern(C) int read_own_global()
+{
+    return own_global;
+}
+
+extern(C) int set_own_global(int x)
+{
+    own_global = x;
+    return x;
+}
+
+extern(C) int read_external_global()
+{
+    return external_global;
+}
+
+extern(C) int set_external_global(int x)
+{
+    external_global = x;
+    return x;
+}
+
+extern(C) int* own_global_address()
+{
+    return &own_global;
+}
