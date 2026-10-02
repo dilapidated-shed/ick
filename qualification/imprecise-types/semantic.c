@@ -74,6 +74,48 @@ main(void)
             return 40;
     }
 
+    {
+        unsigned left_code;
+        unsigned right_code;
+        for (left_code = 0; left_code < 256; ++left_code) {
+            for (right_code = 0; right_code < 256; ++right_code) {
+                E5M3 left = e5m3_from_code((ick_byte)left_code);
+                E5M3 right = e5m3_from_code((ick_byte)right_code);
+                E5M3 direct = e5m3_from_code(0x5au);
+                E5M3 reference = e5m3_from_code(0x5au);
+                int direct_ok;
+                int reference_ok;
+
+                direct_ok = e5m3_add(left, right, &direct);
+                reference_ok = e5m3_from_float(
+                    e5m3_to_float(left) + e5m3_to_float(right), &reference);
+                if (direct_ok != reference_ok
+                    || (direct_ok && e5m3_code(direct) != e5m3_code(reference)))
+                    return 45;
+
+                direct = e5m3_from_code(0x5au);
+                reference = e5m3_from_code(0x5au);
+                direct_ok = e5m3_subtract(left, right, &direct);
+                reference_ok = e5m3_from_float(
+                    e5m3_to_float(left) - e5m3_to_float(right), &reference);
+                if (direct_ok != reference_ok
+                    || (direct_ok && e5m3_code(direct) != e5m3_code(reference))
+                    || (!direct_ok && e5m3_code(direct) != 0x5au))
+                    return 46;
+
+                direct = e5m3_from_code(0x5au);
+                reference = e5m3_from_code(0x5au);
+                direct_ok = e5m3_multiply(left, right, &direct);
+                reference_ok = e5m3_from_float(
+                    e5m3_to_float(left) * e5m3_to_float(right), &reference);
+                if (direct_ok != reference_ok
+                    || (direct_ok && e5m3_code(direct) != e5m3_code(reference))
+                    || (!direct_ok && e5m3_code(direct) != 0x5au))
+                    return 47;
+            }
+        }
+    }
+
     if (e3m2_code(e3m2_add(e3m2_from_float(16.0f), e3m2_from_float(16.0f))) != 31)
         return 41;
     if (e4m3_code(e4m3_add(e4m3_from_float(256.0f), e4m3_from_float(256.0f))) != 0x7eu)
