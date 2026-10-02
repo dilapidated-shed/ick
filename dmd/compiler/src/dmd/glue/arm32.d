@@ -320,6 +320,16 @@ private struct LeafEmitter
             code.constant(0);
             return;
         }
+        if (auto symbolOffset = e.isSymOffExp())
+        {
+            auto declaration = symbolOffset.var.isVarDeclaration();
+            if (!declaration)
+                reject(e.loc, "A32 symbol-offset expressions currently support data symbols only");
+            if (symbolOffset.offset != 0)
+                reject(e.loc, "nonzero A32 data symbol offsets are not implemented yet");
+            globalAddress(declaration);
+            return;
+        }
         if (auto variable = e.isVarExp())
         {
             auto declaration = variable.var.isVarDeclaration();
