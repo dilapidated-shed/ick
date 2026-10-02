@@ -388,6 +388,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #2
     sub sp, sp, #8
     mov r0, #1
     mov r1, #2
@@ -402,6 +403,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #3
     movw r0, #0x0000
     movt r0, #0x3fc0
     movw r1, #0x0000
@@ -414,6 +416,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #4
     sub sp, sp, #8
     movw r0, #0x0000
     movt r0, #0x3f80
@@ -435,6 +438,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #5
     mov r0, #4
     bl choose
     cmp r0, #7
@@ -446,6 +450,7 @@ _start:
     cmp r0, r1
     bne fail
 
+    mov r10, #6
     mov r0, #4
     bl call_internal
     cmp r0, #13
@@ -453,6 +458,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #7
     mov r0, #4
     bl call_nested
     cmp r0, #7
@@ -460,6 +466,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #8
     mov r0, #6
     bl call_external
     cmp r0, #12
@@ -467,6 +474,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #9
     mov r0, #1
     bl call_sum5
     cmp r0, #15
@@ -474,6 +482,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #10
     movw r0, #0x0000
     movt r0, #0x3fc0
     movw r1, #0x0000
@@ -486,6 +495,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #11
     mvn r0, #19
     mov r1, #6
     bl signed_div
@@ -520,12 +530,14 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #12
     bl read_own_global
     cmp r0, #7
     bne fail
     cmp sp, r11
     bne fail
 
+    mov r10, #13
     mov r0, #13
     bl set_own_global
     cmp r0, #13
@@ -540,6 +552,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #14
     bl read_external_global
     cmp r0, #11
     bne fail
@@ -553,6 +566,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #15
     movw r0, #0x7788
     movt r0, #0x5566
     movw r1, #0x3344
@@ -569,6 +583,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #16
     bl long_constant
     movw r2, #0x7788
     movt r2, #0x5566
@@ -581,6 +596,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #17
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x400c
@@ -594,6 +610,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #18
     bl double_constant
     cmp r0, #0
     bne fail
@@ -604,6 +621,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #19
     sub sp, sp, #8
     mov r0, #1
     mov r1, #99
@@ -626,6 +644,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #20
     sub sp, sp, #8
     mov r0, #1
     mov r1, #2
@@ -650,6 +669,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #21
     movw r0, #0x7788
     movt r0, #0x5566
     movw r1, #0x3344
@@ -666,6 +686,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #22
     movw r0, #0x7788
     movt r0, #0x5566
     movw r1, #0x3344
@@ -682,6 +703,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #23
     mov r0, #0
     movw r1, #0x0000
     movt r1, #0x400c
@@ -695,6 +717,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #24
     bl read_own_long_global
     movw r2, #0x0708
     movt r2, #0x0506
@@ -705,6 +728,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #25
     movw r0, #0x7788
     movt r0, #0x5566
     movw r1, #0x3344
@@ -722,6 +746,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #26
     bl read_external_long_global
     movw r2, #0x8899
     movt r2, #0x6677
@@ -732,6 +757,7 @@ _start:
     cmp r1, r2
     bne fail
 
+    mov r10, #27
     movw r0, #0x7788
     movt r0, #0x5566
     movw r1, #0x3344
@@ -749,6 +775,7 @@ _start:
     cmp sp, r11
     bne fail
 
+    mov r10, #28
     bl read_own_double_global
     cmp r0, #0
     bne fail
