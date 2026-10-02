@@ -415,9 +415,25 @@ private struct LeafEmitter
                 else    code.instruction(0xE0000190); // MUL r0,r0,r1
                 break;
             case EXP.div:
-                if (!fp)
-                    reject(e.loc, "integer division needs an ABI helper call and is not implemented yet");
-                code.instruction(0xEE800A20);         // VDIV.F32 s0,s0,s1
+                if (fp)
+                    code.instruction(0xEE800A20);     // VDIV.F32 s0,s0,s1
+                else
+                {
+                    const helper = unsigned_ ? "__aeabi_uidiv" : "__aeabi_idiv";
+                    const at = code.call();
+                    relocations ~= Arm32Relocation(cast(uint)at, helper);
+                }
+                break;
+            case EXP.mod:
+                if (fp)
+                    reject(e.loc, "binary32 remainder is not implemented yet");
+                else
+                {
+                    const helper = unsigned_ ? "__aeabi_uidivmod" : "__aeabi_idivmod";
+                    const at = code.call();
+                    relocations ~= Arm32Relocation(cast(uint)at, helper);
+                    code.instruction(0xE1A00001);     // MOV r0,r1: EABI divmod remainder
+                }
                 break;
             case EXP.and: code.instruction(0xE0000001); break;
             case EXP.or:  code.instruction(0xE1800001); break;
