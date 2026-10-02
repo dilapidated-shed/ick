@@ -90,7 +90,8 @@ main(void)
                 reference_ok = e5m3_from_float(
                     e5m3_to_float(left) + e5m3_to_float(right), &reference);
                 if (direct_ok != reference_ok
-                    || (direct_ok && e5m3_code(direct) != e5m3_code(reference)))
+                    || (direct_ok && e5m3_code(direct) != e5m3_code(reference))
+                    || (!direct_ok && e5m3_code(direct) != 0x5au))
                     return 45;
 
                 direct = e5m3_from_code(0x5au);
