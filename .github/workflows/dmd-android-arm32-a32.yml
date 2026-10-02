@@ -96,9 +96,12 @@ jobs:
           arguments, softfp binary32 arguments/results, 8-byte public stack restoration,
           and execution of the generated code under qemu-arm.
 
-          CURRENT LOWERING BOUNDARY: BetterC scalar A32 functions with direct extern(C)
-          calls, EABI integer divide/remainder helpers, PIC one-word extern(C) globals,
-          and AAPCS32 transport/returns for 64-bit long/ulong/double scalars.
-          64-bit arithmetic/globals, aggregates, variadics, TLS/read-only aggregate data,
-          and druntime/Phobos remain future work.
+          CURRENT LOWERING BOUNDARY: BetterC A32 functions with direct extern(C)
+          calls, ARM EABI 32/64-bit divide/remainder helpers, PIC one/two-word extern(C)
+          globals, AAPCS32 long/ulong/double transport/returns, 64-bit integer arithmetic
+          and comparisons, and VFP double arithmetic behind the softfp boundary.
+          ARMv7 NEON additionally supports internal 16-byte float4 pointer loads/stores
+          and add/subtract/multiply while keeping vector values out of the public ABI.
+          Aggregates, broader vector operations/types, variadics, TLS/read-only aggregate
+          data, and druntime/Phobos remain future work.
           EOF
