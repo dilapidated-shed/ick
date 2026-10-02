@@ -284,3 +284,53 @@ extern(C) int double_truth(double a)
 {
     return !!a;
 }
+
+extern(C) int shl32(int a, int n)
+{
+    return a << n;
+}
+
+extern(C) int sar32(int a, int n)
+{
+    return a >> n;
+}
+
+extern(C) uint shr32(uint a, int n)
+{
+    return a >> n;
+}
+
+extern(C) long shl64(long a, int n)
+{
+    return a << n;
+}
+
+extern(C) long sar64(long a, int n)
+{
+    return a >> n;
+}
+
+extern(C) ulong shr64(ulong a, int n)
+{
+    return a >>> n;
+}
+
+extern(C) long widen_signed(int x)
+{
+    return cast(long)x;
+}
+
+extern(C) ulong widen_unsigned(uint x)
+{
+    return cast(ulong)x;
+}
+
+extern(C) int narrow_signed(long x)
+{
+    return cast(int)x;
+}
+
+extern(C) uint narrow_unsigned(ulong x)
+{
+    return cast(uint)x;
+}
