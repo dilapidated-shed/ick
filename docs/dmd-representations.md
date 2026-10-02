@@ -20,11 +20,11 @@ An explicit compiler representation-selection/lowering stage is still owed.
 
 | Type | Storage | Arithmetic |
 | --- | --- | --- |
-| Float16 | 2 bytes, binary16 | Decode to binary32, one operation, requantize |
-| E4M3 | 1 byte | Same, with the established E4M3 saturation/NaN policy |
-| E5M2 | 1 byte | Same, with the established E5M2 saturation/NaN policy |
-| E3M2 | 6 payload bits in 1 byte | Same; saturate at 28; source NaN becomes +0 |
-| E5M3 | 1 byte, unsigned storage | No invented scalar arithmetic |
+| Float16 | 2 bytes, binary16 | Native binary16 semantics from integer payload arithmetic; no binary32 arithmetic carrier |
+| E4M3 | 1 byte | Existing binary32 reference operation + requantize policy |
+| E5M2 | 1 byte | Existing binary32 reference operation + requantize policy |
+| E3M2 | 6 payload bits in 1 byte | Existing binary32 reference operation + requantize; saturate at 28 |
+| E5M3 | 1 byte, unsigned storage | Checked +, -, * directly in the E5M3 dyadic lattice; ordinary opBinary remains unavailable |
 
 The source of truth is the existing `ick/include/ick/imprecise.h`, described
 in `docs/imprecise-types.md`. Encoding, midpoint reconstruction, ties and
@@ -41,7 +41,9 @@ float displayed = rounded_sum.to_float();
 E5M3 stored;
 bool accepted = E5M3.try_from_float(1.0f, stored);
 // A failed construction leaves stored unchanged.
-// stored + stored does not compile.
+// stored + stored does not compile because domain failure needs a result channel.
+E5M3 sum = E5M3.from_code(0);
+bool sumAccepted = E5M3.try_add(stored, stored, sum);
 ```
 
 Raw payload access is explicit: `from_code`, `code`, and `to_float`.
@@ -55,20 +57,23 @@ and NaNs are rejected. Its code zero represents a positive bin midpoint,
 
 `icky.packed` adds a scalar, byte-strided view and a typed `PackedValue!(S, A)`:
 `S` names the stored representation and `A` names the arithmetic representation.
-For E5M3, `PackedValue!(E5M3, Float16).sizeof == 1`; decoding constructs one
-Float16 value at the point the caller requests arithmetic. Each successful
-load reads one stored element. E5M3 values beyond Float16's finite range widen
-according to the existing Float16 overflow conversion. Stores encode one
-arithmetic value and leave memory unchanged when the E5M3 input falls outside
-its defined domain.
+For E5M3, `PackedValue!(E5M3, Float16).sizeof == 1`; explicit decoding can
+still construct one Float16 value when a caller actually asks for a wider
+result. That is no longer the path for E5M3 addition/subtraction. The
+`try_e5m3_at` surface loads two E5M3 scalars and performs checked `+`, `-`
+or narrow `*` directly in the E5M3 dyadic representation. Each successful
+load reads one stored element. Stores through the explicit Float16 surface
+still encode one arithmetic value and leave memory unchanged when the E5M3
+input falls outside its defined domain.
 
 ```d
-auto packed = PackedView!(E5M3, Float16, 1, alias_group)(bytes, byteLength, 1);
-PackedValue!(E5M3, Float16) value;
-if (packed.try_load(index, value)) {
-    auto result = value.decode() * Float16.from_float(2.0f);
-    packed.try_store(index, result);
+E5M3 result = E5M3.from_code(0);
+if (try_e5m3_at!("+")(left, leftIndex, right, rightIndex, result)) {
+    // result stayed E5M3 throughout the operation.
 }
+
+// Explicit widening remains available when it is actually requested:
+auto product = compute_at!(Float16, "*")(left, leftIndex, other, otherIndex);
 ```
 
 The view carries its base, byte length, byte stride, caller-known alignment,
@@ -140,10 +145,10 @@ unoptimized and optimized DMD output against the original C implementation.
 It includes all 65536 binary16 payloads, every byte code for the smaller
 formats, midpoint neighbours, randomized binary32 inputs, domain rejection,
 requantization, invalid-operation type checks, the Circle96 C oracle and
-finite-geometry laws for all five named grids. Packed-memory qualification
-checks every E5M3 byte through a stride-two view, decode/encode round trips,
-F16 multiply followed by narrowing/store, bounds and domain failure, and
-alignment/alias/effect facts.
+finite-geometry laws for all five named grids. Packed-memory qualification checks every E5M3 byte through a stride-two view,
+decode/encode round trips, exhaustive checked E5M3 `+`, `-`, and narrow
+`*`, explicit Float16 multiply followed by narrowing/store, bounds and domain
+failure, and alignment/alias/effect facts.
 
 The acceptance source uses `-betterC`, static storage and `@nogc`; the C oracle
 is linked only into the test executable. The workflow result, not the presence
