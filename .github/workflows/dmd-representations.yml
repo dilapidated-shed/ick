@@ -241,8 +241,10 @@ jobs:
           PASS: rebuilt Icky DMD compiles and executes the compact D representations.
           PASS: debug and optimized output agree with the existing C oracle.
           PASS: scalar payloads, midpoint neighbours, domain rejection and requantization.
+          PASS: binary16 +, -, *, / use the native payload/integer semantic implementation.
+          PASS: checked E5M3 +, -, and narrow * avoid Float16/binary32 arithmetic.
           PASS: Circle96 oracle and finite geometry laws at 96/192/240/360/720 positions.
-          PASS: invalid arithmetic, direct E5M3 arithmetic, and mixed categories fail source type checking.
+          PASS: unchecked E5M3 opBinary, implicit E5M3 add/sub widening, and mixed categories fail source type checking.
 
           This proves native D value-type support on the host. It does not prove
           new primitive compiler types, representation-aware backend IR, geometric

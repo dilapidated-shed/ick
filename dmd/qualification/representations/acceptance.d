@@ -13,6 +13,7 @@ extern(C) uint oracle_float16_chain(uint firstOperation, uint secondOperation,
                                     uint left, uint middle, uint right);
 extern(C) uint oracle_packed_operation(uint left_format, uint right_format,
                                       uint operation, uint left, uint right);
+extern(C) uint oracle_e5m3_operation(uint operation, uint left, uint right);
 extern(C) int oracle_circle(uint operation, int first, int second);
 extern(C) int puts(const char* text);
 
@@ -147,6 +148,34 @@ void check_storage()
     }
 }
 
+void check_float16_random_operations()
+{
+    uint state = 0x91e10da5u;
+    foreach (uint sample; 0 .. 65536)
+    {
+        state = state * 1664525u + 1013904223u;
+        const ushort leftCode = cast(ushort)(state >> 16);
+        state = state * 1664525u + 1013904223u;
+        const ushort rightCode = cast(ushort)(state >> 16);
+        auto left = Float16.from_code(leftCode);
+        auto right = Float16.from_code(rightCode);
+        Float16[4] results = [
+            left + right,
+            left - right,
+            left * right,
+            left / right
+        ];
+        foreach (uint operation; 0 .. 4)
+        {
+            const expected = oracle_operation(0, operation, leftCode, rightCode);
+            if (nan_bits(oracle_decode(0, expected)))
+                assert(nan_bits(bits_of(results[operation].to_float())));
+            else
+                assert(results[operation].code() == expected);
+        }
+    }
+}
+
 void check_float16_rounding_chain()
 {
     auto left = Float16.from_float(1.0f);
@@ -189,10 +218,57 @@ void check_packed_operation_pairs(Left, Right)(uint leftFormat, uint rightFormat
         left[code] = Left.from_code(cast(typeof(left[code].code()))code);
         right[code] = Right.from_code(cast(typeof(right[code].code()))code);
     }
-    check_packed_operation!("+")(left[], right[], leftFormat, rightFormat);
-    check_packed_operation!("-")(left[], right[], leftFormat, rightFormat);
+    // E5M3/E5M3 + and - deliberately have no Float16-widening overload.
+    static if (!(is(Left == E5M3) && is(Right == E5M3)))
+    {
+        check_packed_operation!("+")(left[], right[], leftFormat, rightFormat);
+        check_packed_operation!("-")(left[], right[], leftFormat, rightFormat);
+    }
     check_packed_operation!("*")(left[], right[], leftFormat, rightFormat);
     check_packed_operation!("/")(left[], right[], leftFormat, rightFormat);
+}
+
+void check_e5m3_direct_arithmetic()
+{
+    E5M3[256] values;
+    foreach (uint code; 0 .. 256)
+        values[code] = E5M3.from_code(cast(ubyte)code);
+
+    foreach (uint left; 0 .. 256)
+    foreach (uint right; 0 .. 256)
+    {
+        foreach (uint operation; 0 .. 3)
+        {
+            E5M3 result = E5M3.from_code(0x5a);
+            bool accepted;
+            switch (operation)
+            {
+                case 0:
+                    accepted = E5M3.try_add(values[left], values[right], result);
+                    break;
+                case 1:
+                    accepted = E5M3.try_subtract(values[left], values[right], result);
+                    break;
+                case 2:
+                    accepted = E5M3.try_multiply(values[left], values[right], result);
+                    break;
+                default:
+                    assert(0);
+            }
+            const expected = oracle_e5m3_operation(operation, left, right);
+            assert(accepted == (expected != 0x10000u));
+            assert(result.code() == (accepted ? expected : 0x5a));
+        }
+    }
+
+    E5M3 output = E5M3.from_code(0x5a);
+    assert(try_e5m3_at!("+")(values[], 80, values[], 81, output));
+    assert(output.code() == oracle_e5m3_operation(0, 80, 81));
+    const saved = output.code();
+    assert(!try_e5m3_at!("-")(values[], 3, values[], 3, output));
+    assert(output.code() == saved);
+    assert(!try_e5m3_at!("+")(values[], 256, values[], 0, output));
+    assert(output.code() == saved);
 }
 
 void check_packed_memory_surface()
@@ -218,8 +294,9 @@ void check_packed_memory_surface()
             assert(widened.code() == 0x7c00u);
     }
 
-    // Every E5M3/E5M3 operation pair, including mixed signed-zero, subnormal,
-    // infinity and NaN cases after the required Float16 operand conversion.
+    // Explicit Float16 compute remains available for multiplication/division
+    // of E5M3 pairs and for all four operations on the mixed/signed formats.
+    // E5M3/E5M3 + and - use the direct checked path instead.
     check_packed_operation_pairs!(E5M3, E5M3)(4, 4);
     check_packed_operation_pairs!(E5M3, E3M2)(4, 3);
     check_packed_operation_pairs!(E3M2, E5M3)(3, 4);
@@ -239,9 +316,10 @@ void check_packed_memory_surface()
     assert(offset_result.code() == oracle_packed_operation(
         4, 3, 1, e5[21].code(), e3[35].code()));
 
-    auto exact_alias = compute_at!(Float16, "+")(one_e5[], 0, one_e5[], 0);
-    assert(exact_alias.code() == oracle_packed_operation(
-        4, 4, 0, one_e5[0].code(), one_e5[0].code()));
+    E5M3 exact_alias = E5M3.from_code(0x5a);
+    assert(try_e5m3_at!("+")(one_e5[], 0, one_e5[], 0, exact_alias));
+    assert(exact_alias.code() == oracle_e5m3_operation(
+        0, one_e5[0].code(), one_e5[0].code()));
 
     // One coordinate, odd length, nonzero offset, final valid index and the
     // first and very large invalid indices all use the checked store surface.
@@ -279,9 +357,10 @@ void check_packed_memory_surface()
                        E5M3.from_code(3), E5M3.from_code(4)];
     auto first = overlap[0 .. 3];
     auto second = overlap[1 .. 4];
-    auto before = compute_at!(Float16, "+")(first, 1, second, 1);
-    const expectedBefore = oracle_packed_operation(4, 4, 0,
-                                                   overlap[1].code(), overlap[2].code());
+    E5M3 before = E5M3.from_code(0x5a);
+    assert(try_e5m3_at!("+")(first, 1, second, 1, before));
+    const expectedBefore = oracle_e5m3_operation(
+        0, overlap[1].code(), overlap[2].code());
     assert(before.code() == expectedBefore);
     assert(try_store_at(second, 0, Float16.from_float(3.0f)));
     assert(overlap[1].code() == oracle_encode(4,
@@ -368,7 +447,7 @@ void check_packed_memory()
            storeFacts.effect == PackedEffect.write &&
            storeFacts.byteStride == 2 && storeFacts.aliasSet == 7);
 
-    puts("PASS: packed scalar load, local F16 widening, arithmetic, narrowing and store");
+    puts("PASS: packed scalar load, explicit F16 widening, arithmetic, narrowing and store");
     puts("PASS: all 256 E5M3 encodings, non-unit stride, bounds, layout and memory facts");
 }
 
@@ -423,6 +502,8 @@ void check_grid(uint positions)()
 extern(C) int main()
 {
     check_packed_memory_surface();
+    check_e5m3_direct_arithmetic();
+    check_float16_random_operations();
     check_float16_rounding_chain();
     check_packed_memory();
     check_format!(Float16, 0, 65536)();
@@ -436,7 +517,8 @@ extern(C) int main()
     foreach (uint bits; [0x477fefffu, 0x477ff000u, 0x477ff001u])
         check_encoding!(Float16, 0)(bits);
     check_storage();
-    puts("PASS: all scalar payloads, boundary quantization and arithmetic against the C oracle");
+    puts("PASS: all scalar payloads, native Float16 arithmetic, and boundary quantization against the C oracle");
+    puts("PASS: exhaustive E5M3 +, -, and narrow * without Float16/binary32 arithmetic");
     check_grid!96();
     check_grid!192();
     check_grid!240();
