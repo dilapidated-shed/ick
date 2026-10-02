@@ -49,12 +49,13 @@ def check_elf(path: Path) -> None:
     for i, section in enumerate(sections):
         section_by_name[cstring(shstr_data, section[0]) if section[0] else ""] = (i, section)
 
-    for required in [".text", ".rel.text", ".symtab", ".strtab", ".ARM.attributes"]:
+    for required in [".text", ".rel.text", ".data", ".symtab", ".strtab", ".ARM.attributes"]:
         if required not in section_by_name:
             raise RuntimeError(f"missing ELF section {required}")
 
     text_index, _ = section_by_name[".text"]
     rel_index, rel = section_by_name[".rel.text"]
+    data_index, data_section = section_by_name[".data"]
     sym_index, sym = section_by_name[".symtab"]
     str_index, strings = section_by_name[".strtab"]
 
@@ -78,18 +79,34 @@ def check_elf(path: Path) -> None:
     if len(external) != 1 or external[0][5] != 0:
         raise RuntimeError("external_twice must be one undefined ELF function symbol")
 
-    relocation_targets = []
+    external_data = [s for s in symbols if s[0] == "external_global"]
+    if len(external_data) != 1 or external_data[0][5] != 0 or (external_data[0][3] & 0xF) != 1:
+        raise RuntimeError("external_global must be one undefined ELF object symbol")
+
+    own_data = [s for s in symbols if s[0] == "own_global"]
+    if len(own_data) != 1 or own_data[0][5] != data_index or own_data[0][2] != 4:
+        raise RuntimeError("own_global must be one four-byte .data object")
+    own_offset = data_section[4] + own_data[0][1]
+    if struct.unpack_from("<I", data, own_offset)[0] != 7:
+        raise RuntimeError("own_global initializer was not emitted as 7")
+
+    call_targets = []
+    got_targets = []
     for at in range(rel[4], rel[4] + rel[5], 8):
         offset, info = struct.unpack_from("<II", data, at)
         rtype = info & 0xFF
         symbol_number = info >> 8
-        if rtype != 28:
-            raise RuntimeError(f"unexpected ARM relocation type {rtype} at {offset:#x}")
         if symbol_number >= len(symbols):
             raise RuntimeError("relocation symbol index outside .symtab")
-        relocation_targets.append(symbols[symbol_number][0])
+        target = symbols[symbol_number][0]
+        if rtype == 28:
+            call_targets.append(target)
+        elif rtype == 96:
+            got_targets.append(target)
+        else:
+            raise RuntimeError(f"unexpected ARM relocation type {rtype} at {offset:#x}")
 
-    expected = Counter({
+    expected_calls = Counter({
         "add_int": 3,
         "sum5": 1,
         "add_float": 1,
@@ -99,8 +116,12 @@ def check_elf(path: Path) -> None:
         "__aeabi_idivmod": 1,
         "__aeabi_uidivmod": 1,
     })
-    if Counter(relocation_targets) != expected:
-        raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(relocation_targets)}")
+    if Counter(call_targets) != expected_calls:
+        raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(call_targets)}")
+
+    expected_got = Counter({"own_global": 3, "external_global": 2})
+    if Counter(got_targets) != expected_got:
+        raise RuntimeError(f"unexpected R_ARM_GOT_PREL targets: {Counter(got_targets)}")
 
     if b"$a\x00" not in data or b"$t\x00" in data:
         raise RuntimeError("A32 mapping symbol missing or Thumb mapping symbol present")
@@ -120,6 +141,14 @@ def harness() -> str:
 .arch armv7-a
 .fpu vfpv3-d16
 .arm
+.data
+.p2align 2
+.global external_global
+.type external_global,%object
+external_global:
+    .word 11
+.size external_global,4
+
 .text
 
 .global external_twice
@@ -331,6 +360,39 @@ _start:
     cmp sp, r11
     bne fail
 
+    bl read_own_global
+    cmp r0, #7
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mov r0, #13
+    bl set_own_global
+    cmp r0, #13
+    bne fail
+    bl read_own_global
+    cmp r0, #13
+    bne fail
+    bl own_global_address
+    ldr r0, [r0]
+    cmp r0, #13
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    bl read_external_global
+    cmp r0, #11
+    bne fail
+    mov r0, #17
+    bl set_external_global
+    cmp r0, #17
+    bne fail
+    bl read_external_global
+    cmp r0, #17
+    bne fail
+    cmp sp, r11
+    bne fail
+
     mov r0, #0
     mov r7, #1
     svc #0
@@ -378,7 +440,7 @@ def main() -> None:
     run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
-    print("PASS: ELF32 EM_ARM A32, R_ARM_CALL, internal/external calls, EABI integer helpers, base PCS softfp")
+    print("PASS: ELF32 EM_ARM A32, R_ARM_CALL, R_ARM_GOT_PREL globals, EABI helpers, base PCS softfp")
 
 
 if __name__ == "__main__":
