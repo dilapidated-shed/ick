@@ -3,11 +3,11 @@ module packed_memory_negative;
 import icky.imprecise;
 import icky.packed_memory;
 
-E5M3[1] e5;
+UE5M3[1] e5;
 E3M2[1] e3;
 E4M3[1] e4;
 ubyte[1] bytes;
-const(E5M3)[1] read_only;
+const(UE5M3)[1] read_only;
 
 void accepts_widened_slice(Float16[] value) {}
 
@@ -15,6 +15,10 @@ static assert(!__traits(compiles,
     icky.packed_memory.compute_at!(E3M2, "+")(e5[], 0, e5[], 0)));
 static assert(!__traits(compiles,
     icky.packed_memory.compute_at!(Float16, "%")(e5[], 0, e5[], 0)));
+static assert(!__traits(compiles,
+    icky.packed_memory.compute_at!(E5M3, "*")(e5[], 0, e5[], 0)));
+static assert(!__traits(compiles,
+    icky.packed_memory.compute_at!(E5M3, "/")(e5[], 0, e5[], 0)));
 static assert(!__traits(compiles,
     icky.packed_memory.compute_at!(Float16, "+")(bytes[], 0, e5[], 0)));
 static assert(!__traits(compiles,
