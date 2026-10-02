@@ -96,6 +96,16 @@ public void generateCodeAndWrite(Module[] modules, const(char)*[] libmodules,
                           bool writeLibrary, bool obj, bool oneobj, bool multiobj,
                           bool verbose)
 {
+    if (target.isARM32)
+    {
+        import dmd.glue.arm32 : generateArm32Objects;
+        if (writeLibrary || multiobj || libmodules.length || (oneobj && modules.length > 1))
+            error(Loc.initial, "initial Android A32 lowering does not support libraries, split objects, or combined multi-module objects");
+        else if (obj)
+            generateArm32Objects(modules);
+        return;
+    }
+
     auto eSink = global.errorSink;
 
     Library library = null;
