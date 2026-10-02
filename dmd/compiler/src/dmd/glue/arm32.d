@@ -578,18 +578,36 @@ private struct LeafEmitter
             case EXP.greaterThan:
             case EXP.greaterOrEqual:
             {
+                // Compare high words first. If they are equal, the low words
+                // are always compared as unsigned. This preserves whole-value
+                // equality for strict unsigned conditions such as HI.
+                code.instruction(0xE1510003); // CMP r1,r3
+                auto highDiff = code.conditional(1); // BNE
                 code.instruction(0xE1500002); // CMP r0,r2
-                code.instruction(0xE0D1C003); // SBCS r12,r1,r3
-                uint cc;
+                uint lowCc;
                 switch (e.op)
                 {
-                    case EXP.lessThan:       cc = unsigned64 ? 3 : 11; break;
-                    case EXP.lessOrEqual:    cc = unsigned64 ? 9 : 13; break;
-                    case EXP.greaterThan:    cc = unsigned64 ? 8 : 12; break;
-                    case EXP.greaterOrEqual: cc = unsigned64 ? 2 : 10; break;
+                    case EXP.lessThan:       lowCc = 3; break; // LO
+                    case EXP.lessOrEqual:    lowCc = 9; break; // LS
+                    case EXP.greaterThan:    lowCc = 8; break; // HI
+                    case EXP.greaterOrEqual: lowCc = 2; break; // HS
                     default: assert(0);
                 }
-                code.booleanResult(cc);
+                code.booleanResult(lowCc);
+                auto done = code.branch();
+
+                code.resolve(highDiff, code.bytes.length);
+                uint highCc;
+                switch (e.op)
+                {
+                    case EXP.lessThan:       highCc = unsigned64 ? 3 : 11; break;
+                    case EXP.lessOrEqual:    highCc = unsigned64 ? 3 : 11; break;
+                    case EXP.greaterThan:    highCc = unsigned64 ? 8 : 12; break;
+                    case EXP.greaterOrEqual: highCc = unsigned64 ? 8 : 12; break;
+                    default: assert(0);
+                }
+                code.booleanResult(highCc);
+                code.resolve(done, code.bytes.length);
                 return;
             }
             default:
