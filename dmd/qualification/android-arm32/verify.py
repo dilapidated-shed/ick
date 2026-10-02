@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import struct
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 
@@ -26,22 +27,71 @@ def check_elf(path: Path) -> None:
         raise RuntimeError(f"expected EABI5 without hard-float flag, got {flags:#x}")
 
     shoff = struct.unpack_from("<I", data, 32)[0]
-    shentsize, shnum = struct.unpack_from("<HH", data, 46)
-    if shentsize != 40 or shnum < 7:
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 46)
+    if shentsize != 40 or shnum < 8 or shstrndx >= shnum:
         raise RuntimeError("unexpected ELF32 section table")
 
-    # The emitter fixes .symtab at section 2. Global function values must be
-    # word-aligned and must not carry the Thumb low-bit marker.
-    sym = shoff + 2 * shentsize
-    symoff = struct.unpack_from("<I", data, sym + 16)[0]
-    symsize = struct.unpack_from("<I", data, sym + 20)[0]
-    syment = struct.unpack_from("<I", data, sym + 36)[0]
-    if syment != 16 or symsize < 48:
-        raise RuntimeError("unexpected ARM32 symbol table")
-    for at in range(symoff + 32, symoff + symsize, 16):
-        value = struct.unpack_from("<I", data, at + 4)[0]
-        if value & 3:
-            raise RuntimeError(f"A32 function symbol is not word aligned: {value:#x}")
+    sections = []
+    for i in range(shnum):
+        at = shoff + i * shentsize
+        sections.append(struct.unpack_from("<IIIIIIIIII", data, at))
+
+    shstr = sections[shstrndx]
+    shstr_data = data[shstr[4]:shstr[4] + shstr[5]]
+
+    def cstring(blob: bytes, offset: int) -> str:
+        end = blob.find(b"\0", offset)
+        if end < 0:
+            raise RuntimeError("unterminated ELF string")
+        return blob[offset:end].decode("ascii")
+
+    section_by_name = {}
+    for i, section in enumerate(sections):
+        section_by_name[cstring(shstr_data, section[0]) if section[0] else ""] = (i, section)
+
+    for required in [".text", ".rel.text", ".symtab", ".strtab", ".ARM.attributes"]:
+        if required not in section_by_name:
+            raise RuntimeError(f"missing ELF section {required}")
+
+    text_index, _ = section_by_name[".text"]
+    rel_index, rel = section_by_name[".rel.text"]
+    sym_index, sym = section_by_name[".symtab"]
+    str_index, strings = section_by_name[".strtab"]
+
+    if rel[1] != 9 or rel[6] != sym_index or rel[7] != text_index or rel[9] != 8:
+        raise RuntimeError("malformed .rel.text section linkage")
+    if sym[1] != 2 or sym[6] != str_index or sym[9] != 16:
+        raise RuntimeError("malformed .symtab section linkage")
+
+    str_data = data[strings[4]:strings[4] + strings[5]]
+    symbols = []
+    for at in range(sym[4], sym[4] + sym[5], 16):
+        name_off, value, size = struct.unpack_from("<III", data, at)
+        info, other, shndx = struct.unpack_from("<BBH", data, at + 12)
+        symbols.append((cstring(str_data, name_off) if name_off else "", value, size, info, other, shndx))
+
+    for name, value, _, info, _, shndx in symbols:
+        if shndx == text_index and (info & 0xF) == 2 and value & 3:
+            raise RuntimeError(f"A32 function symbol {name} is not word aligned: {value:#x}")
+
+    external = [s for s in symbols if s[0] == "external_twice"]
+    if len(external) != 1 or external[0][5] != 0:
+        raise RuntimeError("external_twice must be one undefined ELF function symbol")
+
+    relocation_targets = []
+    for at in range(rel[4], rel[4] + rel[5], 8):
+        offset, info = struct.unpack_from("<II", data, at)
+        rtype = info & 0xFF
+        symbol_number = info >> 8
+        if rtype != 28:
+            raise RuntimeError(f"unexpected ARM relocation type {rtype} at {offset:#x}")
+        if symbol_number >= len(symbols):
+            raise RuntimeError("relocation symbol index outside .symtab")
+        relocation_targets.append(symbols[symbol_number][0])
+
+    expected = Counter({"add_int": 3, "sum5": 1, "add_float": 1, "external_twice": 1})
+    if Counter(relocation_targets) != expected:
+        raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(relocation_targets)}")
 
     if b"$a\x00" not in data or b"$t\x00" in data:
         raise RuntimeError("A32 mapping symbol missing or Thumb mapping symbol present")
@@ -62,6 +112,13 @@ def harness() -> str:
 .fpu vfpv3-d16
 .arm
 .text
+
+.global external_twice
+.type external_twice,%function
+external_twice:
+    add r0, r0, r0
+    bx lr
+
 .global _start
 .type _start,%function
 _start:
@@ -133,6 +190,46 @@ _start:
     cmp r0, r1
     bne fail
 
+    mov r0, #4
+    bl call_internal
+    cmp r0, #13
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mov r0, #4
+    bl call_nested
+    cmp r0, #7
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mov r0, #6
+    bl call_external
+    cmp r0, #12
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mov r0, #1
+    bl call_sum5
+    cmp r0, #15
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    movw r0, #0x0000
+    movt r0, #0x3fc0
+    movw r1, #0x0000
+    movt r1, #0x4010
+    bl call_float
+    movw r1, #0x0000
+    movt r1, #0x4070
+    cmp r0, r1
+    bne fail
+    cmp sp, r11
+    bne fail
+
     mov r0, #0
     mov r7, #1
     svc #0
@@ -180,7 +277,7 @@ def main() -> None:
     run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
-    print("PASS: ELF32 EM_ARM A32, EABI5/base PCS softfp, r0-r3 + stack arguments, binary32 VFP arithmetic")
+    print("PASS: ELF32 EM_ARM A32, R_ARM_CALL, internal/external calls, base PCS softfp, r0-r3 + stack arguments")
 
 
 if __name__ == "__main__":
