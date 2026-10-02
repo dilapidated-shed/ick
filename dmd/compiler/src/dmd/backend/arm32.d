@@ -42,9 +42,8 @@ struct Arm32Code
         enforce(reg < 4, "A32 constant register outside r0-r3");
         const lo = value & 0xFFFF;
         const hi = value >> 16;
-        // MOVW Rd,#imm16 ; MOVT Rd,#imm16
-        instruction(0xE3000000 | ((lo & 0xF000) << 4) | (reg << 12) | (lo & 0x0FFF));
-        instruction(0xE3400000 | ((hi & 0xF000) << 4) | (reg << 12) | (hi & 0x0FFF));
+        instruction(0xE3000000 | ((lo & 0xF000) << 4) | (reg << 12) | (lo & 0x0FFF)); // MOVW
+        instruction(0xE3400000 | ((hi & 0xF000) << 4) | (reg << 12) | (hi & 0x0FFF)); // MOVT
     }
 
     size_t loadStackOffset(uint offset, uint reg = 0)
@@ -61,6 +60,12 @@ struct Arm32Code
         patchInstruction(at, 0xE59D0000 | reg << 12 | offset);
     }
 
+    void storeStackOffset(uint offset, uint reg = 0)
+    {
+        enforce(offset <= 4095 && reg < 4, "A32 stack store out of range");
+        instruction(0xE58D0000 | reg << 12 | offset); // STR Rd,[sp,#offset]
+    }
+
     void load(uint slot, uint reg = 0)
     {
         enforce(slot < 126, "A32 stack slot out of range");
@@ -69,8 +74,30 @@ struct Arm32Code
 
     void store(uint slot, uint reg = 0)
     {
-        enforce(slot < 126 && reg < 4, "A32 stack store out of range");
-        instruction(0xE58D0000 | reg << 12 | slot * 4); // STR Rd,[sp,#offset]
+        enforce(slot < 126, "A32 stack slot out of range");
+        storeStackOffset(slot * 4, reg);
+    }
+
+    void adjustStack(uint amount, bool subtract)
+    {
+        enforce(!(amount & 7) && amount <= 504,
+                "A32 dynamic stack adjustment must be 8-byte aligned and <= 504 bytes");
+        uint first = amount > 252 ? 252 : amount;
+        uint second = amount - first;
+        const base = subtract ? 0xE24DD000 : 0xE28DD000; // SUB/ADD sp,sp,#imm8
+        if (first)
+            instruction(base | first);
+        if (second)
+            instruction(base | second);
+    }
+
+    size_t call()
+    {
+        const at = bytes.length;
+        // This is the canonical zero-addend R_ARM_CALL placeholder emitted by
+        // the GNU/LLVM ARM assemblers: BL with imm24=-2 (PC bias -8).
+        instruction(0xEBFFFFFE);
+        return at;
     }
 
     size_t branch(uint condition = 14)
@@ -115,10 +142,17 @@ struct Arm32Code
     }
 }
 
+struct Arm32Relocation
+{
+    uint offset;
+    string symbol;
+}
+
 struct Arm32Function
 {
     string name;
     ubyte[] code;
+    Arm32Relocation[] relocations;
 }
 
 private void word(ref ubyte[] bytes, uint value)
@@ -134,17 +168,34 @@ private void half(ref ubyte[] bytes, uint value)
 }
 
 /**
- * Relocation-free ELF32 ARM object containing A32 leaf functions.
+ * ELF32 ARM object containing A32 functions and R_ARM_CALL relocations.
  *
  * The ELF flags and .ARM.attributes describe EABI5 + base PCS/softfp.
  * There is intentionally no EF_ARM_ABI_FLOAT_HARD flag.
  */
 ubyte[] arm32Object(Arm32Function[] functions)
 {
+    enum R_ARM_CALL = 28;
+
     ubyte[] text;
+    Arm32Relocation[] relocations;
+    uint[string] functionOffsets;
+
+    foreach (function_; functions)
+    {
+        while (text.length & 3)
+            text ~= 0;
+        const base = cast(uint)text.length;
+        functionOffsets[function_.name] = base;
+        foreach (relocation; function_.relocations)
+            relocations ~= Arm32Relocation(base + relocation.offset, relocation.symbol);
+        text ~= function_.code;
+    }
+
     ubyte[] strings = [0];
     ubyte[] symbols;
     symbols.length = 16; // mandatory undefined symbol
+    uint[string] symbolIndex;
 
     uint name(string value)
     {
@@ -154,24 +205,44 @@ ubyte[] arm32Object(Arm32Function[] functions)
         return start;
     }
 
-    void symbol(uint nameOffset, uint value, uint size, ubyte info)
+    uint symbol(uint nameOffset, uint value, uint size, ubyte info, ushort section)
     {
+        const index = cast(uint)(symbols.length / 16);
         word(symbols, nameOffset);
         word(symbols, value);
         word(symbols, size);
         symbols ~= info;
         symbols ~= 0;
-        half(symbols, 1); // .text
+        half(symbols, section);
+        return index;
     }
 
-    symbol(name("$a"), 0, 0, 0); // local A32 mapping symbol
+    symbol(name("$a"), 0, 0, 0, 1); // local A32 mapping symbol
+
     foreach (function_; functions)
     {
-        while (text.length & 3)
-            text ~= 0;
-        symbol(name(function_.name), cast(uint)text.length,
-               cast(uint)function_.code.length, 0x12); // GLOBAL FUNC
-        text ~= function_.code;
+        const index = symbol(name(function_.name), functionOffsets[function_.name],
+                             cast(uint)function_.code.length, 0x12, 1); // GLOBAL FUNC
+        symbolIndex[function_.name] = index;
+    }
+
+    bool[string] undefinedSeen;
+    foreach (relocation; relocations)
+    {
+        if (relocation.symbol in symbolIndex || relocation.symbol in undefinedSeen)
+            continue;
+        undefinedSeen[relocation.symbol] = true;
+        const index = symbol(name(relocation.symbol), 0, 0, 0x12, 0); // undefined GLOBAL FUNC
+        symbolIndex[relocation.symbol] = index;
+    }
+
+    ubyte[] relText;
+    foreach (relocation; relocations)
+    {
+        auto index = relocation.symbol in symbolIndex;
+        enforce(index !is null, "A32 relocation references missing symbol");
+        word(relText, relocation.offset);
+        word(relText, (*index << 8) | R_ARM_CALL);
     }
 
     // aeabi: v7-A, ARM ISA, no Thumb requirement, VFPv3-D16,
@@ -184,14 +255,23 @@ ubyte[] arm32Object(Arm32Function[] functions)
     word(attributes, cast(uint)(5 + tags.length));
     attributes ~= tags;
 
-    immutable sectionNames = "\0.text\0.symtab\0.strtab\0.shstrtab\0.ARM.attributes\0.note.GNU-stack\0";
-    ubyte[][] contents = [null, text, symbols, strings,
-        cast(ubyte[])sectionNames.dup, attributes, null];
-    uint[7] offsets;
+    ubyte[] sectionNames = [0];
+    uint[8] sectionNameOffsets;
+    immutable string[8] sectionNameValues =
+        ["", ".text", ".rel.text", ".symtab", ".strtab", ".shstrtab", ".ARM.attributes", ".note.GNU-stack"];
+    foreach (i; 1 .. sectionNameValues.length)
+    {
+        sectionNameOffsets[i] = cast(uint)sectionNames.length;
+        sectionNames ~= cast(const(ubyte)[])sectionNameValues[i];
+        sectionNames ~= 0;
+    }
+
+    ubyte[][] contents = [null, text, relText, symbols, strings, sectionNames, attributes, null];
+    uint[8] offsets;
     ubyte[] result;
     result.length = 52;
 
-    foreach (i; 1 .. 7)
+    foreach (i; 1 .. contents.length)
     {
         while (result.length & 3)
             result ~= 0;
@@ -202,21 +282,20 @@ ubyte[] arm32Object(Arm32Function[] functions)
     while (result.length & 3)
         result ~= 0;
     const sectionOffset = cast(uint)result.length;
-    uint[7] names = [0, 1, 7, 15, 23, 33, 49];
-    uint[7] types = [0, 1, 2, 3, 3, 0x70000003, 1];
 
-    foreach (i; 0 .. 7)
+    immutable uint[8] types = [0, 1, 9, 2, 3, 3, 0x70000003, 1];
+    foreach (i; 0 .. 8)
     {
-        word(result, names[i]);
+        word(result, sectionNameOffsets[i]);
         word(result, types[i]);
-        word(result, i == 1 ? 6 : 0); // SHF_ALLOC | SHF_EXECINSTR
+        word(result, i == 1 ? 6 : 0);               // .text: ALLOC | EXECINSTR
         word(result, 0);
         word(result, offsets[i]);
         word(result, cast(uint)contents[i].length);
-        word(result, i == 2 ? 3 : 0); // symtab -> strtab
-        word(result, i == 2 ? 2 : 0); // first global symbol
-        word(result, i == 0 ? 0 : (i == 1 || i == 2 ? 4 : 1));
-        word(result, i == 2 ? 16 : 0);
+        word(result, i == 2 ? 3 : i == 3 ? 4 : 0); // rel->symtab; symtab->strtab
+        word(result, i == 2 ? 1 : i == 3 ? 2 : 0); // rel applies to .text; first global symbol
+        word(result, i == 0 ? 0 : (i == 1 || i == 2 || i == 3 ? 4 : 1));
+        word(result, i == 2 ? 8 : i == 3 ? 16 : 0);
     }
 
     ubyte[] header = [0x7F, 'E', 'L', 'F', 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -231,8 +310,8 @@ ubyte[] arm32Object(Arm32Function[] functions)
     half(header, 0);
     half(header, 0);
     half(header, 40);
-    half(header, 7);
-    half(header, 4);
+    half(header, 8);
+    half(header, 5);
     result[0 .. 52] = header;
     return result;
 }
