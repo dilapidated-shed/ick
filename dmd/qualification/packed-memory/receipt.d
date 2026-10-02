@@ -27,6 +27,33 @@ extern(C) Float16 ordinary_half_receipt(Float16 left, Float16 right)
     return left * right;
 }
 
+extern(C) bool packed_e5_add_runtime(
+    const(E5M3)[] left, size_t leftIndex,
+    const(E5M3)[] right, size_t rightIndex,
+    ref E5M3 output)
+    nothrow @nogc
+{
+    return try_e5m3_at!("+")(left, leftIndex, right, rightIndex, output);
+}
+
+extern(C) bool packed_e5_subtract_runtime(
+    const(E5M3)[] left, size_t leftIndex,
+    const(E5M3)[] right, size_t rightIndex,
+    ref E5M3 output)
+    nothrow @nogc
+{
+    return try_e5m3_at!("-")(left, leftIndex, right, rightIndex, output);
+}
+
+extern(C) bool packed_e5_multiply_narrow_runtime(
+    const(E5M3)[] left, size_t leftIndex,
+    const(E5M3)[] right, size_t rightIndex,
+    ref E5M3 output)
+    nothrow @nogc
+{
+    return try_e5m3_at!("*")(left, leftIndex, right, rightIndex, output);
+}
+
 extern(C) Float16 packed_multiply_runtime(
     const(E5M3)[] left, size_t leftIndex,
     const(E3M2)[] right, size_t rightIndex)
@@ -71,8 +98,14 @@ extern(C) int main()
     auto product = packed_multiply_runtime(left[], 3, right[], 3);
     auto quotient = packed_divide_runtime(left[], 3, right[], 3);
     auto stream = packed_stream_runtime(left[], right[], left.length);
+
+    E5M3 direct = E5M3.from_code(0x5a);
+    if (!packed_e5_add_runtime(left[], 3, left[], 4, direct)) return 1;
+    if (!packed_e5_subtract_runtime(left[], 4, left[], 3, direct)) return 2;
+    if (!packed_e5_multiply_narrow_runtime(left[], 3, left[], 4, direct)) return 3;
+
     E5M3[8] destination;
-    if (!packed_store_runtime(destination[], 3, product)) return 1;
-    if (product.code() == quotient.code() || stream.code() == 0xffffu) return 2;
+    if (!packed_store_runtime(destination[], 3, product)) return 4;
+    if (product.code() == quotient.code() || stream.code() == 0xffffu) return 5;
     return 0;
 }
