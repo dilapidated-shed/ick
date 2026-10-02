@@ -43,6 +43,39 @@ ick_e5m3_round_trip_code(ick_byte code, ick_byte *round_tripped)
     return 1;
 }
 
+int
+ick_e5m3_add_codes(ick_byte left, ick_byte right, ick_byte *output)
+{
+    E5M3 result = e5m3_from_code(0);
+    int accepted = e5m3_add(
+        e5m3_from_code(left), e5m3_from_code(right), &result);
+    if (accepted && output)
+        *output = e5m3_code(result);
+    return accepted && output != 0;
+}
+
+int
+ick_e5m3_subtract_codes(ick_byte left, ick_byte right, ick_byte *output)
+{
+    E5M3 result = e5m3_from_code(0);
+    int accepted = e5m3_subtract(
+        e5m3_from_code(left), e5m3_from_code(right), &result);
+    if (accepted && output)
+        *output = e5m3_code(result);
+    return accepted && output != 0;
+}
+
+int
+ick_e5m3_multiply_codes(ick_byte left, ick_byte right, ick_byte *output)
+{
+    E5M3 result = e5m3_from_code(0);
+    int accepted = e5m3_multiply(
+        e5m3_from_code(left), e5m3_from_code(right), &result);
+    if (accepted && output)
+        *output = e5m3_code(result);
+    return accepted && output != 0;
+}
+
 ick_byte
 ick_e3m2_arithmetic(ick_byte left, ick_byte right)
 {
