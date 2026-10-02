@@ -26,6 +26,14 @@ For the currently public Android NDK ABI set, keep four CPU/ABI targets independ
 
 A release may choose a subset, but the compiler should not make the omission structural.
 
+## Device mappings
+
+Named devices map onto the independent dimensions above; they do not become new
+compiler ABIs.
+
+- [MIRO C67 target map](miro-c67-target-map.md) — Helio G36 / Cortex-A53 model
+  facts are known, while the physical Android ABI is still unverified.
+
 ## Android API floors
 
 The selected NDK constrains the oldest Android API it can target. The current NDK lane and any old-Android lane must therefore be explicit, pinned build inputs.
