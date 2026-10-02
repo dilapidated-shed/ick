@@ -115,6 +115,9 @@ def check_elf(path: Path) -> None:
         "__aeabi_uidiv": 1,
         "__aeabi_idivmod": 1,
         "__aeabi_uidivmod": 1,
+        "aligned_long": 1,
+        "stacked_long": 1,
+        "echo_double": 1,
     })
     if Counter(call_targets) != expected_calls:
         raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(call_targets)}")
@@ -393,6 +396,148 @@ _start:
     cmp sp, r11
     bne fail
 
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x1122
+    bl echo_long
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+    movw r2, #0x3344
+    movt r2, #0x1122
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    bl long_constant
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+    movw r2, #0x3344
+    movt r2, #0x1122
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x400c
+    bl echo_double
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0x400c
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    bl double_constant
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0x400c
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    sub sp, sp, #8
+    mov r0, #1
+    mov r1, #99
+    movw r2, #0x7788
+    movt r2, #0x5566
+    movw r3, #0x3344
+    movt r3, #0x1122
+    mov r12, #3
+    str r12, [sp]
+    bl aligned_long
+    add sp, sp, #8
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+    movw r2, #0x3344
+    movt r2, #0x1122
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    sub sp, sp, #8
+    mov r0, #1
+    mov r1, #2
+    mov r2, #3
+    mov r3, #99
+    movw r12, #0x7788
+    movt r12, #0x5566
+    str r12, [sp]
+    movw r12, #0x3344
+    movt r12, #0x1122
+    str r12, [sp, #4]
+    bl stacked_long
+    add sp, sp, #8
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+    movw r2, #0x3344
+    movt r2, #0x1122
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x1122
+    bl call_aligned_long
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+    movw r2, #0x3344
+    movt r2, #0x1122
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    movw r0, #0x7788
+    movt r0, #0x5566
+    movw r1, #0x3344
+    movt r1, #0x1122
+    bl call_stacked_long
+    movw r2, #0x7788
+    movt r2, #0x5566
+    cmp r0, r2
+    bne fail
+    movw r2, #0x3344
+    movt r2, #0x1122
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x400c
+    bl call_echo_double
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0x400c
+    cmp r1, r2
+    bne fail
+    cmp sp, r11
+    bne fail
+
     mov r0, #0
     mov r7, #1
     svc #0
@@ -440,7 +585,7 @@ def main() -> None:
     run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
-    print("PASS: ELF32 EM_ARM A32, R_ARM_CALL, R_ARM_GOT_PREL globals, EABI helpers, base PCS softfp")
+    print("PASS: A32 base PCS softfp: calls, GOT globals, EABI helpers, and aligned 64-bit scalar arguments/results")
 
 
 if __name__ == "__main__":
