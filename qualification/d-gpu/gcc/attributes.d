@@ -7,7 +7,7 @@ private struct Attribute(A...)
 
 @system
 auto attribute(A...)(A arguments)
-    if (A.length > 0 && is(A[0] == string))
+    if (A.length > 0 && is(A[0] == immutable(char)[]))
 {
     return Attribute!A(arguments);
 }
