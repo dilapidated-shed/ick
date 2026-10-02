@@ -1,0 +1,168 @@
+name: DMD NetBSD qualification
+
+on:
+  push:
+    branches:
+      - upstream/netbsd-amd64-v2
+    paths:
+      - "dmd/**"
+      - ".github/workflows/dmd-netbsd-runtime.yml"
+  pull_request:
+    branches:
+      - dmd-upstream
+    paths:
+      - "dmd/**"
+      - ".github/workflows/dmd-netbsd-runtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dmd-netbsd-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  normal-d-object:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact ICK source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install bootstrap dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc
+
+      - name: Build ICK DMD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          dmd_bin=$(realpath "$dmd_bin")
+          "$dmd_bin" --version
+          printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.icky-dmd-bin"
+
+      - name: Qualify NetBSD amd64 BetterC object
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          test -f "$runtime_import/object.d"
+
+          "$dmd_bin" \
+            -conf= \
+            -betterC \
+            -c \
+            -target=x86_64-unknown-netbsd \
+            -I"$runtime_import" \
+            dmd/qualification/netbsd_amd64_betterc.d \
+            -of=/tmp/netbsd_amd64_betterc.o
+
+          test -s /tmp/netbsd_amd64_betterc.o
+          readelf -h /tmp/netbsd_amd64_betterc.o | tee /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'Class:[[:space:]]+ELF64' /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'OS/ABI:[[:space:]]+UNIX - System V' /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' /tmp/netbsd_amd64_betterc.elf
+
+      - name: Check out matching druntime interfaces
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dlang/dmd
+          ref: 74917954b53f7f35b13e61b4438c7253834929ed
+          path: .runtime-dmd
+          persist-credentials: false
+
+      - name: Check out matching Phobos
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dlang/phobos
+          ref: 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          path: .runtime-phobos
+          persist-credentials: false
+
+      - name: Compile NetBSD normal-D object
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          runtime_import="$GITHUB_WORKSPACE/.runtime-dmd/druntime/src"
+          phobos="$GITHUB_WORKSPACE/.runtime-phobos"
+          object="$GITHUB_WORKSPACE/dmd/qualification/.build/netbsd_amd64_normal_d.o"
+          mkdir -p "$(dirname "$object")"
+
+          "$dmd_bin" \
+            -conf= \
+            -c \
+            -fPIC \
+            -target=x86_64-unknown-netbsd \
+            -I"$runtime_import" \
+            -I"$phobos" \
+            dmd/qualification/netbsd_amd64_normal_d.d \
+            -of="$object"
+
+          test -s "$object"
+          readelf -h "$object" | tee /tmp/netbsd-normal-d.elf
+          grep -Eq 'Class:[[:space:]]+ELF64' /tmp/netbsd-normal-d.elf
+          grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' \
+            /tmp/netbsd-normal-d.elf
+
+          nm -u "$object" | tee /tmp/netbsd-normal-d.undefined
+          grep -Eq '(_d_|_D)' /tmp/netbsd-normal-d.undefined
+
+      - name: Prove this is not BetterC
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          runtime_import="$GITHUB_WORKSPACE/.runtime-dmd/druntime/src"
+          phobos="$GITHUB_WORKSPACE/.runtime-phobos"
+
+          if "$dmd_bin" \
+              -conf= \
+              -betterC \
+              -c \
+              -target=x86_64-unknown-netbsd \
+              -I"$runtime_import" \
+              -I"$phobos" \
+              dmd/qualification/netbsd_amd64_normal_d.d \
+              -of=/tmp/should-not-build.o \
+              > /tmp/betterc.stdout \
+              2> /tmp/betterc.stderr
+          then
+            echo "normal-D probe unexpectedly compiled under -betterC" >&2
+            exit 1
+          fi
+
+          test ! -s /tmp/should-not-build.o
+          test -s /tmp/betterc.stderr
+
+      - name: Record boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: ICK DMD emitted the NetBSD amd64 BetterC qualification object.
+
+          PASS: ICK DMD lowered a normal-D source file for
+          x86_64-unknown-netbsd to an ELF64 amd64 object.
+
+          The probe instantiates GC allocation, exceptions, std.regex,
+          std.file, and std.stdio/File code. Undefined runtime/Phobos symbols
+          remain in the object, as expected before target libraries are built.
+
+          PASS: the same source is rejected under -betterC, proving this is a
+          normal-D boundary rather than another BetterC receipt.
+
+          OUT OF SCOPE: NetBSD druntime/Phobos libraries, final linking, and
+          native execution. Those remain issue #61.
+          EOF
