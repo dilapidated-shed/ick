@@ -716,6 +716,56 @@ private struct LeafEmitter
     }
 }
 
+private Arm32Global lowerGlobal(VarDeclaration variable)
+{
+    if (!wordType(variable.type))
+        reject(variable.loc, "A32 global data currently supports one-word scalar types only");
+    if (!variable.isDataseg() || variable.isThreadlocal())
+        reject(variable.loc, "A32 global data currently requires non-TLS __gshared/shared storage");
+    if (variable.resolvedLinkage() != LINK.c)
+        reject(variable.loc, "A32 global data currently requires extern(C) linkage");
+    if (variable.isConst() || variable.isImmutable())
+        reject(variable.loc, "read-only A32 data sections are not implemented yet");
+
+    const name = declarationName(variable, variable.loc);
+    const defined = !(variable.storage_class & STC.extern_);
+    if (!defined)
+    {
+        if (variable._init)
+            reject(variable.loc, "extern A32 global declaration cannot have an initializer");
+        return Arm32Global(name, 0, false);
+    }
+
+    if (!variable._init)
+        return Arm32Global(name, 0, true);
+
+    auto initializer = variable._init.isExpInitializer();
+    if (!initializer)
+        reject(variable.loc, "A32 global initializer must be a scalar constant expression");
+
+    auto value = initializer.exp;
+    if (auto integer = value.isIntegerExp())
+        return Arm32Global(name, cast(uint)integer.value, true);
+    if (auto realConstant = value.isRealExp())
+    {
+        if (!floating(variable.type))
+            reject(variable.loc, "only binary32 floating global constants are implemented");
+        union Payload
+        {
+            float value;
+            uint bits;
+        }
+        Payload payload;
+        payload.value = cast(float)realConstant.value;
+        return Arm32Global(name, payload.bits, true);
+    }
+    if (value.op == EXP.null_)
+        return Arm32Global(name, 0, true);
+
+    reject(variable.loc, "A32 global initializer is outside the scalar constant subset");
+    assert(0);
+}
+
 void generateArm32Objects(Module[] modules)
 {
     ubyte[][] objects;
@@ -729,6 +779,7 @@ void generateArm32Objects(Module[] modules)
                 continue;
 
             Arm32Function[] functions;
+            Arm32Global[] globals;
             bool[string] names;
 
             void members(Dsymbols* symbols)
@@ -761,13 +812,19 @@ void generateArm32Objects(Module[] modules)
                     {
                         if (variable.storage_class & STC.manifest)
                             continue;
+                        auto global_ = lowerGlobal(variable);
+                        if (global_.name in names)
+                            reject(variable.loc, "duplicate A32 external symbol");
+                        names[global_.name] = true;
+                        globals ~= global_;
+                        continue;
                     }
                     reject(symbol.loc, "declaration requires data/runtime emission not implemented by the initial A32 slice");
                 }
             }
 
             members(module_.members);
-            objects ~= arm32Object(functions);
+            objects ~= arm32Object(functions, globals);
             paths ~= module_.objfile.toString().idup;
         }
 
