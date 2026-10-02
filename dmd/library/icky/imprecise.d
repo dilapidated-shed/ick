@@ -208,18 +208,18 @@ alias E4M3 = Quantized!(ScalarFormat.e4m3);
 alias E5M2 = Quantized!(ScalarFormat.e5m2);
 alias E3M2 = Quantized!(ScalarFormat.e3m2);
 
-/** Unsigned Ootomo-Naruse storage. There is deliberately no opBinary. */
-struct E5M3
+/** Unsigned Ootomo-Naruse byte storage. There is deliberately no opBinary. */
+struct UE5M3
 {
     private ubyte payload;
-    static E5M3 from_code(ubyte code) nothrow @nogc
+    static UE5M3 from_code(ubyte code) nothrow @nogc
     {
-        E5M3 result;
+        UE5M3 result;
         result.payload = code;
         return result;
     }
     ubyte code() const nothrow @nogc { return payload; }
-    static bool try_from_float(float value, ref E5M3 output) nothrow @nogc
+    static bool try_from_float(float value, ref UE5M3 output) nothrow @nogc
     {
         uint bits = float_bits(value);
         uint exponent = (bits >> 23) & 0xffu;
@@ -233,6 +233,321 @@ struct E5M3
     }
 }
 
+
+/* Signed E5M3 ------------------------------------------------------------ */
+
+/**
+ * E5M3 is a nine-bit signed arithmetic format:
+ *
+ *     s eeeee mmm
+ *
+ * It uses an IEEE-style exponent interpretation with bias 15.  Exponent zero
+ * carries signed zero/subnormals; exponent 31 carries infinity/NaN.  The
+ * logical payload is nine bits, held in a 16-bit scalar container on ordinary
+ * byte-addressed targets.  Dense nine-bit memory packing is a separate storage
+ * representation and is not implied by this value type.
+ *
+ * Addition and subtraction return E5M3 and round once,
+ * round-to-nearest/ties-to-even, using exact integer units of the minimum
+ * subnormal. Multiplication and division are deliberately absent here:
+ * callers must select a wider arithmetic format explicitly for those operations.
+ */
+struct E5M3
+{
+    private ushort payload;
+
+    static E5M3 from_code(ushort code) nothrow @nogc
+    {
+        E5M3 result;
+        result.payload = cast(ushort)(code & 0x01ffu);
+        return result;
+    }
+
+    ushort code() const nothrow @nogc
+    {
+        return payload;
+    }
+
+    static E5M3 from_float(float value) nothrow @nogc
+    {
+        uint bits = float_bits(value);
+        bool negative = (bits >> 31) != 0;
+        uint exponent = (bits >> 23) & 0xffu;
+        uint mantissa = bits & 0x007fffffu;
+
+        if (exponent == 0xffu)
+        {
+            if (mantissa == 0)
+                return signed_e5m3_infinity(negative);
+            return signed_e5m3_nan();
+        }
+
+        if (exponent == 0)
+        {
+            if (mantissa == 0)
+                return signed_e5m3_zero(negative);
+            return signed_e5m3_quantize_ratio(negative, mantissa, 1u, -149);
+        }
+
+        return signed_e5m3_quantize_ratio(
+            negative, 0x00800000u | mantissa, 1u, cast(int)exponent - 150);
+    }
+
+    float to_float() const nothrow @nogc
+    {
+        ushort raw = payload;
+        uint sign = cast(uint)(raw & 0x0100u) << 23;
+        uint exponent = (raw >> 3) & 0x1fu;
+        uint mantissa = raw & 0x7u;
+
+        if (exponent == 0)
+        {
+            if (mantissa == 0)
+                return float_from_bits(sign);
+            float magnitude = cast(float)mantissa * float_from_bits(0x37000000u);
+            return sign ? -magnitude : magnitude;
+        }
+
+        if (exponent == 0x1fu)
+            return float_from_bits(sign | 0x7f800000u | (mantissa << 20));
+
+        return float_from_bits(sign | ((exponent + 112u) << 23) | (mantissa << 20));
+    }
+
+    E5M3 opBinary(string operation)(E5M3 other) const nothrow @nogc
+        if (operation == "+" || operation == "-")
+    {
+        static if (operation == "+")
+            return signed_e5m3_add(this, other);
+        else
+            return signed_e5m3_add(this, signed_e5m3_negate(other));
+    }
+}
+
+private enum uint signed_e5m3_sign = 0x0100u;
+private enum uint signed_e5m3_exponent_mask = 0x00f8u;
+private enum uint signed_e5m3_fraction_mask = 0x0007u;
+private enum uint signed_e5m3_infinity_code = 0x00f8u;
+private enum uint signed_e5m3_nan_code = 0x00fcu;
+
+private bool signed_e5m3_signbit(ushort code)
+{
+    return (code & signed_e5m3_sign) != 0;
+}
+
+private bool signed_e5m3_is_zero(ushort code)
+{
+    return (code & (signed_e5m3_exponent_mask | signed_e5m3_fraction_mask)) == 0;
+}
+
+private bool signed_e5m3_is_infinite(ushort code)
+{
+    return (code & signed_e5m3_exponent_mask) == signed_e5m3_exponent_mask
+        && (code & signed_e5m3_fraction_mask) == 0;
+}
+
+private bool signed_e5m3_is_nan(ushort code)
+{
+    return (code & signed_e5m3_exponent_mask) == signed_e5m3_exponent_mask
+        && (code & signed_e5m3_fraction_mask) != 0;
+}
+
+private E5M3 signed_e5m3_zero(bool negative)
+{
+    return E5M3.from_code(cast(ushort)(negative ? signed_e5m3_sign : 0u));
+}
+
+private E5M3 signed_e5m3_infinity(bool negative)
+{
+    return E5M3.from_code(cast(ushort)(
+        (negative ? signed_e5m3_sign : 0u) | signed_e5m3_infinity_code));
+}
+
+private E5M3 signed_e5m3_nan()
+{
+    return E5M3.from_code(cast(ushort)signed_e5m3_nan_code);
+}
+
+private E5M3 signed_e5m3_negate(E5M3 value)
+{
+    return E5M3.from_code(cast(ushort)(value.code() ^ signed_e5m3_sign));
+}
+
+private int signed_e5m3_floor_log2(ulong value)
+{
+    assert(value != 0);
+    int result = -1;
+    while (value != 0)
+    {
+        value >>= 1;
+        ++result;
+    }
+    return result;
+}
+
+private bool signed_e5m3_ratio_less_than_power(
+    ulong numerator, ulong denominator, int binaryShift)
+{
+    if (binaryShift >= 0)
+    {
+        uint shift = cast(uint)binaryShift;
+        assert(shift < 63 && numerator <= (ulong.max >> shift));
+        return (numerator << shift) < denominator;
+    }
+
+    uint shift = cast(uint)(-binaryShift);
+    assert(shift < 63 && denominator <= (ulong.max >> shift));
+    return numerator < (denominator << shift);
+}
+
+private ulong signed_e5m3_round_ratio_even(
+    ulong numerator, ulong denominator, int binaryShift)
+{
+    assert(numerator != 0 && denominator != 0);
+
+    if (binaryShift >= 0)
+    {
+        uint shift = cast(uint)binaryShift;
+        assert(shift < 63 && numerator <= (ulong.max >> shift));
+        numerator <<= shift;
+    }
+    else
+    {
+        uint shift = cast(uint)(-binaryShift);
+        assert(shift < 63 && denominator <= (ulong.max >> shift));
+        denominator <<= shift;
+    }
+
+    ulong quotient = numerator / denominator;
+    ulong remainder = numerator % denominator;
+    if (remainder > denominator - remainder
+        || (remainder == denominator - remainder && (quotient & 1u)))
+        ++quotient;
+    return quotient;
+}
+
+/**
+ * Quantize the exact nonnegative rational
+ *
+ *     numerator / denominator * 2^^binaryPower
+ *
+ * into signed E5M3.  The caller supplies the sign separately.
+ */
+private E5M3 signed_e5m3_quantize_ratio(
+    bool negative, ulong numerator, ulong denominator, int binaryPower)
+{
+    assert(denominator != 0);
+    if (numerator == 0)
+        return signed_e5m3_zero(negative);
+
+    int exponent = signed_e5m3_floor_log2(numerator)
+                 - signed_e5m3_floor_log2(denominator)
+                 + binaryPower;
+
+    if (signed_e5m3_ratio_less_than_power(
+            numerator, denominator, binaryPower - exponent))
+        --exponent;
+
+    if (exponent > 15)
+        return signed_e5m3_infinity(negative);
+
+    // Half the minimum subnormal is 2^-18.  Anything below that rounds to zero.
+    if (exponent < -18)
+        return signed_e5m3_zero(negative);
+
+    uint sign = negative ? signed_e5m3_sign : 0u;
+
+    if (exponent >= -14)
+    {
+        // Round the normalized significand to four bits: implicit 1 + M3.
+        ulong rounded = signed_e5m3_round_ratio_even(
+            numerator, denominator, binaryPower + 3 - exponent);
+
+        if (rounded >= 16u)
+        {
+            rounded = 8u;
+            ++exponent;
+        }
+
+        if (exponent > 15)
+            return signed_e5m3_infinity(negative);
+
+        assert(rounded >= 8u && rounded <= 15u);
+        uint storedExponent = cast(uint)(exponent + 15);
+        uint fraction = cast(uint)(rounded - 8u);
+        return E5M3.from_code(cast(ushort)(
+            sign | (storedExponent << 3) | fraction));
+    }
+
+    // Subnormal unit is exactly 2^-17.
+    ulong fraction = signed_e5m3_round_ratio_even(
+        numerator, denominator, binaryPower + 17);
+
+    if (fraction == 0)
+        return signed_e5m3_zero(negative);
+
+    // Rounding the top subnormal upward produces the minimum normal exactly.
+    if (fraction >= 8u)
+        return E5M3.from_code(cast(ushort)(sign | 0x0008u));
+
+    return E5M3.from_code(cast(ushort)(sign | cast(uint)fraction));
+}
+
+private long signed_e5m3_finite_units(ushort code)
+{
+    uint exponent = (code >> 3) & 0x1fu;
+    uint fraction = code & 0x7u;
+    assert(exponent != 0x1fu);
+
+    ulong magnitude;
+    if (exponent == 0)
+        magnitude = fraction;
+    else
+        magnitude = cast(ulong)(8u + fraction) << (exponent - 1u);
+
+    long units = cast(long)magnitude;
+    return signed_e5m3_signbit(code) ? -units : units;
+}
+
+private E5M3 signed_e5m3_add(E5M3 left, E5M3 right)
+{
+    ushort a = left.code();
+    ushort b = right.code();
+
+    if (signed_e5m3_is_nan(a) || signed_e5m3_is_nan(b))
+        return signed_e5m3_nan();
+
+    bool aInfinity = signed_e5m3_is_infinite(a);
+    bool bInfinity = signed_e5m3_is_infinite(b);
+    if (aInfinity || bInfinity)
+    {
+        if (aInfinity && bInfinity
+            && signed_e5m3_signbit(a) != signed_e5m3_signbit(b))
+            return signed_e5m3_nan();
+        return aInfinity ? left : right;
+    }
+
+    bool aZero = signed_e5m3_is_zero(a);
+    bool bZero = signed_e5m3_is_zero(b);
+    if (aZero && bZero)
+        return signed_e5m3_zero(
+            signed_e5m3_signbit(a) && signed_e5m3_signbit(b));
+    if (aZero)
+        return right;
+    if (bZero)
+        return left;
+
+    long sum = signed_e5m3_finite_units(a) + signed_e5m3_finite_units(b);
+    if (sum == 0)
+        return signed_e5m3_zero(false);
+
+    bool negative = sum < 0;
+    ulong magnitude = cast(ulong)(negative ? -sum : sum);
+    return signed_e5m3_quantize_ratio(negative, magnitude, 1u, -17);
+}
+
 static assert(Float16.sizeof == 2);
-static assert(E4M3.sizeof == 1 && E5M2.sizeof == 1 && E3M2.sizeof == 1 && E5M3.sizeof == 1);
-static assert(!is(E4M3 == E5M2) && !is(E5M3 == ubyte) && !is(Float16 == float));
+static assert(E4M3.sizeof == 1 && E5M2.sizeof == 1 && E3M2.sizeof == 1 && UE5M3.sizeof == 1);
+static assert(E5M3.sizeof == 2, "nine-bit E5M3 uses a 16-bit scalar container");
+static assert(!is(E4M3 == E5M2) && !is(UE5M3 == ubyte) && !is(Float16 == float));
+static assert(!is(E5M3 == UE5M3) && !is(E5M3 == ushort));
