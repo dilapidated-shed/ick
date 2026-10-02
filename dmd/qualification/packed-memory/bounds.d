@@ -12,14 +12,14 @@ extern(C) int main()
     // This executable is built with D bounds and assertions disabled.  The
     // public checked store must still reject every invalid coordinate before
     // encoding or touching the packed destination.
-    E5M3[3] destination = [E5M3.from_code(11), E5M3.from_code(23),
-                           E5M3.from_code(37)];
+    UE5M3[3] destination = [UE5M3.from_code(11), UE5M3.from_code(23),
+                           UE5M3.from_code(37)];
     const before = destination;
     if (try_store_at(destination[], 3, Float16.from_float(1.0f))) return 1;
     if (try_store_at(destination[], size_t.max, Float16.from_float(1.0f))) return 2;
     if (destination != before) return 3;
 
-    E5M3[0] empty;
+    UE5M3[0] empty;
     if (try_store_at(empty[], 0, Float16.from_float(1.0f))) return 4;
 
     auto offset = destination[1 .. 3];
