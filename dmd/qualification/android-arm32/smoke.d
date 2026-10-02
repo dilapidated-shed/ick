@@ -163,3 +163,34 @@ extern(C) double double_constant()
 {
     return 3.5;
 }
+
+extern(C) __gshared long own_long_global = 0x0102030405060708L;
+extern(C) extern __gshared long external_long_global;
+extern(C) __gshared double own_double_global = 3.5;
+
+extern(C) long read_own_long_global()
+{
+    return own_long_global;
+}
+
+extern(C) long set_own_long_global(long x)
+{
+    own_long_global = x;
+    return x;
+}
+
+extern(C) long read_external_long_global()
+{
+    return external_long_global;
+}
+
+extern(C) long set_external_long_global(long x)
+{
+    external_long_global = x;
+    return x;
+}
+
+extern(C) double read_own_double_global()
+{
+    return own_double_global;
+}
