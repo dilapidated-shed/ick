@@ -817,10 +817,10 @@ private struct LeafEmitter
 
         auto result = signature.next;
         if (result.toBasetype().ty != TY.Tvoid)
-            requireWord(result, location);
+            requireScalar(result, location);
 
         if (function_.parameters && function_.parameters.length > 64)
-            reject(location, "more than 64 one-word parameters are outside the qualification range");
+            reject(location, "more than 64 scalar parameters are outside the qualification range");
 
         string name = declarationName(function_, location);
 
@@ -831,22 +831,52 @@ private struct LeafEmitter
 
         if (function_.parameters)
         {
-            foreach (i, parameter; *function_.parameters)
+            uint ncrn;
+            uint stackWords;
+            foreach (parameter; *function_.parameters)
             {
-                requireWord(parameter.type, parameter.loc);
+                requireScalar(parameter.type, parameter.loc);
                 if (parameter.storage_class & (STC.ref_ | STC.out_ | STC.lazy_))
                     reject(parameter.loc, "ref/out/lazy parameters are not implemented");
 
-                homes[parameter] = temporary();
-                if (i < 4)
+                const words = scalarWords(parameter.type);
+                if (words == 2 && (ncrn & 1))
+                    ++ncrn;
+
+                ArgumentLocation loc;
+                loc.words = words;
+                if (ncrn < 4 && words <= 4 - ncrn)
                 {
-                    code.store(homes[parameter], cast(uint)i);
+                    loc.reg = cast(int)ncrn;
+                    ncrn += words;
                 }
                 else
                 {
-                    const at = code.loadStackOffset(0);
-                    stackParameterLoads ~= StackParameterLoad(at, cast(uint)(i - 4) * 4);
-                    code.store(homes[parameter]);
+                    ncrn = 4;
+                    if (words == 2 && (stackWords & 1))
+                        ++stackWords;
+                    loc.stackWord = stackWords;
+                    stackWords += words;
+                }
+
+                homes[parameter] = temporary(parameter.type);
+                if (loc.reg >= 0)
+                {
+                    storeValue(parameter.type, homes[parameter], cast(uint)loc.reg);
+                }
+                else if (words == 1)
+                {
+                    const at = code.loadStackOffset(0, 0);
+                    stackParameterLoads ~= StackParameterLoad(at, loc.stackWord * 4, 0);
+                    code.store(homes[parameter], 0);
+                }
+                else
+                {
+                    const low = code.loadStackOffset(0, 0);
+                    const high = code.loadStackOffset(0, 1);
+                    stackParameterLoads ~= StackParameterLoad(low, loc.stackWord * 4, 0);
+                    stackParameterLoads ~= StackParameterLoad(high, loc.stackWord * 4 + 4, 1);
+                    code.storePair(homes[parameter], 0);
                 }
             }
         }
@@ -882,7 +912,7 @@ private struct LeafEmitter
         foreach (at; returns)
             code.patchFrame(at, frame, false);
         foreach (load; stackParameterLoads)
-            code.patchLoadStackOffset(load.at, frame + 8 + load.incomingOffset);
+            code.patchLoadStackOffset(load.at, frame + 8 + load.incomingOffset, load.reg);
 
         return Arm32Function(name, code.bytes, relocations, dataOffsets);
     }
