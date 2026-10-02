@@ -1588,6 +1588,7 @@ auto sourceFiles()
             typesem.d typinf.d utils.d
             iasm/package.d iasm/gcc.d
             mangle/package.d mangle/basic.d mangle/cpp.d mangle/cppwin.d
+            packedmemory.d
             visitor/package.d visitor/foreachvar.d visitor/parsetime.d visitor/permissive.d visitor/postorder.d visitor/statement_rewrite_walker.d
             visitor/strict.d visitor/transitive.d
             cparse.d
