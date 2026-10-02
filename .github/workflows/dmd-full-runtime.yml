@@ -1,0 +1,125 @@
+name: DMD full runtime and Phobos
+
+on:
+  push:
+    branches:
+      - ci/full-d-runtime
+      - dmd-upstream
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-full-runtime.yml'
+  pull_request:
+    branches:
+      - dmd-upstream
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-full-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dmd-full-runtime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  normal-d:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact compiler source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install bootstrap dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc
+
+      - name: Build owned DMD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          dmd_bin=$(realpath "$dmd_bin")
+          "$dmd_bin" --version
+          printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.ick-dmd-bin"
+
+      - name: Check out matching druntime source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: dlang/dmd
+          ref: 74917954b53f7f35b13e61b4438c7253834929ed
+          path: .runtime-dmd
+          persist-credentials: false
+
+      - name: Check out matching Phobos source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: dlang/phobos
+          ref: 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          path: .runtime-phobos
+          persist-credentials: false
+
+      - name: Install owned DMD into reconstructed toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .ick-dmd-bin)
+          mkdir -p .runtime-dmd/generated/linux/release/64
+          cp "$dmd_bin" .runtime-dmd/generated/linux/release/64/dmd
+          chmod +x .runtime-dmd/generated/linux/release/64/dmd
+
+      - name: Build matching druntime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
+          make -C .runtime-dmd/druntime -j"$(nproc)" \
+            MODEL=64 OS=linux BUILD=release SHARED=0 DMD="$dmd_bin"
+          test -f .runtime-dmd/generated/linux/release/64/libdruntime.a
+          test -f .runtime-dmd/druntime/import/object.d
+
+      - name: Build matching Phobos
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
+          make -C .runtime-phobos -j"$(nproc)" \
+            MODEL=64 OS=linux BUILD=release SHARED=0 USE_IMPORTC=1 \
+            DMD_DIR="$GITHUB_WORKSPACE/.runtime-dmd" DMD="$dmd_bin"
+          test -f .runtime-phobos/generated/linux/release/64/libphobos2.a
+
+      - name: Compile and run ordinary D
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
+          "$dmd_bin" -conf= -fPIC \
+            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
+            -I"$GITHUB_WORKSPACE/.runtime-phobos" \
+            "$GITHUB_WORKSPACE/dmd/qualification/full_runtime_smoke.d" \
+            "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
+            -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
+            -of=/tmp/ick_full_runtime
+          /tmp/ick_full_runtime | grep -Fx '123456789012345678901234567891'
+
+      - name: Record full-D receipt
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: conservative ICK DMD built matching v2.113 druntime and Phobos.
+
+          PASS: ordinary D executed std.bigint, GC-managed class allocation,
+          exceptions, and std.stdio without -betterC.
+
+          This receipt is independent of the BetterC/Android qualification.
+          EOF
