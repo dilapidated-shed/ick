@@ -45,10 +45,14 @@ See [`ick/README.md`](ick/README.md) for the source-ownership rule.
 
 ## Imprecise storage types
 
-`<ick/imprecise.h>` exposes the five low-precision numeric types `Float16`,
-`E4M3`, `E5M2`, `E3M2`, and `E5M3`. The first four use explicit binary32
-one-operation-then-requantize arithmetic; unsigned storage-only `E5M3` has no
-invented arithmetic.
+`<ick/imprecise.h>` exposes the five low-precision C representations
+`Float16`, `E4M3`, `E5M2`, `E3M2`, and the unsigned Ootomo–Naruse
+storage format historically named `E5M3`.
+
+The Icky D line names that byte-storage representation `UE5M3` and reserves
+`E5M3` for the signed nine-bit arithmetic type. Signed E5M3 performs `+` and
+`-` directly; multiplication and division require an explicit wider arithmetic
+choice rather than silently widening.
 
 `<ick/circle.h>` exposes `Circle96`, `Rotation96`, `Reflection96`, and
 `Tangent96` as distinct geometric categories with exact 96-position rotation,

@@ -24,11 +24,13 @@ An explicit compiler representation-selection/lowering stage is still owed.
 | E4M3 | 1 byte | Same, with the established E4M3 saturation/NaN policy |
 | E5M2 | 1 byte | Same, with the established E5M2 saturation/NaN policy |
 | E3M2 | 6 payload bits in 1 byte | Same; saturate at 28; source NaN becomes +0 |
-| E5M3 | 1 byte, unsigned storage | No invented scalar arithmetic |
+| UE5M3 | 1 byte, unsigned Ootomo–Naruse storage | No direct arithmetic |
+| E5M3 | 9 meaningful bits in a 16-bit scalar container | Signed `+`/`-` directly; multiply/divide require explicit Float16 |
 
-The source of truth is the existing `ick/include/ick/imprecise.h`, described
-in `docs/imprecise-types.md`. Encoding, midpoint reconstruction, ties and
-exceptional cases are ported, not redefined.
+UE5M3 ports the existing C `E5M3` Ootomo–Naruse byte codec from
+`ick/include/ick/imprecise.h`; the D name makes its unsigned storage role
+explicit. Signed E5M3 is a separate nine-bit arithmetic format specified in
+`docs/signed-e5m3.md`.
 
 ```d
 import icky.imprecise;
@@ -38,33 +40,44 @@ auto b = E3M2.from_float(0.0625f);
 auto rounded_sum = a + b;
 float displayed = rounded_sum.to_float();
 
-E5M3 stored;
-bool accepted = E5M3.try_from_float(1.0f, stored);
+UE5M3 stored;
+bool accepted = UE5M3.try_from_float(1.0f, stored);
 // A failed construction leaves stored unchanged.
 // stored + stored does not compile.
+
+auto a = E5M3.from_float(1.0f);
+auto b = E5M3.from_float(2.0f);
+auto difference = a - b; // E5M3(-1), no Float16 arithmetic
 ```
 
 Raw payload access is explicit: `from_code`, `code`, and `to_float`.
 `E3M2.from_code` masks unused bits, matching the existing C contract.
-E5M3 accepts binary32 inputs with no sign bit and exponent fields 112 through
+Signed E5M3 uses logical layout `s eeeee mmm`, exponent bias 15, signed
+zero/subnormals, infinity/NaN, and direct E5M3 rounding after `+`/`-`.
+Multiplication/division are not E5M3 operators and require an explicit wider
+arithmetic choice.
+Its nine meaningful bits occupy a 16-bit scalar container; dense nine-bit
+memory packing is a separate representation problem.
+
+UE5M3 accepts binary32 inputs with no sign bit and exponent fields 112 through
 143 inclusive. Zero, negatives, subnormals, out-of-range normals, infinities
 and NaNs are rejected. Its code zero represents a positive bin midpoint,
-**not numeric zero**; that also describes `E5M3.init`.
+**not numeric zero**; that also describes `UE5M3.init`.
 
 ## Packed memory access
 
 `icky.packed` adds a scalar, byte-strided view and a typed `PackedValue!(S, A)`:
 `S` names the stored representation and `A` names the arithmetic representation.
-For E5M3, `PackedValue!(E5M3, Float16).sizeof == 1`; decoding constructs one
+For UE5M3, `PackedValue!(UE5M3, Float16).sizeof == 1`; decoding constructs one
 Float16 value at the point the caller requests arithmetic. Each successful
-load reads one stored element. E5M3 values beyond Float16's finite range widen
+load reads one stored element. UE5M3 values beyond Float16's finite range widen
 according to the existing Float16 overflow conversion. Stores encode one
-arithmetic value and leave memory unchanged when the E5M3 input falls outside
+arithmetic value and leave memory unchanged when the UE5M3 input falls outside
 its defined domain.
 
 ```d
-auto packed = PackedView!(E5M3, Float16, 1, alias_group)(bytes, byteLength, 1);
-PackedValue!(E5M3, Float16) value;
+auto packed = PackedView!(UE5M3, Float16, 1, alias_group)(bytes, byteLength, 1);
+PackedValue!(UE5M3, Float16) value;
 if (packed.try_load(index, value)) {
     auto result = value.decode() * Float16.from_float(2.0f);
     packed.try_store(index, result);
@@ -76,7 +89,7 @@ and optional alias-set label. The alias label does not assert disjointness.
 Read/write effects and ordinary source ordering are recorded in
 `PackedOperation!(S, A)`. Alignment records the caller-known guarantee; an
 alias-set label is optional analysis information and does not assert
-disjointness. Storage size, the decode/encode methods, and E5M3's partial input
+disjointness. Storage size, the decode/encode methods, and UE5M3's partial input
 domain define the value semantics. Target properties such as ISA, SIMD width, cache descriptions,
 prefetch distance, runner model, and fetch behavior do not enter the D API.
 
@@ -141,7 +154,7 @@ It includes all 65536 binary16 payloads, every byte code for the smaller
 formats, midpoint neighbours, randomized binary32 inputs, domain rejection,
 requantization, invalid-operation type checks, the Circle96 C oracle and
 finite-geometry laws for all five named grids. Packed-memory qualification
-checks every E5M3 byte through a stride-two view, decode/encode round trips,
+checks every UE5M3 byte through a stride-two view, decode/encode round trips,
 F16 multiply followed by narrowing/store, bounds and domain failure, and
 alignment/alias/effect facts.
 

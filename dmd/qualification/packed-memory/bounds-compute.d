@@ -7,9 +7,9 @@ nothrow @nogc:
 
 extern(C) int main(int argc, char** argv)
 {
-    E5M3[1] valid_left = [E5M3.from_code(21)];
+    UE5M3[1] valid_left = [UE5M3.from_code(21)];
     E3M2[1] valid_right = [E3M2.from_code(7)];
-    E5M3[0] empty_left;
+    UE5M3[0] empty_left;
     E3M2[0] empty_right;
 
     if (argc < 2)
