@@ -120,6 +120,40 @@ jobs:
           nm -u "$object" | tee /tmp/netbsd-normal-d.undefined
           grep -Eq '(_d_|_D)' /tmp/netbsd-normal-d.undefined
 
+      - name: Build NetBSD druntime body without host-CC shims
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          runtime="$GITHUB_WORKSPACE/.runtime-dmd/druntime"
+          root="$GITHUB_WORKSPACE/.runtime-dmd/generated/netbsd/release/64"
+          archive="$root/libdruntime.a"
+          errno_obj="$root/errno_c.o"
+
+          target_dflags="-conf= -Isrc -Iimport -w -de -preview=dip1000 -preview=fieldwise -preview=dtorfields -m64 -fPIC -O -release -inline -target=x86_64-unknown-netbsd"
+
+          make -C "$runtime" \
+            OS=netbsd MODEL=64 BUILD=release SHARED=0 \
+            DMD="$dmd_bin" DFLAGS="$target_dflags" \
+            OBJS="../generated/netbsd/release/64/errno_c.o" \
+            lib
+
+          test -s "$archive"
+          ar t "$archive" | tee /tmp/netbsd-druntime.members
+          grep -Fx 'errno_c.o' /tmp/netbsd-druntime.members
+          ! grep -Eq 'threadasm|valgrind' /tmp/netbsd-druntime.members
+
+          while IFS= read -r member; do
+            test -n "$member"
+            ar p "$archive" "$member" > /tmp/netbsd-druntime-member.o
+            readelf -h /tmp/netbsd-druntime-member.o > /tmp/netbsd-druntime-member.elf
+            grep -Eq 'Class:[[:space:]]+ELF64' /tmp/netbsd-druntime-member.elf
+            grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' \
+              /tmp/netbsd-druntime-member.elf
+          done < /tmp/netbsd-druntime.members
+
+          printf '%s\n' "$archive" > .netbsd-druntime-body
+
       - name: Prove this is not BetterC
         shell: bash
         run: |
@@ -163,6 +197,10 @@ jobs:
           PASS: the same source is rejected under -betterC, proving this is a
           normal-D boundary rather than another BetterC receipt.
 
-          OUT OF SCOPE: NetBSD druntime/Phobos libraries, final linking, and
-          native execution. Those remain issue #61.
+          PASS: the NetBSD druntime D body plus ImportC errno.c builds into a
+          target ELF64/x86-64 archive with the host-CC threadasm and Valgrind
+          shims explicitly omitted.
+
+          OUT OF SCOPE: the two omitted target shim objects, complete druntime,
+          Phobos, final linking, and native execution. Those remain issue #61.
           EOF
