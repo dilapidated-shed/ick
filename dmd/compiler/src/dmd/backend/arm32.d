@@ -65,6 +65,12 @@ struct Arm32Code
         patchInstruction(at, 0xE59F0000 | reg << 12 | cast(uint)delta);
     }
 
+    void constant64(ulong value)
+    {
+        constant(cast(uint)value, 0);
+        constant(cast(uint)(value >> 32), 1);
+    }
+
     size_t loadStackOffset(uint offset, uint reg = 0)
     {
         enforce(offset <= 4095 && reg < 4, "A32 stack load out of range");
@@ -91,10 +97,24 @@ struct Arm32Code
         loadStackOffset(slot * 4, reg);
     }
 
+    void loadPair(uint slot, uint reg = 0)
+    {
+        enforce(slot < 125 && (reg == 0 || reg == 2), "A32 pair load requires two core registers");
+        loadStackOffset(slot * 4, reg);
+        loadStackOffset(slot * 4 + 4, reg + 1);
+    }
+
     void store(uint slot, uint reg = 0)
     {
         enforce(slot < 126, "A32 stack slot out of range");
         storeStackOffset(slot * 4, reg);
+    }
+
+    void storePair(uint slot, uint reg = 0)
+    {
+        enforce(slot < 125 && (reg == 0 || reg == 2), "A32 pair store requires two core registers");
+        storeStackOffset(slot * 4, reg);
+        storeStackOffset(slot * 4 + 4, reg + 1);
     }
 
     void adjustStack(uint amount, bool subtract)
