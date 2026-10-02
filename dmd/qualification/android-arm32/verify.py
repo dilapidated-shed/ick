@@ -53,7 +53,7 @@ def check_elf(path: Path) -> None:
         if required not in section_by_name:
             raise RuntimeError(f"missing ELF section {required}")
 
-    text_index, _ = section_by_name[".text"]
+    text_index, text_section = section_by_name[".text"]
     rel_index, rel = section_by_name[".rel.text"]
     data_index, data_section = section_by_name[".data"]
     sym_index, sym = section_by_name[".symtab"]
@@ -74,6 +74,15 @@ def check_elf(path: Path) -> None:
     for name, value, _, info, _, shndx in symbols:
         if shndx == text_index and (info & 0xF) == 2 and value & 3:
             raise RuntimeError(f"A32 function symbol {name} is not word aligned: {value:#x}")
+
+    for name, value, size, info, _, shndx in symbols:
+        if shndx == text_index and (info & 0xF) == 2 and name == "add_int":
+            start = text_section[4] + value
+            words = [
+                struct.unpack_from("<I", data, at)[0]
+                for at in range(start, start + size, 4)
+            ]
+            print("add_int words:", " ".join(f"{word:08x}" for word in words))
 
     external = [s for s in symbols if s[0] == "external_twice"]
     if len(external) != 1 or external[0][5] != 0:
