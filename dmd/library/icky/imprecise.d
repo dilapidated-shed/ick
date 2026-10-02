@@ -502,7 +502,7 @@ struct E5M3
         return true;
     }
 
-    static bool try_add(E5M3 left, E5M3 right, ref E5M3 output) nothrow @nogc
+    static bool try_add(const(E5M3) left, const(E5M3) right, ref E5M3 output) nothrow @nogc
     {
         E5M3 candidate;
         if (!try_from_dyadic(left.fixed_units() + right.fixed_units(), -19, candidate))
@@ -510,7 +510,7 @@ struct E5M3
         output = candidate;
         return true;
     }
-    static bool try_subtract(E5M3 left, E5M3 right, ref E5M3 output) nothrow @nogc
+    static bool try_subtract(const(E5M3) left, const(E5M3) right, ref E5M3 output) nothrow @nogc
     {
         const ulong leftUnits = left.fixed_units();
         const ulong rightUnits = right.fixed_units();
@@ -521,7 +521,7 @@ struct E5M3
         output = candidate;
         return true;
     }
-    static bool try_multiply(E5M3 left, E5M3 right, ref E5M3 output) nothrow @nogc
+    static bool try_multiply(const(E5M3) left, const(E5M3) right, ref E5M3 output) nothrow @nogc
     {
         E5M3 candidate;
         if (!try_from_dyadic(
