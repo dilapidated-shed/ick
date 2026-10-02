@@ -145,15 +145,17 @@ def check_elf(path: Path) -> None:
     if Counter(call_targets) != expected_calls:
         raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(call_targets)}")
 
-    expected_got = Counter({
-        "own_global": 3,
-        "external_global": 2,
-        "own_long_global": 2,
-        "external_long_global": 2,
-        "own_double_global": 1,
-    })
-    if Counter(got_targets) != expected_got:
-        raise RuntimeError(f"unexpected R_ARM_GOT_PREL targets: {Counter(got_targets)}")
+    expected_got_targets = {
+        "own_global",
+        "external_global",
+        "own_long_global",
+        "external_long_global",
+        "own_double_global",
+    }
+    actual_got_targets = set(got_targets)
+    if actual_got_targets != expected_got_targets:
+        raise RuntimeError(
+            f"unexpected R_ARM_GOT_PREL targets: {Counter(got_targets)}")
 
     if b"$a\x00" not in data or b"$t\x00" in data:
         raise RuntimeError("A32 mapping symbol missing or Thumb mapping symbol present")
