@@ -209,9 +209,15 @@ private struct LeafEmitter
 
     void condition(Expression expression_)
     {
-        requireWord(expression_.type, expression_.loc);
+        requireScalar(expression_.type, expression_.loc);
         expression(expression_);
-        if (floating(expression_.type))
+        if (scalarWords(expression_.type) == 2)
+        {
+            if (expression_.type.toBasetype().ty == TY.Tfloat64)
+                code.instruction(0xE3C11102); // BIC r1,r1,#0x80000000: ignore double sign zero
+            code.instruction(0xE1800001);     // ORR r0,r0,r1
+        }
+        else if (floating(expression_.type))
             code.instruction(0xE1A00080); // MOV r0,r0,LSL #1: +0/-0 -> 0, NaN stays nonzero
         code.instruction(0xE3500000);     // CMP r0,#0
     }
@@ -414,6 +420,137 @@ private struct LeafEmitter
         code.adjustStack(outgoing, false);
     }
 
+    void pairBinary(Expression e, BinExp binary)
+    {
+        requireScalar(binary.e1.type, binary.e1.loc);
+        requireScalar(binary.e2.type, binary.e2.loc);
+        if (scalarWords(binary.e1.type) != 2 || scalarWords(binary.e2.type) != 2)
+            reject(e.loc, "mixed one/two-word binary operation is not implemented");
+
+        expression(binary.e1);
+        const saved = temporary(binary.e1.type);
+        code.storePair(saved, 0);
+        expression(binary.e2);
+        code.instruction(0xE1A02000); // MOV r2,r0
+        code.instruction(0xE1A03001); // MOV r3,r1
+        code.loadPair(saved, 0);
+
+        const ty = binary.e1.type.toBasetype().ty;
+        const fp64 = ty == TY.Tfloat64;
+        const unsigned64 = ty == TY.Tuns64;
+
+        if (fp64)
+        {
+            code.instruction(0xEC410B10); // VMOV d0,r0,r1
+            code.instruction(0xEC432B11); // VMOV d1,r2,r3
+            switch (e.op)
+            {
+                case EXP.add: code.instruction(0xEE300B01); break;
+                case EXP.min: code.instruction(0xEE300B41); break;
+                case EXP.mul: code.instruction(0xEE200B01); break;
+                case EXP.div: code.instruction(0xEE800B01); break;
+                case EXP.equal: case EXP.notEqual:
+                case EXP.lessThan: case EXP.lessOrEqual:
+                case EXP.greaterThan: case EXP.greaterOrEqual:
+                {
+                    code.instruction(0xEEB40B41); // VCMP.F64 d0,d1
+                    code.instruction(0xEEF1FA10); // VMRS APSR_nzcv,FPSCR
+                    uint cc;
+                    switch (e.op)
+                    {
+                        case EXP.equal:          cc = 0; break;
+                        case EXP.notEqual:       cc = 1; break;
+                        case EXP.lessThan:       cc = 4; break;
+                        case EXP.lessOrEqual:    cc = 9; break;
+                        case EXP.greaterThan:    cc = 12; break;
+                        case EXP.greaterOrEqual: cc = 10; break;
+                        default: assert(0);
+                    }
+                    code.booleanResult(cc);
+                    return;
+                }
+                default:
+                    reject(e.loc, "unsupported double binary operation in A32 slice");
+            }
+            code.instruction(0xEC510B10); // VMOV r0,r1,d0
+            return;
+        }
+
+        switch (e.op)
+        {
+            case EXP.add:
+                code.instruction(0xE0900002); // ADDS r0,r0,r2
+                code.instruction(0xE0A11003); // ADC r1,r1,r3
+                return;
+            case EXP.min:
+                code.instruction(0xE0500002); // SUBS r0,r0,r2
+                code.instruction(0xE0C11003); // SBC r1,r1,r3
+                return;
+            case EXP.mul:
+                code.instruction(0xE08EC092); // UMULL r12,lr,r2,r0
+                code.instruction(0xE021E192); // MLA r1,r2,r1,lr
+                code.instruction(0xE0211093); // MLA r1,r3,r0,r1
+                code.instruction(0xE1A0000C); // MOV r0,r12
+                return;
+            case EXP.div:
+            case EXP.mod:
+            {
+                const helper = unsigned64 ? "__aeabi_uldivmod" : "__aeabi_ldivmod";
+                const at = code.call();
+                relocations ~= Arm32Relocation(cast(uint)at, helper, ARM32_R_CALL);
+                if (e.op == EXP.mod)
+                {
+                    code.instruction(0xE1A00002); // MOV r0,r2
+                    code.instruction(0xE1A01003); // MOV r1,r3
+                }
+                return;
+            }
+            case EXP.and:
+                code.instruction(0xE0000002); // AND r0,r0,r2
+                code.instruction(0xE0011003); // AND r1,r1,r3
+                return;
+            case EXP.or:
+                code.instruction(0xE1800002); // ORR r0,r0,r2
+                code.instruction(0xE1811003); // ORR r1,r1,r3
+                return;
+            case EXP.xor:
+                code.instruction(0xE0200002); // EOR r0,r0,r2
+                code.instruction(0xE0211003); // EOR r1,r1,r3
+                return;
+            case EXP.equal:
+            case EXP.notEqual:
+            {
+                code.instruction(0xE0200002); // EOR r0,r0,r2
+                code.instruction(0xE0211003); // EOR r1,r1,r3
+                code.instruction(0xE1800001); // ORR r0,r0,r1
+                code.instruction(0xE3500000); // CMP r0,#0
+                code.booleanResult(e.op == EXP.equal ? 0 : 1);
+                return;
+            }
+            case EXP.lessThan:
+            case EXP.lessOrEqual:
+            case EXP.greaterThan:
+            case EXP.greaterOrEqual:
+            {
+                code.instruction(0xE1500002); // CMP r0,r2
+                code.instruction(0xE0D1C003); // SBCS r12,r1,r3
+                uint cc;
+                switch (e.op)
+                {
+                    case EXP.lessThan:       cc = unsigned64 ? 3 : 11; break;
+                    case EXP.lessOrEqual:    cc = unsigned64 ? 9 : 13; break;
+                    case EXP.greaterThan:    cc = unsigned64 ? 8 : 12; break;
+                    case EXP.greaterOrEqual: cc = unsigned64 ? 2 : 10; break;
+                    default: assert(0);
+                }
+                code.booleanResult(cc);
+                return;
+            }
+            default:
+                reject(e.loc, "unsupported 64-bit integer binary operation in A32 slice");
+        }
+    }
+
     void expression(Expression e)
     {
         if (!e)
@@ -554,7 +691,25 @@ private struct LeafEmitter
                     expression(operand);
                     return;
                 }
-                reject(e.loc, "64-bit unary arithmetic is not implemented yet");
+                if (e.op == EXP.not)
+                {
+                    condition(operand);
+                    code.booleanResult(0);
+                    return;
+                }
+                expression(operand);
+                if (operand.type.toBasetype().ty == TY.Tfloat64)
+                {
+                    code.instruction(0xEC410B10); // VMOV d0,r0,r1
+                    code.instruction(0xEEB10B40); // VNEG.F64 d0,d0
+                    code.instruction(0xEC510B10); // VMOV r0,r1,d0
+                }
+                else
+                {
+                    code.instruction(0xE2700000); // RSBS r0,r0,#0
+                    code.instruction(0xE2E11000); // RSC r1,r1,#0
+                }
+                return;
             }
             if (e.op == EXP.not)
             {
@@ -628,7 +783,10 @@ private struct LeafEmitter
         }
 
         if (scalarWords(binary.e1.type) == 2 || scalarWords(binary.e2.type) == 2)
-            reject(e.loc, "64-bit binary arithmetic/comparisons are not implemented yet");
+        {
+            pairBinary(e, binary);
+            return;
+        }
 
         expression(binary.e1);
         const saved = temporary();
