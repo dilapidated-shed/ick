@@ -32,6 +32,7 @@ alias binder_flags_t = uint;
 
 enum binder_status_t STATUS_OK = 0;
 enum binder_status_t STATUS_PERMISSION_DENIED = -1; // -EPERM
+enum binder_status_t STATUS_NO_MEMORY = -12; // -ENOMEM
 enum binder_status_t STATUS_BAD_VALUE = -22; // -EINVAL
 enum binder_status_t STATUS_UNKNOWN_TRANSACTION = -74; // -EBADMSG on Linux/Android
 enum binder_flags_t FLAG_ONEWAY = 0x01;
