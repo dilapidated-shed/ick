@@ -1,82 +1,83 @@
 # Packed memory in Icky DMD
 
-This slice keeps the stored representation and the arithmetic representation
-separate. E5M3 and E3M2 coordinates occupy one byte each. The first arithmetic
-carrier is the existing `Float16` semantic type, whose machine carrier remains
-binary32 in the portable scalar implementation.
+This slice keeps stored representation and arithmetic representation separate.
+`UE5M3` and `E3M2` coordinates occupy one byte each. Arithmetic is selected
+explicitly per operation: the current scalar surface supports `Float16` and
+signed `E5M3`.
 
-“Just in time” means that a coordinate is decoded when the current arithmetic
-operation consumes it in ahead-of-time compiled code. It does not mean a
-runtime compiler or a new JIT. A call consumes only its requested coordinates;
-the implementation does not construct a widened F16/F32 input array.
+No operation constructs a widened input array. A coordinate is decoded only
+when the current ahead-of-time compiled scalar operation consumes it.
 
 ## Public scalar surface
 
 ```d
-auto result = compute_at!(Float16, "*")(left, left_index, right, right_index);
-bool stored = try_store_at(destination, index, result);
+auto signed_result =
+    compute_at!(E5M3, "-")(left, left_index, right, right_index);
+
+auto half_result =
+    compute_at!(Float16, "*")(left, left_index, right, right_index);
+
+bool stored = try_store_at(destination, index, signed_result);
 ```
 
-`compute_at` accepts read-only contiguous E5M3 and E3M2 slices, including mixed
-representations, and supports `+`, `-`, `*`, and `/`. It checks both indices,
-loads each packed coordinate once, decodes both values, converts them to
-`Float16`, performs one binary32 operation under the existing Float16 contract,
-and requantizes the result at that operation boundary. An invalid index triggers
-an explicit non-returning failure before either coordinate is read. The public
-result is one `Float16`, never a slice.
+`compute_at` accepts read-only contiguous `UE5M3` and `E3M2` slices,
+including mixed storage representations, and supports `+`, `-`, `*`, and
+`/`. It checks both indices and loads each requested packed coordinate once.
 
-`try_store_at` checks the destination index before reading or writing the
-coordinate. E3M2 keeps its existing total quantizer, including saturation,
-NaN-to-positive-zero behavior, and unused-bit normalization. E5M3 has a partial
-input domain: a rejected encode returns `false` and leaves the destination byte
-unchanged.
+With `Arithmetic == E5M3`, each input is converted into signed E5M3 and the
+operation executes under the direct E5M3 contract in
+`docs/signed-e5m3.md`. In particular, subtraction may return a negative E5M3
+value. It does not silently select Float16. E5M3 supports `+` and `-` here,
+using exact integer units of the minimum subnormal and one final E5M3 rounding.
 
-E5M3 is unsigned Ootomo–Naruse storage, not signed IEEE FP8. Its codes 0–247
-convert to finite Float16 values. Codes 248–255 convert to positive Float16
-infinity because their decoded binary32 midpoints exceed the finite Float16
-range. No valid E5M3 storage code is rejected during widening, and direct
-E5M3 arithmetic remains unavailable.
+Multiplication and division are the explicit promotion boundary:
+`compute_at!(E5M3, "*")` and `compute_at!(E5M3, "/")` are rejected.
+Callers select `compute_at!(Float16, "*")` or
+`compute_at!(Float16, "/")` when those operations are required.
+
+`try_store_at` accepts either arithmetic type. `E3M2` keeps its existing
+total quantizer. `UE5M3` is positive-only storage: values outside its encoder
+domain—including a negative E5M3 result—return `false` and leave the
+destination byte unchanged. That failure is the explicit result/domain rule;
+no hidden widening changes the result type.
+
+The highest UE5M3 codes represent positive values larger than signed E5M3's
+finite range. Converting such an operand to E5M3 therefore produces positive
+infinity under the E5M3 conversion rule. The storage value itself remains
+valid UE5M3.
 
 ## Compiler seam
 
-The owned DMD recognizes the exact public compute_at and try_store_at
-templates in module icky.packed_memory, including supported template arguments
-and checked signatures. A same-named function in another module uses normal D
-lowering.
-The request in `dmd/packedmemory.d` retains:
+The owned DMD recognizes the exact `compute_at` and `try_store_at` templates
+in `icky.packed_memory`. The target-independent request retains the storage
+type, arithmetic type, operation, result/store domain, memory facts, and
+rounding boundary.
 
-- source representation for each operand;
-- arithmetic representation and exact operation;
-- destination representation;
-- decode, arithmetic, encode, and packed-load/store stages;
-- Float16 per-operation rounding;
-- partial-domain versus total-quantization behavior;
-- base, length, index, element stride, alignment, alias, effect, and ordering facts;
-- the absence of a proven disjoint-alias relation; and
-- the obligation that temporary widening stays bounded independently of vector length.
+The trace distinguishes:
 
-The compiler records and validates the full operation before ordinary call
-lowering, then selects its bounded scalar body as the conservative follower.
-That body checks indices before access, loads one coordinate from each source,
-uses the existing codecs and Float16 operators, and returns or stores one
-scalar. Its internal packed byte loads and stores reach the concrete DMD
-memory followers. No step constructs a widened input array.
+```text
+rounding=Float16-per-operation
+rounding=E5M3-per-operation
+```
 
-The public declarations and internal scalar helpers use
-`pragma(inline, false)` so `-O -inline` cannot erase the operation boundary before
-the request reaches DMD. Compiler receipts distinguish the semantic request
-from follower execution; the optimized qualification requires both. Taking a
-function address still emits and calls the same bounded scalar body.
+The conservative follower validates that the chosen rounding mode matches the
+arithmetic representation before executing the ordinary scalar body. Internal
+packed byte reads/stores also retain that arithmetic identity. A same-named
+function outside `icky.packed_memory` receives ordinary D lowering.
 
-Bounded scalar spills are allowed. Register allocation is a backend decision;
-this contract does not require values to remain in registers. Whole-array
-implicit widening remains forbidden.
+The public declarations and scalar helpers use `pragma(inline, false)` so
+`-O -inline` cannot erase the compiler seam before it is recorded. Function
+pointers still execute the same bounded scalar fallback.
+
+## Storage naming
+
+`UE5M3` is the one-byte unsigned Ootomo–Naruse storage codec that earlier ICK
+work called `E5M3`. Signed `E5M3` has nine meaningful bits and is a numeric
+arithmetic type. Its ordinary scalar representation uses a 16-bit container.
+Packing a stream densely at nine bits per value is a separate storage codec and
+is not implied by `E5M3[]`.
 
 ## Deliberately unoptimized
 
-This implementation is a correctness baseline. It does not claim native FP16
-arithmetic or any throughput improvement. It chooses no SIMD or packed-fetch
-width, prefetch distance, cache policy, non-temporal access, unroll factor,
-independent-stream count, processor dispatch, memory-channel policy, or
-microarchitecture-specific instruction. Those decisions belong to the later
-measured x86 backend work.
+This remains a correctness baseline. It makes no SIMD-width, prefetch, cache,
+unroll, dispatch, or microarchitecture claim. Those are later backend choices.
