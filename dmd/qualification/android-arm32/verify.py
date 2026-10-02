@@ -383,8 +383,10 @@ _start:
     mov r0, #7
     mov r1, #5
     bl add_int
+    mov r10, #29
     cmp r0, #12
     bne fail
+    mov r10, #30
     cmp sp, r11
     bne fail
 
