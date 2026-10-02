@@ -463,6 +463,7 @@ __aeabi_uldivmod:
 .type _start,%function
 _start:
     mov r11, sp
+    mov r10, #1
 
     mov r0, #7
     mov r1, #5
