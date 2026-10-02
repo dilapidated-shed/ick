@@ -730,6 +730,13 @@ extern (C++) struct Target
      */
     extern (C++) int isVectorTypeSupported(int sz, Type type) @safe
     {
+        if (isARM32)
+        {
+            if (sz != 16)
+                return 3;
+            return type.ty == TY.Tfloat32 ? 0 : 2;
+        }
+
         if (!isXmmSupported())
             return 1; // not supported
 
@@ -808,6 +815,22 @@ extern (C++) struct Target
             return true; // not a vector op
         const vecsize = cast(int)tvec.basetype.size();
         const elemty = cast(int)tvec.elementType().ty;
+
+        if (isARM32)
+        {
+            if (vecsize != 16 || elemty != TY.Tfloat32)
+                return false;
+            switch (op)
+            {
+            case EXP.uadd:
+            case EXP.add:
+            case EXP.min:
+            case EXP.mul:
+                return true;
+            default:
+                return false;
+            }
+        }
 
         // Only operations on these sizes are supported (see isVectorTypeSupported)
         if (vecsize != 16 && vecsize != 32)
