@@ -225,10 +225,18 @@ void addPredefinedGlobalIdentifiers(const ref Target tgt)
         }
     }
 
+    if (tgt.isAndroid)
+        predef("Android");
+
     addCRuntimePredefinedGlobalIdent(tgt.c);
     addCppRuntimePredefinedGlobalIdent(tgt.cpp);
 
-    if (tgt.isAArch64)
+    if (tgt.isARM32)
+    {
+        predef("ARM");
+        predef("ARM_SoftFP");
+    }
+    else if (tgt.isAArch64)
     {
         VersionCondition.addPredefinedGlobalIdent("AArch64");
     }
@@ -372,6 +380,8 @@ extern (C++) struct Target
     const(char)[] architectureName;
     CPU cpu;                // CPU instruction set to target
     bool isAArch64;         // generate 64 bit Arm code
+    bool isARM32;            // generate 32 bit Arm A32 code
+    bool isAndroid;          // Linux kernel with Android/Bionic ABI
     bool isX86_64;          // generate 64 bit code for x86_64; true by default for 64 bit dmd
     bool isX86;             // generate 32 bit Intel x86 code
     bool isLP64;            // pointers are 64 bits
@@ -430,8 +440,8 @@ extern (C++) struct Target
     {
         // isX86_64 and cpu are initialized in parseCommandLine
         //printf("isX86_64 %d isAArch64 %d\n", isX86_64, isAArch64);
-        isX86 = !isX86_64 && !isAArch64;
-        assert(isX86 + isX86_64 + isAArch64 == 1); // there can be only one
+        isX86 = !isX86_64 && !isAArch64 && !isARM32;
+        assert(isX86 + isX86_64 + isAArch64 + isARM32 == 1); // there can be only one
 
         this.params = &params;
 
@@ -500,6 +510,25 @@ extern (C++) struct Target
             realalignsize = 8;
         }
 
+        // Android armeabi-v7a uses IEEE binary64 for D real/C long double.
+        if (isAndroid && isARM32)
+        {
+            realsize = 8;
+            realpad = 0;
+            realalignsize = 8;
+            RealProperties.max = DoubleProperties.max;
+            RealProperties.min_normal = DoubleProperties.min_normal;
+            RealProperties.nan = DoubleProperties.nan;
+            RealProperties.infinity = DoubleProperties.infinity;
+            RealProperties.epsilon = DoubleProperties.epsilon;
+            RealProperties.dig = DoubleProperties.dig;
+            RealProperties.mant_dig = DoubleProperties.mant_dig;
+            RealProperties.max_exp = DoubleProperties.max_exp;
+            RealProperties.min_exp = DoubleProperties.min_exp;
+            RealProperties.max_10_exp = DoubleProperties.max_10_exp;
+            RealProperties.min_10_exp = DoubleProperties.min_10_exp;
+        }
+
         c.initialize(params, this);
         cpp.initialize(params, this);
         objc.initialize(params, this);
@@ -508,6 +537,8 @@ extern (C++) struct Target
             architectureName = "X86_64";
         else if (isX86)
             architectureName = "X86";
+        else if (isARM32)
+            architectureName = "ARM";
         else if (isAArch64)
             architectureName = "AArch64";
         else
@@ -553,6 +584,8 @@ extern (C++) struct Target
      */
     void setCPU() @safe
     {
+        if (isARM32)
+            return;
         if(!isXmmSupported())
         {
             cpu = CPU.x87;   // cannot support other instruction sets
@@ -989,6 +1022,10 @@ extern (C++) struct Target
     extern (C++) TypeTuple toArgTypes(Type t)
     {
         import dmd.argtypes_sysv_x64 : toArgTypes_sysv_x64;
+        // Scalar A32 lowering is handled by glue/arm32.d. Aggregate AAPCS32
+        // classification is deliberately not guessed here.
+        if (isARM32)
+            return null;
         if (isX86_64)
         {
             // no argTypes for Win64 yet
@@ -1412,6 +1449,7 @@ extern (C++) struct Target
         uint sz = isXmmSupported() ? 16 :
                   isX86_64         ?  8 :
                   isAArch64        ?  8 :
+                  isARM32          ?  8 :
                   isX86            ?  4 : 0;
         assert(sz);
         return sz;
@@ -1488,9 +1526,11 @@ struct TargetC
         else
             wchar_tsize = 4;
 
-        if (os == Target.OS.Windows)
+        if (target.isAndroid)
+            runtime = Runtime.Bionic;
+        else if (os == Target.OS.Windows && runtime == Runtime.Unspecified)
             runtime = Runtime.Microsoft;
-        else if (os == Target.OS.linux)
+        else if (os == Target.OS.linux && runtime == Runtime.Unspecified)
         {
             // Note: This is overridden later by `-target=<triple>` if supplied.
             // For now, choose the sensible default.
@@ -1576,7 +1616,9 @@ struct TargetCPP
         else
             assert(0);
         exceptions = (os & Target.OS.Posix) != 0;
-        if (os == Target.OS.Windows)
+        if (target.isAndroid)
+            runtime = Runtime.LLVM;
+        else if (os == Target.OS.Windows)
             runtime = Runtime.Microsoft;
         else if (os & (Target.OS.linux | Target.OS.DragonFlyBSD))
             runtime = Runtime.GNU;

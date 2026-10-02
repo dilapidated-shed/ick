@@ -351,6 +351,16 @@ private int tryMain(const(char)[][] argv, out Param params)
     if (params.v.color)
         global.console = cast(void*) createConsole(core.stdc.stdio.stderr);
 
+    if (target.isAndroid && target.isARM32)
+    {
+        if (target.os != Target.OS.linux)
+            error(Loc.initial, "Android armeabi-v7a requires the Linux target OS");
+        if (!params.betterC || driverParams.link || driverParams.lib || params.run ||
+            params.cov || params.trace || params.tracegc || params.useUnitTests ||
+            driverParams.symdebug || driverParams.symdebugref)
+            error(Loc.initial, "Android ARM32 A32 bring-up requires -betterC -c without runtime, linking, profiling, unit tests or debug information");
+    }
+
     target.setCPU();
     Loc.set(params.v.showColumns, params.v.messageStyle);
 
@@ -990,7 +1000,7 @@ bool parseCommandlineAndConfig(const(char)[][] argv, out Param params, ref Strin
     if (char* p = getenv("DDOCFILE"))
         global.params.ddoc.files.shift(p);
 
-    if (target.isX86_64 != isX86_64 && !target.isAArch64)
+    if ((target.isX86_64 || target.isAArch64) != isX86_64 && !target.isARM32)
         error(Loc.initial, "the architecture must not be changed in the %s section of %.*s",
               envsection.ptr, cast(int)global.inifilename.length, global.inifilename.ptr);
 
