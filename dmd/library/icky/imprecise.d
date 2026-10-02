@@ -147,7 +147,7 @@ private ushort half_add_codes(ushort left, ushort right, bool subtract)
         const bool negativeZero =
             half_is_zero(left) && half_is_zero(right) &&
             half_sign(left) && half_sign(right);
-        return negativeZero ? 0x8000u : 0u;
+        return cast(ushort)(negativeZero ? 0x8000u : 0u);
     }
     const bool sign = sum < 0;
     const ulong magnitude = sign ? cast(ulong)(-sum) : cast(ulong)sum;
@@ -164,7 +164,7 @@ private ushort half_multiply_codes(ushort left, ushort right)
     if (half_is_infinite(left) || half_is_infinite(right))
         return cast(ushort)((sign ? 0x8000u : 0u) | 0x7c00u);
     if (half_is_zero(left) || half_is_zero(right))
-        return sign ? 0x8000u : 0u;
+        return cast(ushort)(sign ? 0x8000u : 0u);
 
     ulong leftSignificand;
     ulong rightSignificand;
