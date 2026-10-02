@@ -1,0 +1,140 @@
+name: DMD upstream gate
+
+on:
+  pull_request:
+    branches:
+      - dmd-upstream
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-upstream.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dmd-upstream-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upstream:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify DMD provenance
+        shell: bash
+        run: |
+          set -euxo pipefail
+          . dmd/SOURCE.lock
+          test "$upstream_repository" = https://github.com/dlang/dmd.git
+          test "$upstream_tag" = v2.113.0
+          test "$upstream_commit" = 74917954b53f7f35b13e61b4438c7253834929ed
+          test "$upstream_compiler_src_dmd_tree" = 609b890e7cfc65474e5fdebd001c580e174cd22b
+          test -x dmd/compiler/src/build.d
+          test -x dmd/compiler/src/bootstrap.sh
+          test ! -e dmd/druntime
+          test ! -e dmd/compiler/test
+
+      - name: Install host toolchain
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc binutils
+          command -v ldmd2
+          command -v nm
+          command -v objdump
+          ldmd2 --version
+
+      - name: Build standalone DMD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          test -x "$dmd_bin"
+          "$dmd_bin" --version
+          printf 'DMD_BIN=%s\n' "$(realpath "$dmd_bin")" >> "$GITHUB_ENV"
+
+      - name: Compile ordinary BetterC smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > /tmp/dmd-upstream-smoke.d <<'EOF'
+          module dmd_upstream_smoke;
+          extern(C) int add(int a, int b) { return a + b; }
+          EOF
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+          test -f "$runtime_import/object.d"
+          "$DMD_BIN" -betterC -c -I"$runtime_import"             /tmp/dmd-upstream-smoke.d -of=/tmp/dmd-upstream-smoke.o
+          test -s /tmp/dmd-upstream-smoke.o
+          file /tmp/dmd-upstream-smoke.o
+
+      - name: Run BetterC initialization regression when present
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test_file=dmd/qualification/betterc_init_semantics.d
+          void_file=dmd/qualification/betterc_void_init.d
+          if test ! -f "$test_file"; then
+            echo "BetterC aggregate regression not present on this candidate."
+            exit 0
+          fi
+          test -f "$void_file"
+          runtime_import=$(dpkg -L libphobos2-ldc-shared-dev | awk 'substr($0, length($0)-8) == "/object.d" { print substr($0, 1, length($0)-9); exit }')
+
+          for optimization in unoptimized optimized; do
+            flags=()
+            if test "$optimization" = optimized; then
+              flags=(-O -inline)
+            fi
+            object="/tmp/betterc-init-$optimization.o"
+            executable="/tmp/betterc-init-$optimization"
+            "$DMD_BIN" -betterC "${flags[@]}" -c -I"$runtime_import"               "$test_file" -of="$object"
+            if nm -u "$object" | awk '{ print $NF }' | grep -Eq '^_memset'; then
+              nm -u "$object"
+              exit 1
+            fi
+            "$DMD_BIN" -betterC "${flags[@]}" -I"$runtime_import"               "$test_file" -of="$executable"
+            "$executable"
+          done
+
+          "$DMD_BIN" -m32 -betterC -c -I"$runtime_import"             "$test_file" -of=/tmp/betterc-init-32.o
+          file /tmp/betterc-init-32.o | grep -F 'ELF 32-bit'
+          if nm -u /tmp/betterc-init-32.o | awk '{ print $NF }' | grep -Eq '^_memset'; then
+            nm -u /tmp/betterc-init-32.o
+            exit 1
+          fi
+
+          "$DMD_BIN" -betterC -c -I"$runtime_import"             "$void_file" -of=/tmp/betterc-void-init.o
+          for function in void_float_case void_double_case void_real_case; do
+            objdump -d --no-show-raw-insn --disassemble="$function"               /tmp/betterc-void-init.o > "/tmp/$function.asm"
+            if grep -Eq ',[^,]*\([^)]*\)[[:space:]]*$' "/tmp/$function.asm"; then
+              cat "/tmp/$function.asm"
+              exit 1
+            fi
+          done
+
+          "$DMD_BIN" -c -I"$runtime_import"             "$test_file" -of=/tmp/normal-d-init.o
+          for symbol in _memsetFloat _memsetDouble _memset80; do
+            nm -u /tmp/normal-d-init.o | awk '{ print $NF }' | grep -Fx "$symbol"
+          done
+
+      - name: Record scope
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: upstream-facing DMD candidate built from the pinned source snapshot.
+          PASS: ordinary BetterC smoke compiled.
+
+          This gate is for standard D compiler behavior only.
+          IDK syntax, compact-number policy, E5M3 semantics, and specialized
+          representations are deliberately outside this workflow.
+          EOF
