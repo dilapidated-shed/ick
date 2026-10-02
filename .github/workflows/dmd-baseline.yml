@@ -111,6 +111,20 @@ jobs:
           test -x "$dmd_bin"
           python3 "$verify"             --compiler "$dmd_bin"             --imports /tmp/dmd-arm32-bootstrap/dmd2/src/druntime/import             --output /tmp/dmd-arm32-qualification
 
+      - name: Qualify AArch64 floating comparisons when present
+        if: steps.source.outputs.loaded == 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          verify=dmd/qualification/aarch64-fcmp/verify.py
+          if test ! -f "$verify"; then
+            echo "AArch64 floating-comparison regression not present on this candidate."
+            exit 0
+          fi
+          dmd_bin=$(find dmd/generated -type f -name dmd -perm -u+x -print -quit)
+          test -x "$dmd_bin"
+          python3 "$verify" --compiler "$dmd_bin" --output /tmp/aarch64-fcmp
+
       - name: Record boundary
         if: steps.source.outputs.loaded == 'true'
         shell: bash
