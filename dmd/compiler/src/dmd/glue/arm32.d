@@ -57,6 +57,19 @@ private bool floating(Type t)
     return t && t.toBasetype().ty == TY.Tfloat32;
 }
 
+private bool vectorFloat4(Type t)
+{
+    if (!t)
+        return false;
+    auto vector = t.toBasetype().isTypeVector();
+    if (!vector)
+        return false;
+    auto array = vector.basetype.toBasetype().isTypeSArray();
+    auto dim = array ? array.dim.isIntegerExp() : null;
+    return dim && dim.getInteger() == 4 &&
+           vector.elementType().ty == TY.Tfloat32;
+}
+
 private bool pairType(Type t)
 {
     if (!t)
@@ -72,6 +85,13 @@ private uint scalarWords(Type t)
     if (pairType(t))
         return 2;
     return 0;
+}
+
+private uint valueWords(Type t)
+{
+    if (vectorFloat4(t))
+        return 4;
+    return scalarWords(t);
 }
 
 private string declarationName(Declaration declaration, Loc loc)
@@ -148,9 +168,9 @@ private struct LeafEmitter
 
     uint temporary(Type type)
     {
-        const words = scalarWords(type);
+        const words = valueWords(type);
         if (!words)
-            reject(location, "A32 temporary requires a supported scalar type");
+            reject(location, "A32 temporary requires a supported scalar or float4 vector type");
         return temporaryWords(words);
     }
 
@@ -174,9 +194,22 @@ private struct LeafEmitter
             reject(loc, "A32 scalar lowering supports int/uint/bool/pointers, float, long/ulong and double");
     }
 
+    void requireValue(Type t, Loc loc)
+    {
+        if (!valueWords(t))
+            reject(loc, "A32 lowering supports the scalar subset plus 16-byte float4 vectors");
+    }
+
     void loadValue(Type type, uint slot, uint reg = 0)
     {
-        if (scalarWords(type) == 2)
+        if (vectorFloat4(type))
+        {
+            if (reg)
+                reject(location, "float4 stack loads use q0, not a core-register selector");
+            code.stackAddress(slot * 4);
+            code.neonLoadF32x4(0, 12);
+        }
+        else if (scalarWords(type) == 2)
             code.loadPair(slot, reg);
         else
             code.load(slot, reg);
@@ -184,7 +217,14 @@ private struct LeafEmitter
 
     void storeValue(Type type, uint slot, uint reg = 0)
     {
-        if (scalarWords(type) == 2)
+        if (vectorFloat4(type))
+        {
+            if (reg)
+                reject(location, "float4 stack stores use q0, not a core-register selector");
+            code.stackAddress(slot * 4);
+            code.neonStoreF32x4(0, 12);
+        }
+        else if (scalarWords(type) == 2)
             code.storePair(slot, reg);
         else
             code.store(slot, reg);
@@ -261,6 +301,16 @@ private struct LeafEmitter
 
     void assign(Expression destination)
     {
+        if (vectorFloat4(destination.type) && !destination.isVarExp())
+        {
+            const saved = temporary(destination.type);
+            storeValue(destination.type, saved);
+            address(destination);
+            loadValue(destination.type, saved);
+            code.neonStoreF32x4(0, 0);
+            return;
+        }
+
         if (auto variable = destination.isVarExp())
         {
             auto declaration = variable.var.isVarDeclaration();
@@ -301,9 +351,9 @@ private struct LeafEmitter
 
     void declare(VarDeclaration variable)
     {
-        requireScalar(variable.type, variable.loc);
+        requireValue(variable.type, variable.loc);
         if (variable.storage_class & (STC.static_ | STC.ref_ | STC.out_ | STC.lazy_))
-            reject(variable.loc, "static and by-reference locals are outside the scalar A32 slice");
+            reject(variable.loc, "static and by-reference locals are outside the A32 value slice");
         homes[variable] = temporary(variable.type);
         auto initializer = variable._init ? variable._init.isExpInitializer() : null;
         if (!initializer)
@@ -612,7 +662,7 @@ private struct LeafEmitter
         scope(exit) --depth;
 
         if (e.type && e.type.toBasetype().ty != TY.Tvoid && e.op != EXP.declaration)
-            requireScalar(e.type, e.loc);
+            requireValue(e.type, e.loc);
 
         if (auto integer = e.isIntegerExp())
         {
@@ -674,6 +724,8 @@ private struct LeafEmitter
                 loadValue(declaration.type, *found);
             else
             {
+                if (vectorFloat4(declaration.type))
+                    reject(e.loc, "A32 float4 globals are not implemented");
                 globalAddress(declaration);
                 if (scalarWords(declaration.type) == 1)
                     code.instruction(0xE5900000); // LDR r0,[r0]
@@ -690,7 +742,7 @@ private struct LeafEmitter
         {
             auto variable = declaration.declaration.isVarDeclaration();
             if (!variable)
-                reject(e.loc, "only scalar local declarations are implemented");
+                reject(e.loc, "only local value declarations are implemented");
             declare(variable);
             return;
         }
@@ -753,12 +805,22 @@ private struct LeafEmitter
         if (e.op == EXP.index || e.op == EXP.star)
         {
             address(e);
-            code.instruction(0xE5900000); // LDR r0,[r0]
+            if (vectorFloat4(e.type))
+                code.neonLoadF32x4(0, 0);
+            else
+                code.instruction(0xE5900000); // LDR r0,[r0]
             return;
         }
         if (e.op == EXP.negate || e.op == EXP.uadd || e.op == EXP.not)
         {
             auto operand = e.isUnaExp().e1;
+            if (vectorFloat4(operand.type))
+            {
+                if (e.op != EXP.uadd)
+                    reject(e.loc, "ARM32 float4 unary operation is not implemented");
+                expression(operand);
+                return;
+            }
             if (pairType(operand.type))
             {
                 if (e.op == EXP.uadd)
@@ -857,6 +919,35 @@ private struct LeafEmitter
             return;
         }
 
+        if (vectorFloat4(binary.e1.type) || vectorFloat4(binary.e2.type))
+        {
+            if (!vectorFloat4(binary.e1.type) || !vectorFloat4(binary.e2.type) ||
+                !vectorFloat4(e.type))
+                reject(e.loc, "ARM32 float4 arithmetic requires matching vector operands and result");
+
+            expression(binary.e1);
+            const savedVector = temporary(binary.e1.type);
+            storeValue(binary.e1.type, savedVector);
+            expression(binary.e2);
+            code.stackAddress(savedVector * 4);
+            code.neonLoadF32x4(1, 12);
+
+            switch (e.op)
+            {
+            case EXP.add:
+                code.neonAddF32x4(0, 1, 0);
+                return;
+            case EXP.min:
+                code.neonSubF32x4(0, 1, 0);
+                return;
+            case EXP.mul:
+                code.neonMulF32x4(0, 1, 0);
+                return;
+            default:
+                reject(e.loc, "ARM32 float4 lowering supports add, subtract and multiply only");
+            }
+        }
+
         const isShift = e.op == EXP.leftShift || e.op == EXP.rightShift ||
                         e.op == EXP.unsignedRightShift;
         if (isShift && scalarWords(binary.e1.type) == 2)
@@ -864,6 +955,7 @@ private struct LeafEmitter
             pairShift(e, binary);
             return;
         }
+
         if (scalarWords(binary.e1.type) == 2 || scalarWords(binary.e2.type) == 2)
         {
             pairBinary(e, binary);
@@ -1180,7 +1272,7 @@ private struct LeafEmitter
         foreach (load; stackParameterLoads)
             code.patchLoadStackOffset(load.at, frame + 8 + load.incomingOffset, load.reg);
 
-        return Arm32Function(name, code.bytes, relocations, dataOffsets);
+        return Arm32Function(name, code.bytes, relocations, dataOffsets, code.usesNeon);
     }
 }
 
