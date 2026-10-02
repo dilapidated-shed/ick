@@ -57,6 +57,23 @@ private bool floating(Type t)
     return t && t.toBasetype().ty == TY.Tfloat32;
 }
 
+private bool pairType(Type t)
+{
+    if (!t)
+        return false;
+    const ty = t.toBasetype().ty;
+    return ty == TY.Tint64 || ty == TY.Tuns64 || ty == TY.Tfloat64;
+}
+
+private uint scalarWords(Type t)
+{
+    if (wordType(t))
+        return 1;
+    if (pairType(t))
+        return 2;
+    return 0;
+}
+
 private string declarationName(Declaration declaration, Loc loc)
 {
     string name = declaration.mangleOverride.length ? declaration.mangleOverride.idup :
@@ -92,6 +109,14 @@ private struct LeafEmitter
     {
         size_t at;
         uint incomingOffset;
+        uint reg;
+    }
+
+    struct ArgumentLocation
+    {
+        uint words;
+        int reg = -1;
+        uint stackWord;
     }
     StackParameterLoad[] stackParameterLoads;
 
@@ -105,11 +130,28 @@ private struct LeafEmitter
     Loc location;
     uint depth;
 
+    uint temporaryWords(uint words)
+    {
+        if (words == 2 && (slots & 1))
+            ++slots;
+        if (!words || slots + words > 126)
+            reject(location, "A32 scalar frame exceeds 504 bytes");
+        const first = slots;
+        slots += words;
+        return first;
+    }
+
     uint temporary()
     {
-        if (slots >= 126)
-            reject(location, "A32 leaf frame exceeds 504 bytes");
-        return slots++;
+        return temporaryWords(1);
+    }
+
+    uint temporary(Type type)
+    {
+        const words = scalarWords(type);
+        if (!words)
+            reject(location, "A32 temporary requires a supported scalar type");
+        return temporaryWords(words);
     }
 
     uint home(VarDeclaration variable)
@@ -123,7 +165,29 @@ private struct LeafEmitter
     void requireWord(Type t, Loc loc)
     {
         if (!wordType(t))
-            reject(loc, "initial A32 lowering supports float, int, uint, bool and pointers");
+            reject(loc, "operation currently requires a one-word scalar");
+    }
+
+    void requireScalar(Type t, Loc loc)
+    {
+        if (!scalarWords(t))
+            reject(loc, "A32 scalar lowering supports int/uint/bool/pointers, float, long/ulong and double");
+    }
+
+    void loadValue(Type type, uint slot, uint reg = 0)
+    {
+        if (scalarWords(type) == 2)
+            code.loadPair(slot, reg);
+        else
+            code.load(slot, reg);
+    }
+
+    void storeValue(Type type, uint slot, uint reg = 0)
+    {
+        if (scalarWords(type) == 2)
+            code.storePair(slot, reg);
+        else
+            code.store(slot, reg);
     }
 
     string globalName(VarDeclaration variable)
