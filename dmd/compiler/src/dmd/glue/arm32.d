@@ -466,6 +466,40 @@ private struct LeafEmitter
         code.adjustStack(outgoing, false);
     }
 
+    void pairShift(Expression e, BinExp binary)
+    {
+        if (scalarWords(binary.e1.type) != 2 || scalarWords(binary.e2.type) != 1)
+            reject(e.loc, "A32 64-bit shift requires a two-word value and one-word count");
+        const valueTy = binary.e1.type.toBasetype().ty;
+        if (valueTy != TY.Tint64 && valueTy != TY.Tuns64)
+            reject(e.loc, "A32 64-bit shifts currently require long/ulong");
+
+        expression(binary.e1);
+        const saved = temporary(binary.e1.type);
+        code.storePair(saved, 0);
+        expression(binary.e2);
+        code.instruction(0xE1A02000); // MOV r2,r0: EABI shift count
+        code.loadPair(saved, 0);
+
+        string helper;
+        switch (e.op)
+        {
+            case EXP.leftShift:
+                helper = "__aeabi_llsl";
+                break;
+            case EXP.unsignedRightShift:
+                helper = "__aeabi_llsr";
+                break;
+            case EXP.rightShift:
+                helper = valueTy == TY.Tuns64 ? "__aeabi_llsr" : "__aeabi_lasr";
+                break;
+            default:
+                reject(e.loc, "unsupported A32 64-bit shift operation");
+        }
+        const at = code.call();
+        relocations ~= Arm32Relocation(cast(uint)at, helper, ARM32_R_CALL);
+    }
+
     void pairBinary(Expression e, BinExp binary)
     {
         requireScalar(binary.e1.type, binary.e1.loc);
@@ -722,13 +756,36 @@ private struct LeafEmitter
             {
                 const sourceTy = cast_.e1.type.toBasetype().ty;
                 const targetTy = cast_.type.toBasetype().ty;
-                const bothIntegerPairs =
-                    (sourceTy == TY.Tint64 || sourceTy == TY.Tuns64) &&
-                    (targetTy == TY.Tint64 || targetTy == TY.Tuns64);
-                if (!bothIntegerPairs && sourceTy != targetTy)
-                    reject(e.loc, "64-bit integer/floating conversions are not implemented");
-                expression(cast_.e1);
-                return;
+                const sourceIntegerWord =
+                    sourceTy == TY.Tint32 || sourceTy == TY.Tuns32 ||
+                    sourceTy == TY.Tbool || sourceTy == TY.Tpointer;
+                const targetIntegerWord =
+                    targetTy == TY.Tint32 || targetTy == TY.Tuns32 ||
+                    targetTy == TY.Tbool || targetTy == TY.Tpointer;
+                const sourceIntegerPair = sourceTy == TY.Tint64 || sourceTy == TY.Tuns64;
+                const targetIntegerPair = targetTy == TY.Tint64 || targetTy == TY.Tuns64;
+
+                if (sourceWords == 1 && targetIntegerPair && sourceIntegerWord)
+                {
+                    expression(cast_.e1);
+                    if (sourceTy == TY.Tint32)
+                        code.instruction(0xE1A01FC0); // ASR r1,r0,#31: sign extend
+                    else
+                        code.instruction(0xE3A01000); // MOV r1,#0: zero extend
+                    return;
+                }
+                if (targetWords == 1 && sourceIntegerPair && targetIntegerWord)
+                {
+                    expression(cast_.e1); // truncate: low word is already r0
+                    return;
+                }
+                if (sourceWords == 2 && targetWords == 2 &&
+                    ((sourceIntegerPair && targetIntegerPair) || sourceTy == targetTy))
+                {
+                    expression(cast_.e1);
+                    return;
+                }
+                reject(e.loc, "conversion is outside the qualified A32 integer-width scalar subset");
             }
             if (floating(cast_.type) != floating(cast_.e1.type))
                 reject(e.loc, "integer/float conversions are not implemented");
@@ -887,6 +944,14 @@ private struct LeafEmitter
             }
         }
 
+        const isShift = e.op == EXP.leftShift || e.op == EXP.rightShift ||
+                        e.op == EXP.unsignedRightShift;
+        if (isShift && scalarWords(binary.e1.type) == 2)
+        {
+            pairShift(e, binary);
+            return;
+        }
+
         if (scalarWords(binary.e1.type) == 2 || scalarWords(binary.e2.type) == 2)
         {
             pairBinary(e, binary);
@@ -947,6 +1012,15 @@ private struct LeafEmitter
             case EXP.and: code.instruction(0xE0000001); break;
             case EXP.or:  code.instruction(0xE1800001); break;
             case EXP.xor: code.instruction(0xE0200001); break;
+            case EXP.leftShift:
+                code.instruction(0xE1A00110); // LSL r0,r0,r1
+                break;
+            case EXP.rightShift:
+                code.instruction(unsigned_ ? 0xE1A00130 : 0xE1A00150); // LSR/ASR
+                break;
+            case EXP.unsignedRightShift:
+                code.instruction(0xE1A00130); // LSR r0,r0,r1
+                break;
 
             case EXP.equal:
             case EXP.notEqual:
