@@ -33,10 +33,11 @@ enum TargetOS : ubyte
     FreeBSD      = 0x10,
     Solaris      = 0x20,
     DragonFlyBSD = 0x40,
+    NetBSD       = 0x80,
 
     // Combination masks
-    all = linux | Windows | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD,
-    Posix = linux | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD,
+    all = linux | Windows | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD | NetBSD,
+    Posix = linux | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD | NetBSD,
 }
 
 // Detect the current TargetOS
@@ -59,6 +60,10 @@ else version(OpenBSD)
 else version(FreeBSD)
 {
     private enum targetOS = TargetOS.FreeBSD;
+}
+else version(NetBSD)
+{
+    private enum targetOS = TargetOS.NetBSD;
 }
 else version(DragonFlyBSD)
 {
@@ -621,7 +626,7 @@ dmd -cov -unittest myprog.d
         Option("m32",
             "generate 32 bit code",
             `$(UNIX Compile a 32 bit executable. This is the default for the 32 bit dmd.)`,
-            cast(TargetOS) (TargetOS.all & ~cast(uint)TargetOS.DragonFlyBSD)  // available on all OS'es except DragonFly, which does not support 32-bit binaries
+            cast(TargetOS) (TargetOS.all & ~cast(uint)(TargetOS.DragonFlyBSD | TargetOS.NetBSD))  // Icky DMD supports DragonFly and NetBSD as 64-bit targets only
         ),
         Option("m32mscoff",
             "generate 32 bit code and write MS-COFF object files (deprecated use `-m32`)",
@@ -788,6 +793,7 @@ dmd -cov -unittest myprog.d
                     $(LI $(I dragonflybsd): DragonFlyBSD)
                     $(LI $(I freebsd): FreeBSD)
                     $(LI $(I linux): Linux)
+                    $(LI $(I netbsd): NetBSD)
                     $(LI $(I openbsd): OpenBSD)
                     $(LI $(I osx): OSX)
                     $(LI $(I solaris): Solaris)
