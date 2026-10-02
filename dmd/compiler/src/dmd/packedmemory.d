@@ -56,6 +56,7 @@ enum PackedMemoryRounding : ubyte
 {
     none,
     float16_per_operation,
+    e5m3_per_operation,
 }
 
 enum PackedMemoryDomain : ubyte
