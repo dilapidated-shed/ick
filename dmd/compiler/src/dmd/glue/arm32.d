@@ -192,7 +192,7 @@ private struct LeafEmitter
 
     string globalName(VarDeclaration variable)
     {
-        requireWord(variable.type, variable.loc);
+        requireScalar(variable.type, variable.loc);
         if (!variable.isDataseg() || variable.isThreadlocal())
             reject(variable.loc, "A32 scalar globals must be non-TLS data-segment variables");
         if (variable.resolvedLinkage() != LINK.c)
@@ -266,13 +266,23 @@ private struct LeafEmitter
                 return;
             }
 
-            requireWord(declaration.type, destination.loc);
-            const saved = temporary();
-            code.store(saved);
+            requireScalar(declaration.type, destination.loc);
+            const saved = temporary(declaration.type);
+            storeValue(declaration.type, saved);
             globalAddress(declaration);
-            code.load(saved, 1);
-            code.instruction(0xE5801000); // STR r1,[r0]
-            code.instruction(0xE1A00001); // MOV r0,r1
+            if (scalarWords(declaration.type) == 1)
+            {
+                code.load(saved, 1);
+                code.instruction(0xE5801000); // STR r1,[r0]
+                code.instruction(0xE1A00001); // MOV r0,r1
+            }
+            else
+            {
+                code.instruction(0xE1A02000); // MOV r2,r0: preserve global address
+                code.loadPair(saved, 0);
+                code.instruction(0xE5820000); // STR r0,[r2]
+                code.instruction(0xE5821004); // STR r1,[r2,#4]
+            }
             return;
         }
         const saved = temporary();
@@ -476,7 +486,14 @@ private struct LeafEmitter
             else
             {
                 globalAddress(declaration);
-                code.instruction(0xE5900000); // LDR r0,[r0]
+                if (scalarWords(declaration.type) == 1)
+                    code.instruction(0xE5900000); // LDR r0,[r0]
+                else
+                {
+                    code.instruction(0xE1A02000); // MOV r2,r0
+                    code.instruction(0xE5920000); // LDR r0,[r2]
+                    code.instruction(0xE5921004); // LDR r1,[r2,#4]
+                }
             }
             return;
         }
@@ -920,8 +937,9 @@ private struct LeafEmitter
 
 private Arm32Global lowerGlobal(VarDeclaration variable)
 {
-    if (!wordType(variable.type))
-        reject(variable.loc, "A32 global data currently supports one-word scalar types only");
+    const words = scalarWords(variable.type);
+    if (!words)
+        reject(variable.loc, "A32 global data currently supports scalar one- and two-word types only");
     if (!variable.isDataseg() || variable.isThreadlocal())
         reject(variable.loc, "A32 global data currently requires non-TLS __gshared/shared storage");
     if (variable.resolvedLinkage() != LINK.c)
@@ -935,11 +953,11 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
     {
         if (variable._init)
             reject(variable.loc, "extern A32 global declaration cannot have an initializer");
-        return Arm32Global(name, 0, false);
+        return Arm32Global(name, 0, words, false);
     }
 
     if (!variable._init)
-        return Arm32Global(name, 0, true);
+        return Arm32Global(name, 0, words, true);
 
     auto initializer = variable._init.isExpInitializer();
     if (!initializer)
@@ -947,22 +965,35 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
 
     auto value = initializer.exp;
     if (auto integer = value.isIntegerExp())
-        return Arm32Global(name, cast(uint)integer.value, true);
+        return Arm32Global(name, cast(ulong)integer.value, words, true);
     if (auto realConstant = value.isRealExp())
     {
-        if (!floating(variable.type))
-            reject(variable.loc, "only binary32 floating global constants are implemented");
-        union Payload
+        if (floating(variable.type))
         {
-            float value;
-            uint bits;
+            union Payload32
+            {
+                float value;
+                uint bits;
+            }
+            Payload32 payload;
+            payload.value = cast(float)realConstant.value;
+            return Arm32Global(name, payload.bits, 1, true);
         }
-        Payload payload;
-        payload.value = cast(float)realConstant.value;
-        return Arm32Global(name, payload.bits, true);
+        if (variable.type.toBasetype().ty == TY.Tfloat64)
+        {
+            union Payload64
+            {
+                double value;
+                ulong bits;
+            }
+            Payload64 payload;
+            payload.value = cast(double)realConstant.value;
+            return Arm32Global(name, payload.bits, 2, true);
+        }
+        reject(variable.loc, "floating global constant is outside the float/double A32 subset");
     }
     if (value.op == EXP.null_)
-        return Arm32Global(name, 0, true);
+        return Arm32Global(name, 0, words, true);
 
     reject(variable.loc, "A32 global initializer is outside the scalar constant subset");
     assert(0);
