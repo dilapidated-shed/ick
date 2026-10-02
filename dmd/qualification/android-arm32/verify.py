@@ -136,6 +136,8 @@ def check_elf(path: Path) -> None:
         "aligned_long": 1,
         "stacked_long": 1,
         "echo_double": 1,
+        "__aeabi_ldivmod": 2,
+        "__aeabi_uldivmod": 2,
     })
     if Counter(call_targets) != expected_calls:
         raise RuntimeError(f"unexpected R_ARM_CALL targets: {Counter(call_targets)}")
@@ -247,6 +249,55 @@ __aeabi_uidivmod:
 .Luidivmod_bad:
     mov r0, #99
     mov r1, #99
+    bx lr
+
+.global __aeabi_ldivmod
+.type __aeabi_ldivmod,%function
+__aeabi_ldivmod:
+    mvn r12, #19
+    cmp r0, r12
+    bne .Lldiv_bad
+    mvn r12, #0
+    cmp r1, r12
+    bne .Lldiv_bad
+    cmp r2, #6
+    bne .Lldiv_bad
+    cmp r3, #0
+    bne .Lldiv_bad
+    mvn r0, #2
+    mvn r1, #0
+    mvn r2, #1
+    mvn r3, #0
+    bx lr
+.Lldiv_bad:
+    mov r0, #99
+    mov r1, #0
+    mov r2, #99
+    mov r3, #0
+    bx lr
+
+.global __aeabi_uldivmod
+.type __aeabi_uldivmod,%function
+__aeabi_uldivmod:
+    cmp r0, #5
+    bne .Luldiv_bad
+    cmp r1, #2
+    bne .Luldiv_bad
+    cmp r2, #3
+    bne .Luldiv_bad
+    cmp r3, #0
+    bne .Luldiv_bad
+    movw r0, #0xaaac
+    movt r0, #0xaaaa
+    mov r1, #0
+    mov r2, #1
+    mov r3, #0
+    bx lr
+.Luldiv_bad:
+    mov r0, #99
+    mov r1, #0
+    mov r2, #99
+    mov r3, #0
     bx lr
 
 .global _start
@@ -633,6 +684,205 @@ _start:
     cmp sp, r11
     bne fail
 
+    mvn r0, #0
+    mov r1, #1
+    mov r2, #2
+    mov r3, #0
+    bl long_add
+    cmp r0, #1
+    bne fail
+    cmp r1, #2
+    bne fail
+
+    mov r0, #1
+    mov r1, #2
+    mov r2, #2
+    mov r3, #0
+    bl long_sub
+    mvn r2, #0
+    cmp r0, r2
+    bne fail
+    cmp r1, #1
+    bne fail
+
+    mov r0, #2
+    mov r1, #1
+    mov r2, #3
+    mov r3, #0
+    bl long_mul
+    cmp r0, #6
+    bne fail
+    cmp r1, #3
+    bne fail
+
+    mvn r0, #19
+    mvn r1, #0
+    mov r2, #6
+    mov r3, #0
+    bl long_div
+    mvn r2, #2
+    cmp r0, r2
+    bne fail
+    mvn r2, #0
+    cmp r1, r2
+    bne fail
+
+    mvn r0, #19
+    mvn r1, #0
+    mov r2, #6
+    mov r3, #0
+    bl long_mod
+    mvn r2, #1
+    cmp r0, r2
+    bne fail
+    mvn r2, #0
+    cmp r1, r2
+    bne fail
+
+    mov r0, #5
+    mov r1, #2
+    mov r2, #3
+    mov r3, #0
+    bl ulong_div
+    movw r2, #0xaaac
+    movt r2, #0xaaaa
+    cmp r0, r2
+    bne fail
+    cmp r1, #0
+    bne fail
+
+    mov r0, #5
+    mov r1, #2
+    mov r2, #3
+    mov r3, #0
+    bl ulong_mod
+    cmp r0, #1
+    bne fail
+    cmp r1, #0
+    bne fail
+
+    mov r0, #0
+    mov r1, #1
+    bl long_neg
+    cmp r0, #0
+    bne fail
+    mvn r2, #0
+    cmp r1, r2
+    bne fail
+
+    mvn r0, #0
+    mvn r1, #0
+    mov r2, #0
+    mov r3, #0
+    bl long_less
+    cmp r0, #1
+    bne fail
+
+    mov r0, #0
+    mov r1, #1
+    mvn r2, #0
+    mov r3, #0
+    bl ulong_greater
+    cmp r0, #1
+    bne fail
+
+    mov r0, #0
+    mov r1, #1
+    bl long_truth
+    cmp r0, #1
+    bne fail
+    mov r0, #0
+    mov r1, #0
+    bl long_truth
+    cmp r0, #0
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x3ff8
+    mov r2, #0
+    movw r3, #0x0000
+    movt r3, #0x4002
+    bl double_add
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0x400e
+    cmp r1, r2
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x3ff8
+    mov r2, #0
+    movw r3, #0x0000
+    movt r3, #0x4002
+    bl double_sub
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0xbfe8
+    cmp r1, r2
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x3ff8
+    mov r2, #0
+    movw r3, #0x0000
+    movt r3, #0x4002
+    bl double_mul
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0x400b
+    cmp r1, r2
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x4000
+    mov r2, #0
+    movw r3, #0x0000
+    movt r3, #0x4010
+    bl double_div
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0x3fe0
+    cmp r1, r2
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x3ff8
+    bl double_neg
+    cmp r0, #0
+    bne fail
+    movw r2, #0x0000
+    movt r2, #0xbff8
+    cmp r1, r2
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x3ff8
+    mov r2, #0
+    movw r3, #0x0000
+    movt r3, #0x4002
+    bl double_less
+    cmp r0, #1
+    bne fail
+
+    mov r0, #0
+    movw r1, #0x0000
+    movt r1, #0x8000
+    bl double_truth
+    cmp r0, #0
+    bne fail
+    cmp sp, r11
+    bne fail
+
     mov r0, #0
     mov r7, #1
     svc #0
@@ -680,7 +930,7 @@ def main() -> None:
     run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
-    print("PASS: A32 base PCS softfp: calls, GOT one/two-word globals, EABI helpers, aligned 64-bit scalar ABI")
+    print("PASS: A32 base PCS softfp: calls, GOT globals, EABI helpers, 64-bit integer/double ABI and arithmetic")
 
 
 if __name__ == "__main__":
