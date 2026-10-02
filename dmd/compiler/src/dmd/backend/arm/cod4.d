@@ -1072,7 +1072,9 @@ void cdcmp(ref CGstate cg, ref CodeBuilder cdb,elem* e,ref regm_t pretregs)
     }
 
     /* See if we should swap operands     */
-    if (e1.Eoper == OPvar && e2.Eoper == OPvar && evalinregister(e2))
+    // The integer paths account for `reverse`; the floating instruction
+    // path does not. Keep FCMP operands in source order.
+    if (!tyfloating(tym) && e1.Eoper == OPvar && e2.Eoper == OPvar && evalinregister(e2))
     {
         e1 = e.E2;
         e2 = e.E1;
