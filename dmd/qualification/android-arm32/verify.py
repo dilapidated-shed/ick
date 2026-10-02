@@ -167,6 +167,164 @@ def check_elf(path: Path) -> None:
         raise RuntimeError("expected AAPCS32/base-PCS ARM attributes not found")
 
 
+def check_neon_elf(path: Path) -> None:
+    data = path.read_bytes()
+    if len(data) < 52 or data[:4] != b"\x7fELF":
+        raise RuntimeError("NEON fixture is not an ELF object")
+    e_type, e_machine = struct.unpack_from("<HH", data, 16)
+    if (e_type, e_machine) != (1, 40):
+        raise RuntimeError("NEON fixture is not ELF32 ARM")
+    flags = struct.unpack_from("<I", data, 36)[0]
+    if flags != 0x05000000:
+        raise RuntimeError(f"NEON fixture escaped base PCS softfp: {flags:#x}")
+
+    shoff = struct.unpack_from("<I", data, 32)[0]
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 46)
+    sections = [
+        struct.unpack_from("<IIIIIIIIII", data, shoff + i * shentsize)
+        for i in range(shnum)
+    ]
+    shstr = sections[shstrndx]
+    shstr_data = data[shstr[4]:shstr[4] + shstr[5]]
+
+    def cstring(blob: bytes, offset: int) -> str:
+        end = blob.find(b"\0", offset)
+        if end < 0:
+            raise RuntimeError("unterminated ELF string")
+        return blob[offset:end].decode("ascii")
+
+    by_name = {}
+    for section in sections:
+        name = cstring(shstr_data, section[0]) if section[0] else ""
+        by_name[name] = section
+
+    if ".text" not in by_name or ".ARM.attributes" not in by_name:
+        raise RuntimeError("NEON fixture lacks required ELF sections")
+    text_section = by_name[".text"]
+    text = data[text_section[4]:text_section[4] + text_section[5]]
+    if len(text) % 4:
+        raise RuntimeError("A32 NEON text is not word aligned")
+    words = struct.unpack("<" + "I" * (len(text) // 4), text)
+
+    load_store_mask = 0xFFF01FFF
+    operation_mask = 0xFFF11FF1
+
+    def has(mask: int, value: int) -> bool:
+        return any((word & mask) == value for word in words)
+
+    required = [
+        (load_store_mask, 0xF4200A8F, "VLD1.32 q"),
+        (load_store_mask, 0xF4000A8F, "VST1.32 q"),
+        (operation_mask, 0xF2000D40, "VADD.F32 q"),
+        (operation_mask, 0xF2200D40, "VSUB.F32 q"),
+        (operation_mask, 0xF3000D50, "VMUL.F32 q"),
+    ]
+    for mask, value, name in required:
+        if not has(mask, value):
+            raise RuntimeError(f"missing ARM32 NEON instruction family: {name}")
+
+    if b"fft_butterfly4\0" not in data:
+        raise RuntimeError("NEON fixture lost fft_butterfly4 symbol")
+
+    neon_tags = bytes([6, 10, 7, 65, 8, 1, 9, 0, 10, 3, 12, 1,
+                       24, 1, 25, 1, 28, 0])
+    if neon_tags not in data:
+        raise RuntimeError("expected ARMv7 VFPv3 + NEONv1 softfp attributes not found")
+
+    rel = by_name.get(".rel.text")
+    if rel is not None and rel[5] != 0:
+        raise RuntimeError("NEON FFT fixture unexpectedly requires text relocations/calls")
+
+
+def neon_harness() -> str:
+    return r"""
+.syntax unified
+.arch armv7-a
+.fpu neon
+.arm
+
+.data
+.p2align 4
+even_real:
+    .space 16
+even_imag:
+    .space 16
+odd_real:
+    .space 16
+odd_imag:
+    .space 16
+
+left_real:
+    .float 10, 20, 30, 40
+left_imag:
+    .float 1, 2, 3, 4
+right_real:
+    .float 1, 2, 3, 4
+right_imag:
+    .float 5, 6, 7, 8
+twiddle_real:
+    .float 1, 0, -1, 0
+twiddle_imag:
+    .float 0, 1, 0, -1
+
+expected:
+    .float 11, 14, 27, 48
+    .float 6, 4, -4, 0
+    .float 9, 26, 33, 32
+    .float -4, 0, 10, 8
+
+.text
+.global _start
+.type _start,%function
+_start:
+    mov r11, sp
+    sub sp, sp, #24
+
+    ldr r0, =even_real
+    ldr r1, =even_imag
+    ldr r2, =odd_real
+    ldr r3, =odd_imag
+
+    ldr r12, =left_real
+    str r12, [sp, #0]
+    ldr r12, =left_imag
+    str r12, [sp, #4]
+    ldr r12, =right_real
+    str r12, [sp, #8]
+    ldr r12, =right_imag
+    str r12, [sp, #12]
+    ldr r12, =twiddle_real
+    str r12, [sp, #16]
+    ldr r12, =twiddle_imag
+    str r12, [sp, #20]
+
+    bl fft_butterfly4
+    add sp, sp, #24
+    cmp sp, r11
+    bne fail
+
+    ldr r0, =even_real
+    ldr r1, =expected
+    mov r2, #16
+check:
+    ldr r3, [r0], #4
+    ldr r4, [r1], #4
+    cmp r3, r4
+    bne fail
+    subs r2, r2, #1
+    bne check
+
+    mov r0, #0
+    mov r7, #1
+    svc #0
+
+fail:
+    mov r0, #1
+    mov r7, #1
+    svc #0
+"""
+
+
 def harness() -> str:
     return r"""
 .syntax unified
@@ -1122,6 +1280,30 @@ def main() -> None:
     ])
     check_elf(obj)
 
+    neon_obj = out / "android-arm32-neon-fft.o"
+    run([
+        str(Path(args.compiler).resolve()),
+        "-target=armv7a-linux-androideabi21",
+        "-betterC", "-c",
+        f"-I{Path(args.imports).resolve()}",
+        str(here / "neon_fft.d"),
+        f"-of={neon_obj}",
+    ])
+    check_neon_elf(neon_obj)
+
+    neon_asm = out / "neon-harness.s"
+    neon_harness_obj = out / "neon-harness.o"
+    neon_exe = out / "a32-neon-fft"
+    neon_asm.write_text(neon_harness())
+    run([
+        args.clang, "--target=armv7a-linux-androideabi21",
+        "-march=armv7-a", "-marm", "-mfpu=neon", "-mfloat-abi=softfp",
+        "-c", str(neon_asm), "-o", str(neon_harness_obj),
+    ])
+    run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
+         str(neon_harness_obj), str(neon_obj), "-o", str(neon_exe)])
+    run([args.qemu, "-cpu", "cortex-a9", str(neon_exe)])
+
     asm = out / "harness.s"
     harness_obj = out / "harness.o"
     exe = out / "a32-smoke"
@@ -1135,6 +1317,7 @@ def main() -> None:
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
     print("PASS: A32 scalar base PCS: calls, PIC globals, 32/64 arithmetic, shifts, casts, softfp float/double")
+    print("PASS: ARMv7 NEON float4 FFT butterfly: vector ELF attributes, Q-register instruction families, and qemu execution")
 
 
 if __name__ == "__main__":
