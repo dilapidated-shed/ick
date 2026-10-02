@@ -32,13 +32,18 @@ private float value_of(uint bits)
 private bool nan_bits(uint bits)
 { return (bits & 0x7fffffffu) > 0x7f800000u; }
 
-static assert(!__traits(compiles, E5M3.init + E5M3.init));
+static assert(!__traits(compiles, UE5M3.init + UE5M3.init));
+static assert(__traits(compiles, E5M3.init + E5M3.init));
+static assert(__traits(compiles, E5M3.init - E5M3.init));
+static assert(!__traits(compiles, E5M3.init * E5M3.init));
+static assert(!__traits(compiles, E5M3.init / E5M3.init));
+static assert(E5M3.sizeof == 2);
 static assert(!__traits(compiles, E4M3.init + E5M2.init));
 static assert(!__traits(compiles, Circle96.init + Circle96.init));
 static assert(!__traits(compiles, rotate(Rotation192.init, Circle96.init)));
 static assert(!__traits(compiles, Circle96.init.payload));
 static assert(!__traits(compiles, Circle96(255)));
-static assert(!__traits(compiles, E5M3.init.payload));
+static assert(!__traits(compiles, UE5M3.init.payload));
 
 void check_encoding(T, uint format)(uint bits)
 {
@@ -115,23 +120,118 @@ void check_midpoints(T, uint format, uint last_code)()
     }
 }
 
+
+void check_signed_e5m3()
+{
+    enum ushort sign = 0x100u;
+    enum ushort positiveInfinity = 0x0f8u;
+    enum ushort negativeInfinity = 0x1f8u;
+    enum ushort canonicalNaN = 0x0fcu;
+
+    // Every nine-bit payload decodes.  Every non-NaN payload round-trips
+    // through binary32 exactly because binary32 is only a conversion surface,
+    // not the arithmetic carrier.
+    foreach (uint code; 0 .. 512)
+    {
+        auto value = E5M3.from_code(cast(ushort)code);
+        assert(value.code() == code);
+        auto decoded = value.to_float();
+        uint exponent = (code >> 3) & 0x1fu;
+        uint fraction = code & 0x7u;
+        if (exponent == 0x1fu && fraction != 0)
+        {
+            assert(nan_bits(bits_of(decoded)));
+            assert(E5M3.from_float(decoded).code() == canonicalNaN);
+        }
+        else
+            assert(E5M3.from_float(decoded).code() == code);
+    }
+
+    assert(E5M3.from_code(0x3ffu).code() == 0x1ffu);
+
+    // Exhaust every signed payload pair for the two native E5M3 operations.
+    // binary32 is only the oracle here: every E5M3 input converts exactly and
+    // its extra precision is far beyond the final three fraction bits.
+    foreach (uint leftCode; 0 .. 512)
+    foreach (uint rightCode; 0 .. 512)
+    {
+        auto left = E5M3.from_code(cast(ushort)leftCode);
+        auto right = E5M3.from_code(cast(ushort)rightCode);
+
+        auto gotAdd = left + right;
+        auto expectedAdd = E5M3.from_float(left.to_float() + right.to_float());
+        if (nan_bits(bits_of(expectedAdd.to_float())))
+            assert(nan_bits(bits_of(gotAdd.to_float())));
+        else
+            assert(gotAdd.code() == expectedAdd.code());
+
+        auto gotSubtract = left - right;
+        auto expectedSubtract = E5M3.from_float(left.to_float() - right.to_float());
+        if (nan_bits(bits_of(expectedSubtract.to_float())))
+            assert(nan_bits(bits_of(gotSubtract.to_float())));
+        else
+            assert(gotSubtract.code() == expectedSubtract.code());
+    }
+
+    // Layout and landmarks: s eeeee mmm, bias 15.
+    assert(bits_of(E5M3.from_code(0x000u).to_float()) == 0x00000000u);
+    assert(bits_of(E5M3.from_code(sign).to_float()) == 0x80000000u);
+    assert(bits_of(E5M3.from_code(0x001u).to_float()) == 0x37000000u); // 2^-17
+    assert(bits_of(E5M3.from_code(0x008u).to_float()) == 0x38800000u); // 2^-14
+    assert(bits_of(E5M3.from_code(0x078u).to_float()) == bits_of(1.0f));
+    assert(bits_of(E5M3.from_code(0x178u).to_float()) == bits_of(-1.0f));
+    assert(bits_of(E5M3.from_code(0x0f7u).to_float()) == bits_of(61440.0f));
+    assert(bits_of(E5M3.from_code(positiveInfinity).to_float()) == 0x7f800000u);
+    assert(bits_of(E5M3.from_code(negativeInfinity).to_float()) == 0xff800000u);
+    assert(nan_bits(bits_of(E5M3.from_code(canonicalNaN).to_float())));
+
+    // Round-to-nearest, ties-to-even at ordinary, underflow and overflow edges.
+    assert(E5M3.from_float(1.0625f).code() == 0x078u);
+    assert(E5M3.from_float(1.1875f).code() == 0x07au);
+    assert(E5M3.from_float(value_of(0x36800000u)).code() == 0x000u); // 2^-18 tie -> +0
+    assert(E5M3.from_float(value_of(0xb6800000u)).code() == sign);   // -2^-18 tie -> -0
+    assert(E5M3.from_float(63487.0f).code() == 0x0f7u);
+    assert(E5M3.from_float(63488.0f).code() == positiveInfinity);
+
+    auto positiveZero = E5M3.from_code(0x000u);
+    auto negativeZero = E5M3.from_code(sign);
+    auto one = E5M3.from_code(0x078u);
+    auto negativeOne = E5M3.from_code(0x178u);
+    auto two = E5M3.from_code(0x080u);
+    auto infinity = E5M3.from_code(positiveInfinity);
+    auto negativeInfinityValue = E5M3.from_code(negativeInfinity);
+
+    // Addition/subtraction stay in E5M3. Exact cancellation is +0.
+    assert((one + one).code() == two.code());
+    assert((one - two).code() == negativeOne.code());
+    assert((one - one).code() == positiveZero.code());
+    assert((negativeZero + negativeZero).code() == negativeZero.code());
+    assert((positiveZero + negativeZero).code() == positiveZero.code());
+
+    // Multiplication/division are the explicit promotion boundary, not E5M3
+    // operators. Addition still has explicit special-value behavior.
+    assert(nan_bits(bits_of((infinity + negativeInfinityValue).to_float())));
+
+    puts("PASS: signed nine-bit E5M3 direct arithmetic and explicit domain rules");
+}
+
 void check_storage()
 {
     foreach (uint code; 0 .. 256)
     {
-        auto value = E5M3.from_code(cast(ubyte)code);
+        auto value = UE5M3.from_code(cast(ubyte)code);
         assert(bits_of(value.to_float()) == oracle_decode(4, code));
-        E5M3 result;
-        assert(E5M3.try_from_float(value.to_float(), result));
+        UE5M3 result;
+        assert(UE5M3.try_from_float(value.to_float(), result));
         assert(result.code() == code);
     }
     uint state = 0x735a2d97u;
     foreach (uint sample; 0 .. 16384)
     {
         state = state * 1664525u + 1013904223u;
-        auto output = E5M3.from_code(73);
+        auto output = UE5M3.from_code(73);
         uint expected = oracle_encode(4, state);
-        bool accepted = E5M3.try_from_float(value_of(state), output);
+        bool accepted = UE5M3.try_from_float(value_of(state), output);
         assert(accepted == (expected != 0x10000u));
         assert(output.code() == (accepted ? expected : 73));
     }
@@ -139,9 +239,9 @@ void check_storage()
                         0x47ffffffu, 0x48000000u, 0xbf800000u, 0x7f800000u,
                         0xff800000u, 0x7fc00000u])
     {
-        auto output = E5M3.from_code(73);
+        auto output = UE5M3.from_code(73);
         uint expected = oracle_encode(4, bits);
-        bool accepted = E5M3.try_from_float(value_of(bits), output);
+        bool accepted = UE5M3.try_from_float(value_of(bits), output);
         assert(accepted == (expected != 0x10000u));
         assert(output.code() == (accepted ? expected : 73));
     }
@@ -197,17 +297,17 @@ void check_packed_operation_pairs(Left, Right)(uint leftFormat, uint rightFormat
 
 void check_packed_memory_surface()
 {
-    static assert(E5M3.sizeof == 1 && E3M2.sizeof == 1 && Float16.sizeof == 2);
-    E5M3[2] adjacent_e5 = [E5M3.from_code(7), E5M3.from_code(9)];
+    static assert(UE5M3.sizeof == 1 && E3M2.sizeof == 1 && Float16.sizeof == 2);
+    UE5M3[2] adjacent_e5 = [UE5M3.from_code(7), UE5M3.from_code(9)];
     E3M2[2] adjacent_e3 = [E3M2.from_code(7), E3M2.from_code(9)];
     assert((&adjacent_e5[1] - &adjacent_e5[0]) == 1);
     assert((&adjacent_e3[1] - &adjacent_e3[0]) == 1);
 
-    E5M3[256] e5;
+    UE5M3[256] e5;
     E3M2[256] e3;
     foreach (uint code; 0 .. 256)
     {
-        e5[code] = E5M3.from_code(cast(ubyte)code);
+        e5[code] = UE5M3.from_code(cast(ubyte)code);
         e3[code] = E3M2.from_code(cast(ubyte)code);
         assert(e3[code].code() == (code & 0x3fu));
 
@@ -218,14 +318,14 @@ void check_packed_memory_surface()
             assert(widened.code() == 0x7c00u);
     }
 
-    // Every E5M3/E5M3 operation pair, including mixed signed-zero, subnormal,
+    // Every UE5M3/UE5M3 operation pair, including mixed signed-zero, subnormal,
     // infinity and NaN cases after the required Float16 operand conversion.
-    check_packed_operation_pairs!(E5M3, E5M3)(4, 4);
-    check_packed_operation_pairs!(E5M3, E3M2)(4, 3);
-    check_packed_operation_pairs!(E3M2, E5M3)(3, 4);
+    check_packed_operation_pairs!(UE5M3, UE5M3)(4, 4);
+    check_packed_operation_pairs!(UE5M3, E3M2)(4, 3);
+    check_packed_operation_pairs!(E3M2, UE5M3)(3, 4);
     check_packed_operation_pairs!(E3M2, E3M2)(3, 3);
 
-    E5M3[1] one_e5 = [E5M3.from_code(120)];
+    UE5M3[1] one_e5 = [UE5M3.from_code(120)];
     E3M2[1] one_e3 = [E3M2.from_code(12)];
     auto one_result = compute_at!(Float16, "*")(
         one_e5[], 0, one_e3[], 0);
@@ -243,23 +343,51 @@ void check_packed_memory_surface()
     assert(exact_alias.code() == oracle_packed_operation(
         4, 4, 0, one_e5[0].code(), one_e5[0].code()));
 
+    // The same positive storage can select signed E5M3 arithmetic explicitly.
+    // Subtraction does not widen to Float16: a negative result remains E5M3.
+    UE5M3[1] signed_left;
+    UE5M3[1] signed_right;
+    assert(UE5M3.try_from_float(1.0f, signed_left[0]));
+    assert(UE5M3.try_from_float(2.0f, signed_right[0]));
+    auto signed_difference = compute_at!(E5M3, "-")(
+        signed_left[], 0, signed_right[], 0);
+    assert(signed_difference.code() == 0x178u); // -1
+
+    // Storing a negative signed result back into positive-only UE5M3 is an
+    // explicit domain failure and preserves the destination.
+    UE5M3[1] signed_destination = [UE5M3.from_code(73)];
+    assert(!try_store_at(signed_destination[], 0, signed_difference));
+    assert(signed_destination[0].code() == 73);
+
+    auto signed_sum = compute_at!(E5M3, "+")(
+        signed_left[], 0, signed_right[], 0);
+    assert(bits_of(signed_sum.to_float()) == bits_of(3.0f));
+    assert(try_store_at(signed_destination[], 0, signed_sum));
+    UE5M3 expected_signed_store;
+    assert(UE5M3.try_from_float(3.0f, expected_signed_store));
+    assert(signed_destination[0].code() == expected_signed_store.code());
+
+    // A function pointer keeps the same direct E5M3 scalar fallback.
+    auto signed_subtract = &compute_at!(E5M3, "-", UE5M3, UE5M3);
+    assert(signed_subtract(signed_left[], 0, signed_right[], 0).code() == 0x178u);
+
     // One coordinate, odd length, nonzero offset, final valid index and the
     // first and very large invalid indices all use the checked store surface.
-    E5M3[5] sentinels = [E5M3.from_code(17), E5M3.from_code(31),
-                         E5M3.from_code(47), E5M3.from_code(63),
-                         E5M3.from_code(79)];
+    UE5M3[5] sentinels = [UE5M3.from_code(17), UE5M3.from_code(31),
+                         UE5M3.from_code(47), UE5M3.from_code(63),
+                         UE5M3.from_code(79)];
     auto odd = sentinels[1 .. 4];
     assert(try_store_at(odd, 2, Float16.from_float(2.0f)));
     assert(!try_store_at(odd, 3, Float16.from_float(2.0f)));
     assert(!try_store_at(odd, size_t.max, Float16.from_float(2.0f)));
     assert(sentinels[0].code() == 17 && sentinels[4].code() == 79);
 
-    E5M3[1] one;
+    UE5M3[1] one;
     assert(try_store_at(one[], 0, Float16.from_float(1.0f)));
-    E5M3[0] empty;
+    UE5M3[0] empty;
     assert(!try_store_at(empty[], 0, Float16.from_float(1.0f)));
 
-    // E5M3's partial encoder preserves the destination on every rejected
+    // UE5M3's partial encoder preserves the destination on every rejected
     // result; E3M2 retains its total saturation and NaN mapping.
     auto saved = one[0].code();
     assert(!try_store_at(one[], 0, Float16.from_float(-1.0f)));
@@ -275,8 +403,8 @@ void check_packed_memory_surface()
 
     // Exact aliasing and overlap remain ordinary sequenced D memory effects;
     // no disjointness is inferred from different slice expressions.
-    E5M3[4] overlap = [E5M3.from_code(1), E5M3.from_code(2),
-                       E5M3.from_code(3), E5M3.from_code(4)];
+    UE5M3[4] overlap = [UE5M3.from_code(1), UE5M3.from_code(2),
+                       UE5M3.from_code(3), UE5M3.from_code(4)];
     auto first = overlap[0 .. 3];
     auto second = overlap[1 .. 4];
     auto before = compute_at!(Float16, "+")(first, 1, second, 1);
@@ -289,42 +417,42 @@ void check_packed_memory_surface()
     assert(overlap[0].code() == 1 && overlap[3].code() == 4);
 
     // A function address remains an ordinary callable D function.
-    auto multiply = &compute_at!(Float16, "*", E5M3, E5M3);
+    auto multiply = &compute_at!(Float16, "*", UE5M3, UE5M3);
     assert(multiply(first, 0, second, 0).code() ==
            oracle_packed_operation(4, 4, 2, overlap[0].code(), overlap[1].code()));
-    auto store = &try_store_at!(E5M3);
-    E5M3[1] address_destination = [E5M3.from_code(81)];
+    auto store = &try_store_at!(UE5M3, Float16);
+    UE5M3[1] address_destination = [UE5M3.from_code(81)];
     assert(store(address_destination[], 0, Float16.from_float(1.0f)));
     assert(address_destination[0].code() == oracle_encode(4, bits_of(1.0f)));
 }
 
 void check_packed_memory()
 {
-    static assert(PackedValue!(E5M3, Float16).sizeof == E5M3.sizeof);
-    static assert(PackedView!(E5M3, Float16, 8, 7).known_alignment == 8);
-    static assert(PackedView!(E5M3, Float16, 8, 7).alias_set == 7);
+    static assert(PackedValue!(UE5M3, Float16).sizeof == UE5M3.sizeof);
+    static assert(PackedView!(UE5M3, Float16, 8, 7).known_alignment == 8);
+    static assert(PackedView!(UE5M3, Float16, 8, 7).alias_set == 7);
 
     align(8) struct ByteBuffer { ubyte[512] data; }
     ByteBuffer buffer;
     foreach (size_t code; 0 .. 256)
         buffer.data[code * 2] = cast(ubyte)code;
     assert((cast(size_t)buffer.data.ptr & 7) == 0);
-    auto view = PackedView!(E5M3, Float16, 8, 7)(
+    auto view = PackedView!(UE5M3, Float16, 8, 7)(
         buffer.data.ptr, buffer.data.length, 2);
     foreach (size_t code; 0 .. 256)
     {
-        PackedValue!(E5M3, Float16) stored;
+        PackedValue!(UE5M3, Float16) stored;
         assert(view.try_load(code, stored));
         assert(stored.stored.code() == code);
         auto widened = stored.decode();
         auto expectedWidened = Float16.from_float(value_of(oracle_decode(4, cast(uint)code)));
         assert(bits_of(widened.to_float()) == bits_of(expectedWidened.to_float()));
 
-        // Some finite E5M3 extremes overflow the existing Float16 semantics.
-        // Narrowing then follows E5M3's existing partial input-domain rule.
+        // Some finite UE5M3 extremes overflow the existing Float16 semantics.
+        // Narrowing then follows UE5M3's existing partial input-domain rule.
         const expectedCode = oracle_encode(4, bits_of(widened.to_float()));
-        E5M3 encoded = E5M3.from_code(91);
-        const accepted = PackedValue!(E5M3, Float16).try_encode(widened, encoded);
+        UE5M3 encoded = UE5M3.from_code(91);
+        const accepted = PackedValue!(UE5M3, Float16).try_encode(widened, encoded);
         assert(accepted == (expectedCode != 0x10000u));
         if (accepted) assert(encoded.code() == expectedCode);
         else assert(encoded.code() == 91);
@@ -333,8 +461,8 @@ void check_packed_memory()
         assert(buffer.data[code * 2] == (accepted ? expectedCode : code));
     }
 
-    // Failed bounds checks and failed E5M3-domain encodes preserve storage.
-    PackedValue!(E5M3, Float16) unchanged = { E5M3.from_code(91) };
+    // Failed bounds checks and failed UE5M3-domain encodes preserve storage.
+    PackedValue!(UE5M3, Float16) unchanged = { UE5M3.from_code(91) };
     assert(!view.try_load(256, unchanged));
     assert(unchanged.stored.code() == 91);
     assert(!view.try_store(256, Float16.from_float(1.0f)));
@@ -346,11 +474,11 @@ void check_packed_memory()
     assert(!view.try_store(0, Float16.from_float(value_of(0x7fc00000u))));
     assert(buffer.data[0] == 0);
     // Ordinary unit-stride access uses the same scalar operation at each index.
-    auto unit = PackedView!(E5M3, Float16, 8, 0)(buffer.data.ptr, buffer.data.length, 1);
+    auto unit = PackedView!(UE5M3, Float16, 8, 0)(buffer.data.ptr, buffer.data.length, 1);
     auto arithmetic = Float16.from_float(2.0f) * Float16.from_float(1.5f);
     assert(unit.try_store(5, arithmetic));
     assert(buffer.data[5] == oracle_encode(4, bits_of(arithmetic.to_float())));
-    PackedValue!(E5M3, Float16) product;
+    PackedValue!(UE5M3, Float16) product;
     assert(unit.try_load(5, product));
     assert(product.stored.code() == buffer.data[5]);
     assert(bits_of(product.decode().to_float()) == oracle_decode(4, buffer.data[5]));
@@ -369,7 +497,7 @@ void check_packed_memory()
            storeFacts.byteStride == 2 && storeFacts.aliasSet == 7);
 
     puts("PASS: packed scalar load, local F16 widening, arithmetic, narrowing and store");
-    puts("PASS: all 256 E5M3 encodings, non-unit stride, bounds, layout and memory facts");
+    puts("PASS: all 256 UE5M3 encodings, non-unit stride, bounds, layout and memory facts");
 }
 
 void check_grid(uint positions)()
@@ -436,6 +564,7 @@ extern(C) int main()
     foreach (uint bits; [0x477fefffu, 0x477ff000u, 0x477ff001u])
         check_encoding!(Float16, 0)(bits);
     check_storage();
+    check_signed_e5m3();
     puts("PASS: all scalar payloads, boundary quantization and arithmetic against the C oracle");
     check_grid!96();
     check_grid!192();
@@ -443,6 +572,6 @@ extern(C) int main()
     check_grid!360();
     check_grid!720();
     puts("PASS: finite-circle laws, canonical codes and the exact Circle96 C oracle");
-    puts("PASS: forbidden E5M3 arithmetic and mixed geometric/scalar categories rejected");
+    puts("PASS: forbidden UE5M3 arithmetic and mixed geometric/scalar categories rejected");
     return 0;
 }
