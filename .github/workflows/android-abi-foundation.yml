@@ -263,18 +263,14 @@ jobs:
 
               neon_source=qualification/android-boundary/ick-armv7-neon-fft.c
               "$ick" "${target_flags[@]}" -std=c11 -O3 -fPIC \
-                -ftree-vectorize -fno-vect-cost-model \
-                -fopt-info-vec-optimized=/tmp/ick-armv7-neon.vec \
                 -S "$neon_source" -o /tmp/ick-armv7-neon.s
               "$ick" "${target_flags[@]}" -std=c11 -O3 -fPIC \
-                -ftree-vectorize -fno-vect-cost-model \
                 -c "$neon_source" -o /tmp/ick-armv7-neon.o
 
-              cat /tmp/ick-armv7-neon.vec
-              grep -Eq 'vectorized using 16 byte vectors' /tmp/ick-armv7-neon.vec
-              grep -Eq 'v(mul|mla|mls)\.f32' /tmp/ick-armv7-neon.s
-              grep -Eq 'vadd\.f32' /tmp/ick-armv7-neon.s
-              grep -Eq 'vsub\.f32' /tmp/ick-armv7-neon.s
+              grep -Eq 'v(mul|mla|mls)\.f32[[:space:]]+q[0-9]+' \
+                /tmp/ick-armv7-neon.s
+              grep -Eq 'vadd\.f32[[:space:]]+q[0-9]+' /tmp/ick-armv7-neon.s
+              grep -Eq 'vsub\.f32[[:space:]]+q[0-9]+' /tmp/ick-armv7-neon.s
 
               "$readelf" -A /tmp/ick-armv7-neon.o | tee /tmp/ick-armv7-neon.attributes
               grep -q 'Tag_Advanced_SIMD_arch: NEONv1' /tmp/ick-armv7-neon.attributes
