@@ -1,7 +1,16 @@
 name: DMD runtime and Phobos
 
 on:
+  push:
+    branches:
+      - ci/idk-full-runtime-syntax
+      - idk
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-runtime.yml'
   pull_request:
+    branches:
+      - idk
     paths:
       - 'dmd/**'
       - '.github/workflows/dmd-runtime.yml'
@@ -19,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - name: Check out exact Icky DMD source
+      - name: Check out exact IDK source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -32,7 +41,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential ldc
 
-      - name: Build Icky DMD
+      - name: Build IDK DMD
         shell: bash
         run: |
           set -euxo pipefail
@@ -42,7 +51,7 @@ jobs:
           test -n "$dmd_bin"
           dmd_bin=$(realpath "$dmd_bin")
           "$dmd_bin" --version
-          printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.icky-dmd-bin"
+          printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.idk-dmd-bin"
 
       - name: Check out matching druntime source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -60,11 +69,11 @@ jobs:
           path: .runtime-phobos
           persist-credentials: false
 
-      - name: Install Icky DMD into reconstructed toolchain
+      - name: Install IDK DMD into reconstructed toolchain
         shell: bash
         run: |
           set -euxo pipefail
-          dmd_bin=$(cat .icky-dmd-bin)
+          dmd_bin=$(cat .idk-dmd-bin)
           mkdir -p .runtime-dmd/generated/linux/release/64
           cp "$dmd_bin" .runtime-dmd/generated/linux/release/64/dmd
           chmod +x .runtime-dmd/generated/linux/release/64/dmd
@@ -89,12 +98,12 @@ jobs:
             DMD_DIR="$GITHUB_WORKSPACE/.runtime-dmd" DMD="$dmd_bin"
           test -f .runtime-phobos/generated/linux/release/64/libphobos2.a
 
-      - name: Compile and run normal D
+      - name: Compile and run ordinary D
         shell: bash
         run: |
           set -euxo pipefail
           dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
-          cat > /tmp/icky_normal_d.d <<'EOF'
+          cat > /tmp/idk_normal_d.d <<'EOF'
           import std.bigint : BigInt;
           import std.stdio : writeln;
 
@@ -118,19 +127,35 @@ jobs:
           "$dmd_bin" -conf= -fPIC \
             -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
             -I"$GITHUB_WORKSPACE/.runtime-phobos" \
-            /tmp/icky_normal_d.d \
+            /tmp/idk_normal_d.d \
             "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
             -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
-            -of=/tmp/icky_normal_d
-          /tmp/icky_normal_d | grep -Fx '123456789012345678901234567891'
+            -of=/tmp/idk_normal_d
+          /tmp/idk_normal_d | grep -Fx '123456789012345678901234567891'
+
+      - name: Compile and run IDK syntax with full runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
+          "$dmd_bin" -conf= -fPIC \
+            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
+            -I"$GITHUB_WORKSPACE/.runtime-phobos" \
+            "$GITHUB_WORKSPACE/dmd/qualification/idk_full_runtime_smoke.d" \
+            "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
+            -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
+            -of=/tmp/idk_full_runtime
+          /tmp/idk_full_runtime | grep -Fx '1000000000000000000000000000000'
 
       - name: Record runtime boundary
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: Icky DMD built matching v2.113 druntime and Phobos.
+          PASS: IDK DMD built matching v2.113 druntime and Phobos.
 
-          PASS: the resulting normal-D toolchain ran std.bigint, GC-managed class allocation, exceptions, and std.stdio.
+          PASS: ordinary D ran std.bigint, GC-managed class allocation,
+          exceptions, and std.stdio.
 
-          This is the normal-D qualification required by translations such as YSH; the earlier BetterC gate remains the smaller compiler-only boundary.
+          PASS: IDK λ/⇒/²/≟/×/− syntax compiled and ran in the same
+          full-runtime toolchain, not only under -betterC.
           EOF
