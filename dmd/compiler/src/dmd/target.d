@@ -61,6 +61,8 @@ Target.OS defaultTargetOS() @safe
         return Target.OS.FreeBSD;
     else version (OpenBSD)
         return Target.OS.OpenBSD;
+    else version (NetBSD)
+        return Target.OS.NetBSD;
     else version (Solaris)
         return Target.OS.Solaris;
     else version (DragonFlyBSD)
@@ -184,13 +186,14 @@ void addPredefinedGlobalIdentifiers(const ref Target tgt)
     {
         if (tgt.os & OS.Posix)
             predef("Posix");
-        if (tgt.os & (OS.linux | OS.FreeBSD | OS.OpenBSD | OS.DragonFlyBSD | OS.Solaris))
+        if (tgt.os & (OS.linux | OS.FreeBSD | OS.OpenBSD | OS.NetBSD | OS.DragonFlyBSD | OS.Solaris))
             predef("ELFv1");
         switch (tgt.os)
         {
             case OS.none:         { predef("FreeStanding"); break; }
             case OS.linux:        { predef("linux");        break; }
             case OS.OpenBSD:      { predef("OpenBSD");      break; }
+            case OS.NetBSD:       { predef("NetBSD");       break; }
             case OS.DragonFlyBSD: { predef("DragonFlyBSD"); break; }
             case OS.Solaris:      { predef("Solaris");      break; }
             case OS.Windows:
@@ -343,10 +346,11 @@ extern (C++) struct Target
         FreeBSD      = 0x10,
         Solaris      = 0x20,
         DragonFlyBSD = 0x40,
+        NetBSD       = 0x80,
 
         // Combination masks
-        all = linux | Windows | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD,
-        Posix = linux | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD,
+        all = linux | Windows | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD | NetBSD,
+        Posix = linux | OSX | OpenBSD | FreeBSD | Solaris | DragonFlyBSD | NetBSD,
     }
 
     extern(D) enum ObjectFormat : ubyte
@@ -472,7 +476,7 @@ extern (C++) struct Target
             classinfosize = 0x98+16; // 168
         }
 
-        if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
+        if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
         {
             realsize = 12;
             realpad = 2;
@@ -495,7 +499,7 @@ extern (C++) struct Target
 
         if (isX86_64 || isAArch64)
         {
-            if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
+            if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
             {
                 realsize = 16;
                 realpad = 6;
@@ -551,7 +555,7 @@ extern (C++) struct Target
             dll_ext = "dll";
             run_noext = false;
         }
-        else if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris | Target.OS.OSX))
+        else if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris | Target.OS.OSX))
         {
             obj_ext = "o";
             lib_ext = "a";
@@ -1525,7 +1529,7 @@ struct TargetC
         shortsize = 2;
         intsize = 4;
         long_longsize = 8;
-        if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
+        if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
             longsize = 4;
         else if (os == Target.OS.OSX)
             longsize = 4;
@@ -1535,7 +1539,7 @@ struct TargetC
             assert(0);
         if (target.isX86_64 || target.isAArch64)
         {
-            if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
+            if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
                 longsize = 8;
             else if (os == Target.OS.OSX)
                 longsize = 8;
@@ -1566,7 +1570,7 @@ struct TargetC
         if (os == Target.OS.Windows)
             bitFieldStyle = BitFieldStyle.MS;
         else if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OSX |
-                       Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
+                       Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
             bitFieldStyle = BitFieldStyle.Gcc_Clang;
         else
             assert(0);
@@ -1627,7 +1631,7 @@ struct TargetCPP
     extern (D) void initialize(ref const Param params, ref const Target target) @safe
     {
         const os = target.os;
-        if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
+        if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
             twoDtorInVtable = true;
         else if (os == Target.OS.OSX)
             twoDtorInVtable = true;
@@ -1643,7 +1647,7 @@ struct TargetCPP
             runtime = Runtime.LLVM;
         else if (os == Target.OS.Windows)
             runtime = Runtime.Microsoft;
-        else if (os & (Target.OS.linux | Target.OS.DragonFlyBSD))
+        else if (os & (Target.OS.linux | Target.OS.NetBSD | Target.OS.DragonFlyBSD))
             runtime = Runtime.GNU;
         else if (os & (Target.OS.OSX | Target.OS.FreeBSD | Target.OS.OpenBSD))
             runtime = Runtime.LLVM;
@@ -1667,7 +1671,7 @@ struct TargetCPP
         import dmd.mangle.cpp : toCppMangleItanium;
         import dmd.mangle.cppwin : toCppMangleMSVC;
 
-        if (target.os & (Target.OS.linux | Target.OS.OSX | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
+        if (target.os & (Target.OS.linux | Target.OS.OSX | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
             return toCppMangleItanium(s);
         if (target.os == Target.OS.Windows)
             return toCppMangleMSVC(s);
@@ -1687,7 +1691,7 @@ struct TargetCPP
         import dmd.mangle.cpp : cppTypeInfoMangleItanium;
         import dmd.mangle.cppwin : cppTypeInfoMangleMSVC;
 
-        if (target.os & (Target.OS.linux | Target.OS.OSX | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
+        if (target.os & (Target.OS.linux | Target.OS.OSX | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
             return cppTypeInfoMangleItanium(cd);
         if (target.os == Target.OS.Windows)
             return cppTypeInfoMangleMSVC(cd);
