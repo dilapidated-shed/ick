@@ -1,6 +1,16 @@
 name: DMD compact representations
 
 on:
+  push:
+    branches:
+      - 'dmd-e5m3-local-arithmetic'
+    paths:
+      - 'dmd/compiler/**'
+      - 'dmd/library/**'
+      - 'dmd/qualification/representations/**'
+      - 'dmd/qualification/packed-memory/**'
+      - 'ick/include/ick/**'
+      - '.github/workflows/dmd-representations.yml'
   pull_request:
     paths:
       - 'dmd/compiler/**'
