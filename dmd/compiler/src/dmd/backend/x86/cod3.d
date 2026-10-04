@@ -2460,7 +2460,7 @@ void outjmptab(block* b)
                 break;
             }
         }
-        if (config.exe & (EX_LINUX64 | EX_FREEBSD64 | EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS64))
+        if (config.exe & (EX_LINUX64 | EX_FREEBSD64 | EX_NETBSD64 | EX_OPENBSD64 | EX_DRAGONFLYBSD64 | EX_SOLARIS64))
         {
             if (config.flags3 & CFG3pic)
             {

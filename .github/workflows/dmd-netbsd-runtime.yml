@@ -1,0 +1,338 @@
+name: DMD NetBSD qualification
+
+on:
+  push:
+    branches:
+      - upstream/netbsd-amd64-v2
+      - upstream/netbsd-amd64-v3
+    paths:
+      - "dmd/**"
+      - ".github/workflows/dmd-netbsd-runtime.yml"
+  pull_request:
+    branches:
+      - dmd-upstream
+    paths:
+      - "dmd/**"
+      - ".github/workflows/dmd-netbsd-runtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dmd-netbsd-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  normal-d-object:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact ICK source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install bootstrap dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc
+
+      - name: Build ICK DMD
+        id: compiler
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -n "$dmd_bin"
+          dmd_bin=$(realpath "$dmd_bin")
+          "$dmd_bin" --version
+          printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.icky-dmd-bin"
+          mkdir -p "$GITHUB_WORKSPACE/.netbsd-evidence"
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > "$GITHUB_WORKSPACE/.netbsd-evidence/compiler.sha"
+
+      - name: Check out matching druntime interfaces
+        id: runtime_sources
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dlang/dmd
+          ref: 74917954b53f7f35b13e61b4438c7253834929ed
+          path: .runtime-dmd
+          persist-credentials: false
+
+      - name: Check out matching Phobos
+        id: phobos_sources
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dlang/phobos
+          ref: 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          path: .runtime-phobos
+          persist-credentials: false
+
+      - name: Qualify NetBSD amd64 BetterC object
+        id: betterc
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          runtime_import="$GITHUB_WORKSPACE/.runtime-dmd/druntime/src"
+          test -f "$runtime_import/object.d"
+
+          "$dmd_bin" \
+            -conf= \
+            -betterC \
+            -c \
+            -target=x86_64-unknown-netbsd \
+            -I"$runtime_import" \
+            dmd/qualification/netbsd_amd64_betterc.d \
+            -of=/tmp/netbsd_amd64_betterc.o
+
+          test -s /tmp/netbsd_amd64_betterc.o
+          readelf -h /tmp/netbsd_amd64_betterc.o | tee /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'Class:[[:space:]]+ELF64' /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'OS/ABI:[[:space:]]+UNIX - System V' /tmp/netbsd_amd64_betterc.elf
+          grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' /tmp/netbsd_amd64_betterc.elf
+
+      - name: Compile NetBSD normal-D object
+        id: normal_d
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          runtime_import="$GITHUB_WORKSPACE/.runtime-dmd/druntime/src"
+          phobos="$GITHUB_WORKSPACE/.runtime-phobos"
+          object="$GITHUB_WORKSPACE/dmd/qualification/.build/netbsd_amd64_normal_d.o"
+          mkdir -p "$(dirname "$object")"
+
+          "$dmd_bin" \
+            -conf= \
+            -c \
+            -fPIC \
+            -target=x86_64-unknown-netbsd \
+            -I"$runtime_import" \
+            -I"$phobos" \
+            dmd/qualification/netbsd_amd64_normal_d.d \
+            -of="$object"
+
+          test -s "$object"
+          readelf -h "$object" | tee /tmp/netbsd-normal-d.elf
+          grep -Eq 'Class:[[:space:]]+ELF64' /tmp/netbsd-normal-d.elf
+          grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' \
+            /tmp/netbsd-normal-d.elf
+
+          nm -u "$object" | tee /tmp/netbsd-normal-d.undefined
+          grep -Eq '(_d_|_D)' /tmp/netbsd-normal-d.undefined
+
+      - name: Prove this is not BetterC
+        id: negative_betterc
+        if: ${{ always() && steps.compiler.outcome == 'success' && steps.runtime_sources.outcome == 'success' && steps.phobos_sources.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          runtime_import="$GITHUB_WORKSPACE/.runtime-dmd/druntime/src"
+          phobos="$GITHUB_WORKSPACE/.runtime-phobos"
+
+          if "$dmd_bin" \
+              -conf= \
+              -betterC \
+              -c \
+              -target=x86_64-unknown-netbsd \
+              -I"$runtime_import" \
+              -I"$phobos" \
+              dmd/qualification/netbsd_amd64_normal_d.d \
+              -of=/tmp/should-not-build.o \
+              > /tmp/betterc.stdout \
+              2> /tmp/betterc.stderr
+          then
+            echo "normal-D probe unexpectedly compiled under -betterC" >&2
+            exit 1
+          fi
+
+          test ! -s /tmp/should-not-build.o
+          test -s /tmp/betterc.stderr
+          grep -Eq 'cannot use .*throw.* statements with .*betterC' /tmp/betterc.stderr
+
+      - name: Verify pins and prepare the single-file local overlay
+        id: overlay
+        if: ${{ success() && steps.normal_d.outcome == 'success' && steps.negative_betterc.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C .runtime-dmd rev-parse HEAD)" = 74917954b53f7f35b13e61b4438c7253834929ed
+          test "$(git -C .runtime-phobos rev-parse HEAD)" = 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          grep -Fx 'dmd_upstream_commit=74917954b53f7f35b13e61b4438c7253834929ed' dmd/RUNTIME.lock
+          grep -Fx 'phobos_upstream_commit=7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95' dmd/RUNTIME.lock
+          elf=druntime/src/core/internal/backtrace/elf.d
+          overlay="$GITHUB_WORKSPACE/dmd/qualification/netbsd-runtime/elf.d.patch"
+          printf '%s  %s\n' c711274a980946e7b84c65e36f9a19eb61e5670f805e656f01dc35804f8222b6 ".runtime-dmd/$elf" | sha256sum -c -
+          printf '%s  %s\n' 0a5dd253a22eee26e3d6f4f665d191b1626217c54a57287ec685d439b0c31adc "$overlay" | sha256sum -c -
+          cp -a .runtime-dmd .runtime-unpatched
+          cp -a .runtime-dmd .runtime-mutant
+          git -C .runtime-dmd apply --check "$overlay"
+          git -C .runtime-dmd apply "$overlay"
+          test "$(git -C .runtime-dmd diff --name-only)" = "$elf"
+          printf '%s  %s\n' ebaf13a699cdf0a05396eec6cfe314309c60740a77d21b323ea253d8f4d98c06 ".runtime-dmd/$elf" | sha256sum -c -
+          git -C .runtime-dmd diff --check
+          git -C .runtime-dmd diff > .netbsd-evidence/elf-overlay.diff
+          sha256sum "$overlay" ".runtime-dmd/$elf" > .netbsd-evidence/overlay.sha256
+          git -C .runtime-mutant apply "$overlay"
+          sed -i 's/else version (NetBSD)/else version (NetBSDSelectorDisabled)/' ".runtime-mutant/$elf"
+          test "$(git -C .runtime-mutant diff --name-only)" = "$elf"
+          grep -Fx 'else version (NetBSDSelectorDisabled)' ".runtime-mutant/$elf"
+          git -C .runtime-mutant diff > .netbsd-evidence/selector-mutant.diff
+
+      - name: Require unpatched pinned druntime to fail at Image
+        id: unpatched
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          target_dflags="-conf= -Isrc -Iimport -w -de -preview=dip1000 -preview=fieldwise -preview=dtorfields -m64 -fPIC -O -release -inline -target=x86_64-unknown-netbsd"
+          if make -C .runtime-unpatched/druntime \
+              OS=netbsd MODEL=64 BUILD=release SHARED=0 \
+              DMD="$dmd_bin" DFLAGS="$target_dflags" \
+              OBJS="../generated/netbsd/release/64/errno_c.o" lib \
+              > .netbsd-evidence/unpatched.log 2>&1
+          then
+            echo 'unpatched druntime unexpectedly built' >&2
+            exit 1
+          fi
+          cat .netbsd-evidence/unpatched.log
+          first_error=$(grep -m1 'Error:' .netbsd-evidence/unpatched.log)
+          test "$first_error" = 'src/core/internal/backtrace/dwarf.d(166): Error: undefined identifier `Image`'
+
+      - name: Require the disabled NetBSD selector to fail at Image
+        id: mutant
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          target_dflags="-conf= -Isrc -Iimport -w -de -preview=dip1000 -preview=fieldwise -preview=dtorfields -m64 -fPIC -O -release -inline -target=x86_64-unknown-netbsd"
+          if make -C .runtime-mutant/druntime \
+              OS=netbsd MODEL=64 BUILD=release SHARED=0 \
+              DMD="$dmd_bin" DFLAGS="$target_dflags" \
+              OBJS="../generated/netbsd/release/64/errno_c.o" lib \
+              > .netbsd-evidence/selector-mutant.log 2>&1
+          then
+            echo 'disabled NetBSD selector unexpectedly built' >&2
+            exit 1
+          fi
+          cat .netbsd-evidence/selector-mutant.log
+          first_error=$(grep -m1 'Error:' .netbsd-evidence/selector-mutant.log)
+          test "$first_error" = 'src/core/internal/backtrace/dwarf.d(166): Error: undefined identifier `Image`'
+
+      - name: Compile the real NetBSD backtrace selector fixture
+        id: selector
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          "$dmd_bin" -conf= -c -i -fPIC -target=x86_64-unknown-netbsd \
+            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/src" \
+            dmd/qualification/netbsd_runtime_selector.d \
+            -of=.netbsd-evidence/selector.o \
+            > .netbsd-evidence/selector.log 2>&1 || { cat .netbsd-evidence/selector.log; exit 1; }
+
+      - name: Build patched NetBSD druntime body without host-CC shims
+        id: runtime_body
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(cat .icky-dmd-bin)
+          target_dflags="-conf= -Isrc -Iimport -w -de -preview=dip1000 -preview=fieldwise -preview=dtorfields -m64 -fPIC -O -release -inline -target=x86_64-unknown-netbsd"
+          # Stop on the first post-Image failure. No platform or backend repair.
+          make -C .runtime-dmd/druntime \
+            OS=netbsd MODEL=64 BUILD=release SHARED=0 \
+            DMD="$dmd_bin" DFLAGS="$target_dflags" \
+            OBJS="../generated/netbsd/release/64/errno_c.o" lib \
+            > .netbsd-evidence/patched-runtime.log 2>&1 || { cat .netbsd-evidence/patched-runtime.log; exit 1; }
+
+      - name: Inspect every NetBSD runtime archive member
+        id: archive_members
+        shell: bash
+        run: |
+          set -euxo pipefail
+          archive=.runtime-dmd/generated/netbsd/release/64/libdruntime.a
+          test -s "$archive"
+          ar t "$archive" > .netbsd-evidence/archive.members
+          test -s .netbsd-evidence/archive.members
+          grep -Fx 'errno_c.o' .netbsd-evidence/archive.members
+          ! grep -Fx 'threadasm.o' .netbsd-evidence/archive.members
+          # The upstream D module etc.valgrind.valgrind contributes valgrind.o;
+          # OBJS above includes only ImportC errno.c, never valgrind.c or ASM.
+          # BFD walks every archive occurrence, including repeated names.
+          # readelf cannot parse this outer archive; never hide that limitation.
+          if readelf -h "$archive" > .netbsd-evidence/archive-headers.elf 2> .netbsd-evidence/archive-readelf.stderr; then
+            printf 'outer_archive_readelf\tPASS\n' > .netbsd-evidence/archive-reader.tsv
+          else
+            printf 'outer_archive_readelf\tFAIL\n' > .netbsd-evidence/archive-reader.tsv
+          fi
+          objdump -f "$archive" > .netbsd-evidence/archive-object-formats.txt
+          members=$(wc -l < .netbsd-evidence/archive.members)
+          test "$members" -gt 0
+          test "$(grep -c 'file format ' .netbsd-evidence/archive-object-formats.txt)" -eq "$members"
+          test "$(grep -c 'file format elf64-x86-64$' .netbsd-evidence/archive-object-formats.txt)" -eq "$members"
+          test "$(grep -c '^architecture: i386:x86-64,' .netbsd-evidence/archive-object-formats.txt)" -eq "$members"
+          sha256sum "$archive" > .netbsd-evidence/archive.sha256
+
+      - name: Record boundary
+        if: ${{ always() }}
+        env:
+          BETTERC: ${{ steps.betterc.outcome }}
+          NORMAL_D: ${{ steps.normal_d.outcome }}
+          NEGATIVE_BETTERC: ${{ steps.negative_betterc.outcome }}
+          UNPATCHED: ${{ steps.unpatched.outcome }}
+          MUTANT: ${{ steps.mutant.outcome }}
+          SELECTOR: ${{ steps.selector.outcome }}
+          RUNTIME_BODY: ${{ steps.runtime_body.outcome }}
+          ARCHIVE_MEMBERS: ${{ steps.archive_members.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .netbsd-evidence
+          report() {
+            case "$2" in
+              success) status=PASS ;;
+              failure) status=FAIL ;;
+              cancelled) status=CANCELLED ;;
+              *) status=NOT_RUN ;;
+            esac
+            printf '%s\t%s\n' "$1" "$status"
+          }
+          {
+            printf 'compiler_sha\t%s\n' "$(git rev-parse HEAD)"
+            printf 'druntime_sha\t74917954b53f7f35b13e61b4438c7253834929ed\n'
+            printf 'phobos_interfaces_sha\t7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95\n'
+            report betterc_object "$BETTERC"
+            report normal_d_object "$NORMAL_D"
+            report negative_betterc "$NEGATIVE_BETTERC"
+            report unpatched_Image_rejection "$UNPATCHED"
+            report selector_mutant_Image_rejection "$MUTANT"
+            report patched_selector "$SELECTOR"
+            report runtime_body "$RUNTIME_BODY"
+            report all_archive_members_ELF64_x86_64 "$ARCHIVE_MEMBERS"
+            printf 'native_execution\tNOT_RUN\n'
+            printf 'complete_druntime\tNOT_RUN\nPhobos_link\tNOT_RUN\nnative_ABI\tNOT_RUN\n'
+          } | tee .netbsd-evidence/results.tsv
+          cat .netbsd-evidence/results.tsv >> "$GITHUB_STEP_SUMMARY"
+          if test -f .netbsd-evidence/archive-reader.tsv; then
+            cat .netbsd-evidence/archive-reader.tsv >> "$GITHUB_STEP_SUMMARY"
+          fi
+          printf '\nLocal elf.d overlay; upstream has no NetBSD Image selector. Runtime-body PASS covers D sources and ImportC errno.c only. Target threadasm/Valgrind shims, complete runtime, Phobos linking and native execution remain unqualified.\n' >> "$GITHUB_STEP_SUMMARY"
+          cp /tmp/betterc.stdout /tmp/betterc.stderr .netbsd-evidence/ 2>/dev/null || true
+          cp /tmp/netbsd_amd64_betterc.elf /tmp/netbsd-normal-d.elf /tmp/netbsd-normal-d.undefined .netbsd-evidence/ 2>/dev/null || true
+
+      - name: Preserve independent NetBSD evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: netbsd-runtime-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .netbsd-evidence/
+          include-hidden-files: true
+          if-no-files-found: error

@@ -383,7 +383,7 @@ void setDefaultLibraries(const ref Target target, ref const(char)[] defaultlibna
         {
             defaultlibname = target.isX86_64 ? "phobos64" : "phobos32mscoff";
         }
-        else if (target.os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
+        else if (target.os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.NetBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
         {
             defaultlibname = "libphobos2.a";
         }
@@ -1176,6 +1176,7 @@ bool parseCommandLine(const ref Strings arguments, const size_t argc, out Param 
                 case "windows":      target.os = Target.OS.Windows;      break;
                 case "osx":          target.os = Target.OS.OSX;          break;
                 case "openbsd":      target.os = Target.OS.OpenBSD;      break;
+                case "netbsd":       target.os = Target.OS.NetBSD;       break;
                 case "freebsd":      target.os = Target.OS.FreeBSD;      break;
                 case "solaris":      target.os = Target.OS.Solaris;      break;
                 case "dragonflybsd": target.os = Target.OS.DragonFlyBSD; break;

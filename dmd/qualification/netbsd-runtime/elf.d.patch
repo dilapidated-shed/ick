@@ -1,0 +1,18 @@
+# Local overlay for dlang/dmd@74917954b53f7f35b13e61b4438c7253834929ed.
+# Upstream druntime lacks this NetBSD selector (also checked against master).
+# Only this file changes; Image and its LinuxOrBSD body remain upstream code.
+diff --git a/druntime/src/core/internal/backtrace/elf.d b/druntime/src/core/internal/backtrace/elf.d
+--- a/druntime/src/core/internal/backtrace/elf.d
++++ b/druntime/src/core/internal/backtrace/elf.d
+@@ -30,6 +30,11 @@ else version (OpenBSD)
+     import core.sys.openbsd.sys.elf : SHF_COMPRESSED, ET_DYN;
+     version = LinuxOrBSD;
+ }
++else version (NetBSD)
++{
++    import core.sys.netbsd.sys.elf : SHF_COMPRESSED, ET_DYN;
++    version = LinuxOrBSD;
++}
+ else version (Solaris)
+ {
+     import core.sys.solaris.sys.elf : SHF_COMPRESSED, ET_DYN;

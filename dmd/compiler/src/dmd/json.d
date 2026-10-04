@@ -864,6 +864,11 @@ public:
                 item("openbsd");
                 item("bsd");
             }
+            else if (target.os == Target.OS.NetBSD)
+            {
+                item("netbsd");
+                item("bsd");
+            }
             else if (target.os == Target.OS.Solaris)
             {
                 item("solaris");

@@ -1,0 +1,22 @@
+# Normal-D runtime qualification for the Mars/Icky-DMD line
+dmd_upstream_repository=https://github.com/dlang/dmd.git
+dmd_upstream_tag=v2.113.0
+dmd_upstream_commit=74917954b53f7f35b13e61b4438c7253834929ed
+phobos_upstream_repository=https://github.com/dlang/phobos.git
+phobos_upstream_tag=v2.113.0
+phobos_upstream_commit=7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+source_policy='runtime and standard-library sources are reconstructed from these exact upstream commits during qualification; they are not duplicated into the owned compiler snapshot'
+qualification='build Icky DMD; build matching druntime and Phobos with it; compile and run a normal D program using std.bigint, GC-managed class allocation, exceptions, and std.stdio'
+# NetBSD qualification is separate from the Linux full-runtime qualification.
+netbsd_compiler_base=4eafdf1bb529abeb238523aef967cfd2c9719861
+netbsd_v2_provenance=6920a4e8e6d93a7a006025aade6de08b6d1689c2
+netbsd_v3_provenance=0fa7008f1b79ffead61a38f7aceab8eef9eaddfd
+netbsd_overlay=dmd/qualification/netbsd-runtime/elf.d.patch
+netbsd_overlay_target=druntime/src/core/internal/backtrace/elf.d
+netbsd_overlay_original_sha256=c711274a980946e7b84c65e36f9a19eb61e5670f805e656f01dc35804f8222b6
+netbsd_overlay_sha256=0a5dd253a22eee26e3d6f4f665d191b1626217c54a57287ec685d439b0c31adc
+netbsd_overlay_result_sha256=ebaf13a699cdf0a05396eec6cfe314309c60740a77d21b323ea253d8f4d98c06
+netbsd_overlay_policy='local correction absent from pinned and current upstream druntime; only import SHF_COMPRESSED and ET_DYN from core.sys.netbsd.sys.elf and select the existing LinuxOrBSD Image body'
+netbsd_runtime_body='D sources plus target ImportC errno.c; threadasm and Valgrind C shims omitted; never evidence of complete druntime, Phobos link, or native ABI execution'
+netbsd_stop_policy='stop at first post-Image compiler/runtime failure; no host-C shims, version drift, backend changes, or broader platform work'
+netbsd_native_execution=NOT_RUN
