@@ -101,8 +101,19 @@ extern(C) int main()
 
     E5M3 direct = E5M3.from_code(0x5a);
     if (!packed_e5_add_runtime(left[], 3, left[], 4, direct)) return 1;
-    if (!packed_e5_subtract_runtime(left[], 4, left[], 3, direct)) return 2;
-    if (!packed_e5_multiply_narrow_runtime(left[], 3, left[], 4, direct)) return 3;
+
+    // These tiny operands put subtraction and multiplication below the
+    // positive E5M3 domain. Rejection must preserve the destination.
+    direct = E5M3.from_code(0x5a);
+    if (packed_e5_subtract_runtime(left[], 4, left[], 3, direct)) return 2;
+    if (direct.code() != 0x5a) return 6;
+    if (packed_e5_multiply_narrow_runtime(left[], 3, left[], 4, direct)) return 3;
+    if (direct.code() != 0x5a) return 7;
+
+    // Use ordinary in-range payloads for the successful arithmetic receipt.
+    E5M3[2] in_range_operands = [E5M3.from_code(0x78), E5M3.from_code(0x80)];
+    if (!packed_e5_subtract_runtime(in_range_operands[], 1, in_range_operands[], 0, direct)) return 8;
+    if (!packed_e5_multiply_narrow_runtime(in_range_operands[], 0, in_range_operands[], 1, direct)) return 9;
 
     E5M3[8] destination;
     if (!packed_store_runtime(destination[], 3, product)) return 4;
