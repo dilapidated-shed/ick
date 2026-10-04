@@ -73,6 +73,11 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          . dmd/RUNTIME.lock
+          test "$dmd_upstream_commit" = 74917954b53f7f35b13e61b4438c7253834929ed
+          test "$phobos_upstream_commit" = 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          test "$(git -C .runtime-dmd rev-parse HEAD)" = "$dmd_upstream_commit"
+          test "$(git -C .runtime-phobos rev-parse HEAD)" = "$phobos_upstream_commit"
           dmd_bin=$(cat .idk-dmd-bin)
           mkdir -p .runtime-dmd/generated/linux/release/64
           cp "$dmd_bin" .runtime-dmd/generated/linux/release/64/dmd
@@ -131,7 +136,10 @@ jobs:
             "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
             -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
             -of=/tmp/idk_normal_d
-          /tmp/idk_normal_d | grep -Fx '123456789012345678901234567891'
+          /tmp/idk_normal_d > /tmp/idk_normal_d.actual
+          printf '%s\n' '123456789012345678901234567891' > /tmp/idk_normal_d.expected
+          cmp /tmp/idk_normal_d.expected /tmp/idk_normal_d.actual
+          cat /tmp/idk_normal_d.actual
 
       - name: Compile and run IDK syntax with full runtime
         shell: bash
@@ -145,11 +153,18 @@ jobs:
             "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
             -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
             -of=/tmp/idk_full_runtime
-          /tmp/idk_full_runtime | grep -Fx '1000000000000000000000000000000'
+          /tmp/idk_full_runtime > /tmp/idk_full_runtime.actual
+          printf '%s\n' '1000000000000000000000000000000' > /tmp/idk_full_runtime.expected
+          cmp /tmp/idk_full_runtime.expected /tmp/idk_full_runtime.actual
+          cat /tmp/idk_full_runtime.actual
 
       - name: Record runtime boundary
         shell: bash
         run: |
+          set -euo pipefail
+          printf 'IDK candidate: %s\n' "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          sha256sum "$(cat .idk-dmd-bin)" >> "$GITHUB_STEP_SUMMARY"
+          cat dmd/RUNTIME.lock >> "$GITHUB_STEP_SUMMARY"
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           PASS: IDK DMD built matching v2.113 druntime and Phobos.
 
