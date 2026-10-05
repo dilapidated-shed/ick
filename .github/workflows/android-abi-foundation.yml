@@ -274,6 +274,10 @@ jobs:
               "$ick" "${target_flags[@]}" -std=c11 -O3 -fPIC \
                 -c "$neon_source" -o /tmp/ick-armv7-neon.o
 
+              echo '--- ICK ARMv7 NEON FFT assembly ---'
+              cat /tmp/ick-armv7-neon.s
+              echo '--- end ICK ARMv7 NEON FFT assembly ---'
+
               grep -Eq 'v(mul|mla|mls)\.f32[[:space:]]+q[0-9]+' \
                 /tmp/ick-armv7-neon.s
               grep -Eq 'vadd\.f32[[:space:]]+q[0-9]+' /tmp/ick-armv7-neon.s
