@@ -269,9 +269,13 @@ jobs:
               fi
 
               neon_source=qualification/android-boundary/ick-armv7-neon-fft.c
-              "$ick" "${target_flags[@]}" -std=c11 -O3 -fPIC \
+              # ARMv7 NEON binary32 arithmetic flushes subnormals rather than
+              # preserving the strict scalar IEEE behavior. Opt only this explicit
+              # SIMD qualification kernel into that numerical contract.
+              neon_fp_flags=(-funsafe-math-optimizations)
+              "$ick" "${target_flags[@]}" "${neon_fp_flags[@]}" -std=c11 -O3 -fPIC \
                 -S "$neon_source" -o /tmp/ick-armv7-neon.s
-              "$ick" "${target_flags[@]}" -std=c11 -O3 -fPIC \
+              "$ick" "${target_flags[@]}" "${neon_fp_flags[@]}" -std=c11 -O3 -fPIC \
                 -c "$neon_source" -o /tmp/ick-armv7-neon.o
 
               echo '--- ICK ARMv7 NEON FFT assembly ---'
