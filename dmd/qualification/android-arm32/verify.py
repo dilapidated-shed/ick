@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import struct
 import subprocess
 from collections import Counter
@@ -550,7 +551,7 @@ _start:
     mov r0, #7
     mov r1, #5
     bl add_int
-    mov r10, r0
+    mov r10, #1
     cmp r0, #12
     bne fail
     mov r10, #30
@@ -1356,6 +1357,45 @@ def main() -> None:
     run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
          str(harness_obj), str(obj), "-o", str(exe)])
     run([args.qemu, str(exe)])
+
+    # Mutate a separate copy of the fixture so the assembly harness must reject
+    # a compiler-produced zero result from add_int at its first result check.
+    smoke_source = here / "smoke.d"
+    mutant_source = out / "smoke-add-int-zero-mutant.d"
+    mutant_obj = out / "android-arm32-a32-add-int-zero-mutant.o"
+    mutant_exe = out / "a32-smoke-add-int-zero-mutant"
+    shutil.copyfile(smoke_source, mutant_source)
+    original = mutant_source.read_text()
+    mutation = "extern(C) int add_int(int a, int b)\n{\n    return a + b;\n}\n"
+    if original.count(mutation) != 1:
+        raise RuntimeError("could not isolate the first add_int result in smoke.d")
+    mutant_source.write_text(original.replace(
+        mutation,
+        "extern(C) int add_int(int a, int b)\n{\n    return 0;\n}\n",
+        1,
+    ))
+
+    run([
+        str(Path(args.compiler).resolve()),
+        "-target=armv7a-linux-androideabi21",
+        "-betterC", "-c",
+        f"-I{Path(args.imports).resolve()}",
+        str(mutant_source),
+        f"-of={mutant_obj}",
+    ])
+    check_elf(mutant_obj)
+    run([args.linker, "-m", "armelf_linux_eabi", "-e", "_start",
+         str(harness_obj), str(mutant_obj), "-o", str(mutant_exe)])
+    mutant_command = [args.qemu, str(mutant_exe)]
+    print("+", " ".join(mutant_command))
+    mutant = subprocess.run(mutant_command, check=False, timeout=60)
+    if mutant.returncode != 1:
+        raise RuntimeError(
+            "add_int-zero mutant must fail at stage 1; "
+            f"got process status {mutant.returncode}"
+        )
+
+    print("PASS: scalar A32 harness rejects the add_int-zero mutant at failure stage 1")
     print("PASS: A32 scalar base PCS: calls, PIC globals, 32/64 arithmetic, shifts, casts, softfp float/double")
     print("PASS: ARMv7 NEON float4 FFT butterfly: vector ELF attributes, Q-register instruction families, and qemu execution")
 
