@@ -1,4 +1,9 @@
 # Normal-D runtime qualification for the Mars/Icky-DMD line
+# IDK receipt contract; no conservative syntax/representation files are imported.
+compiler_line=idk
+idk_base_source_head=297112cc526cddbba098716d1617681852b8c4c9
+historical_runtime_slice=d782f734ca4e8cfd4f8a77e4a02780133904e6b9
+f02a_receipt_contract_head=4e1663183a1abc7d6182b305160a3ea6f98247fe
 dmd_upstream_repository=https://github.com/dlang/dmd.git
 dmd_upstream_tag=v2.113.0
 dmd_upstream_commit=74917954b53f7f35b13e61b4438c7253834929ed

@@ -1,9 +1,10 @@
-name: DMD runtime and Phobos
+name: IDK runtime and Phobos
 
 on:
   push:
     branches:
       - ci/idk-full-runtime-syntax
+      - moon/f02b-idk-runtime-receipts
       - idk
     paths:
       - 'dmd/**'
@@ -20,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: dmd-runtime-${{ github.event.pull_request.number || github.ref }}
+  group: idk-runtime-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -29,10 +30,56 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out exact IDK source
+        id: compiler_source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+
+      # These run blocks use the existing GitHub Actions Bash interface.
+      - name: Verify IDK and locked runtime provenance before external checkouts
+        id: provenance
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          idk_base=297112cc526cddbba098716d1617681852b8c4c9
+          git merge-base --is-ancestor "$idk_base" HEAD
+          git diff --exit-code "$idk_base" HEAD -- dmd/compiler
+          expect() {
+            test "$(grep -c "^$2=" "$1")" -eq 1
+            grep -Fx "$2=$3" "$1"
+          }
+          expect dmd/SOURCE.lock upstream_repository https://github.com/dlang/dmd.git
+          expect dmd/SOURCE.lock upstream_tag v2.113.0
+          expect dmd/SOURCE.lock upstream_commit 74917954b53f7f35b13e61b4438c7253834929ed
+          expect dmd/SOURCE.lock upstream_compiler_src_dmd_tree 609b890e7cfc65474e5fdebd001c580e174cd22b
+          expect dmd/RUNTIME.lock compiler_line idk
+          expect dmd/RUNTIME.lock idk_base_source_head "$idk_base"
+          expect dmd/RUNTIME.lock historical_runtime_slice d782f734ca4e8cfd4f8a77e4a02780133904e6b9
+          expect dmd/RUNTIME.lock f02a_receipt_contract_head 4e1663183a1abc7d6182b305160a3ea6f98247fe
+          expect dmd/RUNTIME.lock dmd_upstream_repository https://github.com/dlang/dmd.git
+          expect dmd/RUNTIME.lock dmd_upstream_tag v2.113.0
+          expect dmd/RUNTIME.lock dmd_upstream_commit 74917954b53f7f35b13e61b4438c7253834929ed
+          expect dmd/RUNTIME.lock phobos_upstream_repository https://github.com/dlang/phobos.git
+          expect dmd/RUNTIME.lock phobos_upstream_tag v2.113.0
+          expect dmd/RUNTIME.lock phobos_upstream_commit 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          fixture=dmd/qualification/idk_full_runtime_smoke.d
+          test -f dmd/qualification/idk_ordinary_runtime_smoke.d
+          for token in 'λ' '→' '⇒' '²' '≟' '×' '−'; do
+            grep -F "$token" "$fixture" >/dev/null
+          done
+          mkdir -p .runtime-evidence
+          sha256sum dmd/SOURCE.lock dmd/RUNTIME.lock \
+            dmd/compiler/src/dmd/lexer.d dmd/compiler/src/dmd/parse.d \
+            dmd/qualification/idk_ordinary_runtime_smoke.d "$fixture" \
+            > .runtime-evidence/inputs.sha256
+          awk -F= '$1 == "dmd_upstream_commit" { print "dmd_commit=" $2 }
+                    $1 == "phobos_upstream_commit" { print "phobos_commit=" $2 }' \
+            dmd/RUNTIME.lock >> "$GITHUB_OUTPUT"
 
       - name: Install bootstrap dependencies
         shell: bash
@@ -41,121 +88,318 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential ldc
 
-      - name: Build IDK DMD
+      - name: Build owned IDK
+        id: compiler_build
         shell: bash
         run: |
           set -euxo pipefail
           cd dmd/compiler/src
           ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
-          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
-          test -n "$dmd_bin"
-          dmd_bin=$(realpath "$dmd_bin")
+          dmd_bin="$GITHUB_WORKSPACE/dmd/generated/linux/release/64/dmd"
+          test -x "$dmd_bin"
           "$dmd_bin" --version
           printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.idk-dmd-bin"
 
       - name: Check out matching druntime source
+        id: druntime_source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: dlang/dmd
-          ref: 74917954b53f7f35b13e61b4438c7253834929ed
+          ref: ${{ steps.provenance.outputs.dmd_commit }}
           path: .runtime-dmd
           persist-credentials: false
 
       - name: Check out matching Phobos source
+        id: phobos_source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: dlang/phobos
-          ref: 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          ref: ${{ steps.provenance.outputs.phobos_commit }}
           path: .runtime-phobos
           persist-credentials: false
 
-      - name: Install IDK DMD into reconstructed toolchain
+      - name: Verify pinned external checkout commits
+        id: runtime_checkout_verify
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C .runtime-dmd rev-parse HEAD)" = 74917954b53f7f35b13e61b4438c7253834929ed
+          test "$(git -C .runtime-phobos rev-parse HEAD)" = 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          test -f .runtime-dmd/druntime/src/object.d
+          test -d .runtime-phobos/std
+
+      - name: Check out the conservative F02a source for the negative control
+        id: conservative_source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dilapidated-shed/ick
+          ref: 4e1663183a1abc7d6182b305160a3ea6f98247fe
+          path: .conservative-dmd
+          persist-credentials: false
+
+      - name: Build the conservative compiler for the negative control
+        id: conservative_build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C .conservative-dmd rev-parse HEAD)" = 4e1663183a1abc7d6182b305160a3ea6f98247fe
+          cd .conservative-dmd/dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          cp "$GITHUB_WORKSPACE/.conservative-dmd/dmd/generated/linux/release/64/dmd" \
+            "$GITHUB_WORKSPACE/.runtime-evidence/conservative-dmd"
+          "$GITHUB_WORKSPACE/.runtime-evidence/conservative-dmd" --version
+
+      - name: Install owned IDK into reconstructed toolchain
         shell: bash
         run: |
           set -euxo pipefail
           dmd_bin=$(cat .idk-dmd-bin)
           mkdir -p .runtime-dmd/generated/linux/release/64
           cp "$dmd_bin" .runtime-dmd/generated/linux/release/64/dmd
-          chmod +x .runtime-dmd/generated/linux/release/64/dmd
+          cmp "$dmd_bin" .runtime-dmd/generated/linux/release/64/dmd
 
-      - name: Build matching druntime
+      - name: Build matching druntime with IDK
+        id: druntime_build
         shell: bash
         run: |
           set -euxo pipefail
-          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
           make -C .runtime-dmd/druntime -j"$(nproc)" \
-            MODEL=64 OS=linux BUILD=release SHARED=0 DMD="$dmd_bin"
+            MODEL=64 OS=linux BUILD=release SHARED=0 \
+            DMD="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
           test -f .runtime-dmd/generated/linux/release/64/libdruntime.a
           test -f .runtime-dmd/druntime/import/object.d
 
-      - name: Build matching Phobos
+      - name: Build matching Phobos with IDK
+        id: phobos_build
         shell: bash
         run: |
           set -euxo pipefail
-          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
           make -C .runtime-phobos -j"$(nproc)" \
             MODEL=64 OS=linux BUILD=release SHARED=0 USE_IMPORTC=1 \
-            DMD_DIR="$GITHUB_WORKSPACE/.runtime-dmd" DMD="$dmd_bin"
+            DMD_DIR="$GITHUB_WORKSPACE/.runtime-dmd" \
+            DMD="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
           test -f .runtime-phobos/generated/linux/release/64/libphobos2.a
 
-      - name: Compile and run ordinary D
+      - name: Compile ordinary D with IDK
+        id: ordinary_d_compile
         shell: bash
         run: |
           set -euxo pipefail
-          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
-          cat > /tmp/idk_normal_d.d <<'EOF'
-          import std.bigint : BigInt;
-          import std.stdio : writeln;
-
-          class Box {
-              BigInt value;
-              this(BigInt value) { this.value = value; }
-          }
-
-          int main() {
-              auto box = new Box(BigInt("123456789012345678901234567890"));
-              try {
-                  throw new Exception("normal-d");
-              } catch (Exception error) {
-                  if (error.msg != "normal-d") return 2;
-              }
-              box.value += 1;
-              writeln(box.value);
-              return box.value == BigInt("123456789012345678901234567891") ? 0 : 3;
-          }
-          EOF
-          "$dmd_bin" -conf= -fPIC \
+          "$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd" -conf= -fPIC \
             -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
             -I"$GITHUB_WORKSPACE/.runtime-phobos" \
-            /tmp/idk_normal_d.d \
+            dmd/qualification/idk_ordinary_runtime_smoke.d \
             "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
             -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
-            -of=/tmp/idk_normal_d
-          /tmp/idk_normal_d | grep -Fx '123456789012345678901234567891'
+            -of="$GITHUB_WORKSPACE/.runtime-evidence/ordinary-d"
 
-      - name: Compile and run IDK syntax with full runtime
+      - name: Execute ordinary D with IDK
+        id: ordinary_d_run
         shell: bash
         run: |
           set -euxo pipefail
-          dmd_bin="$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd"
-          "$dmd_bin" -conf= -fPIC \
-            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
-            -I"$GITHUB_WORKSPACE/.runtime-phobos" \
-            "$GITHUB_WORKSPACE/dmd/qualification/idk_full_runtime_smoke.d" \
-            "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
-            -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
-            -of=/tmp/idk_full_runtime
-          /tmp/idk_full_runtime | grep -Fx '1000000000000000000000000000000'
+          .runtime-evidence/ordinary-d > .runtime-evidence/ordinary-d.stdout
+          grep -Fx '123456789012345678901234567891' .runtime-evidence/ordinary-d.stdout
 
-      - name: Record runtime boundary
+      - name: Compile divergent IDK syntax
+        id: divergent_syntax_compile
         shell: bash
         run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: IDK DMD built matching v2.113 druntime and Phobos.
+          set -euxo pipefail
+          "$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd" -conf= -fPIC \
+            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
+            -I"$GITHUB_WORKSPACE/.runtime-phobos" \
+            dmd/qualification/idk_full_runtime_smoke.d \
+            "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
+            -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
+            -of="$GITHUB_WORKSPACE/.runtime-evidence/divergent-syntax"
 
-          PASS: ordinary D ran std.bigint, GC-managed class allocation,
-          exceptions, and std.stdio.
+      - name: Execute divergent IDK syntax
+        id: divergent_syntax_run
+        shell: bash
+        run: |
+          set -euxo pipefail
+          .runtime-evidence/divergent-syntax > .runtime-evidence/divergent-syntax.stdout
+          grep -Fx '1000000000000000000000000000000' .runtime-evidence/divergent-syntax.stdout
 
-          PASS: IDK λ/⇒/²/≟/×/− syntax compiled and ran in the same
-          full-runtime toolchain, not only under -betterC.
-          EOF
+      - name: Compile a Unicode multiplication mutant
+        id: mutant_compile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(grep -Fc '3 × 4 ≟ 12' dmd/qualification/idk_full_runtime_smoke.d)" -eq 1
+          sed 's/3 × 4 ≟ 12/3 − 4 ≟ 12/' dmd/qualification/idk_full_runtime_smoke.d \
+            > .runtime-evidence/idk_unicode_mutant.d
+          test "$(grep -Fc '3 − 4 ≟ 12' .runtime-evidence/idk_unicode_mutant.d)" -eq 1
+          test "$(sha256sum dmd/qualification/idk_full_runtime_smoke.d | cut -d' ' -f1)" != \
+            "$(sha256sum .runtime-evidence/idk_unicode_mutant.d | cut -d' ' -f1)"
+          "$GITHUB_WORKSPACE/.runtime-dmd/generated/linux/release/64/dmd" -conf= -fPIC \
+            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
+            -I"$GITHUB_WORKSPACE/.runtime-phobos" \
+            .runtime-evidence/idk_unicode_mutant.d \
+            "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
+            -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
+            -of="$GITHUB_WORKSPACE/.runtime-evidence/unicode-mutant"
+
+      - name: Require the Unicode mutant to exit at failure stage three
+        id: mutant_run
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          .runtime-evidence/unicode-mutant > .runtime-evidence/unicode-mutant.stdout || status=$?
+          printf '%s\n' "$status" > .runtime-evidence/unicode-mutant.exit
+          test "$status" -eq 3
+          grep -Fx '1000000000000000000000000000000' .runtime-evidence/unicode-mutant.stdout
+
+      - name: Qualify the conservative compiler with the ordinary-D fixture
+        id: conservative_ordinary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          .runtime-evidence/conservative-dmd -conf= -fPIC \
+            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
+            -I"$GITHUB_WORKSPACE/.runtime-phobos" \
+            dmd/qualification/idk_ordinary_runtime_smoke.d \
+            "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
+            -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
+            -of="$GITHUB_WORKSPACE/.runtime-evidence/conservative-ordinary-d"
+          .runtime-evidence/conservative-ordinary-d > .runtime-evidence/conservative-ordinary-d.stdout
+          grep -Fx '123456789012345678901234567891' .runtime-evidence/conservative-ordinary-d.stdout
+
+      - name: Require conservative DMD to reject the unchanged IDK fixture
+        id: conservative_rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          .runtime-evidence/conservative-dmd -conf= -c \
+            -I"$GITHUB_WORKSPACE/.runtime-dmd/druntime/import" \
+            -I"$GITHUB_WORKSPACE/.runtime-phobos" \
+            dmd/qualification/idk_full_runtime_smoke.d \
+            -of="$GITHUB_WORKSPACE/.runtime-evidence/conservative-idk.o" \
+            > .runtime-evidence/conservative-idk.log 2>&1 || status=$?
+          printf '%s\n' "$status" > .runtime-evidence/conservative-idk.exit
+          test "$status" -gt 0
+          test "$status" -lt 126
+          test ! -f .runtime-evidence/conservative-idk.o
+          grep -F 'Error: character 0x2192 is not a valid token' .runtime-evidence/conservative-idk.log
+
+      - name: Record separate IDK runtime receipts
+        if: ${{ always() }}
+        id: receipt
+        env:
+          SOURCE_CHECKOUT: ${{ steps.compiler_source.outcome }}
+          PROVENANCE: ${{ steps.provenance.outcome }}
+          OWNED_COMPILER: ${{ steps.compiler_build.outcome }}
+          DRUNTIME_CHECKOUT: ${{ steps.druntime_source.outcome }}
+          PHOBOS_CHECKOUT: ${{ steps.phobos_source.outcome }}
+          RUNTIME_CHECKOUT_VERIFY: ${{ steps.runtime_checkout_verify.outcome }}
+          DRUNTIME_BUILD: ${{ steps.druntime_build.outcome }}
+          PHOBOS_BUILD: ${{ steps.phobos_build.outcome }}
+          ORDINARY_D_COMPILE: ${{ steps.ordinary_d_compile.outcome }}
+          ORDINARY_D_EXECUTION: ${{ steps.ordinary_d_run.outcome }}
+          DIVERGENT_COMPILE: ${{ steps.divergent_syntax_compile.outcome }}
+          DIVERGENT_EXECUTION: ${{ steps.divergent_syntax_run.outcome }}
+          MUTANT_COMPILE: ${{ steps.mutant_compile.outcome }}
+          MUTANT_EXECUTION: ${{ steps.mutant_run.outcome }}
+          CONSERVATIVE_SOURCE: ${{ steps.conservative_source.outcome }}
+          CONSERVATIVE_BUILD: ${{ steps.conservative_build.outcome }}
+          CONSERVATIVE_ORDINARY: ${{ steps.conservative_ordinary.outcome }}
+          CONSERVATIVE_REJECTION: ${{ steps.conservative_rejection.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .runtime-evidence
+          report() {
+            case "$2" in
+              success) value=PASS ;;
+              failure) value=FAIL ;;
+              cancelled) value=CANCELLED ;;
+              *) value=NOT_RUN ;;
+            esac
+            printf '%s\t%s\n' "$1" "$value"
+          }
+          file_sha256() {
+            if test -f "$1"; then sha256sum "$1" | cut -d' ' -f1; else printf 'NOT_RUN'; fi
+          }
+          lock_value() {
+            if test -f dmd/RUNTIME.lock; then
+              awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; found=1; exit }
+                                   END { if (!found) print "UNKNOWN" }' dmd/RUNTIME.lock
+            else
+              printf 'UNKNOWN'
+            fi
+          }
+          compiler_head=$(git rev-parse HEAD 2>/dev/null || printf 'NOT_RUN')
+          common_fields() {
+            printf 'receipt_schema_version\t1\n'
+            printf 'compiler_line\tidk\n'
+            printf 'compiler_source_head\t%s\n' "$compiler_head"
+            printf 'reconciled_f01_head\tNOT_APPLICABLE\n'
+            printf 'source_lock_sha256\t%s\n' "$(file_sha256 dmd/SOURCE.lock)"
+            printf 'runtime_lock_sha256\t%s\n' "$(file_sha256 dmd/RUNTIME.lock)"
+            printf 'fixture_path\t%s\n' "$1"
+            printf 'fixture_sha256\t%s\n' "$(file_sha256 "$1")"
+            for key in dmd_upstream_repository dmd_upstream_tag dmd_upstream_commit \
+                       phobos_upstream_repository phobos_upstream_tag phobos_upstream_commit; do
+              printf '%s\t%s\n' "$key" "$(lock_value "$key")"
+            done
+            report source_checkout_status "$SOURCE_CHECKOUT"
+            report provenance_validation_status "$PROVENANCE"
+            report owned_compiler_build_status "$OWNED_COMPILER"
+            report druntime_source_checkout_status "$DRUNTIME_CHECKOUT"
+            report phobos_source_checkout_status "$PHOBOS_CHECKOUT"
+            report runtime_checkout_verification_status "$RUNTIME_CHECKOUT_VERIFY"
+            report druntime_build_status "$DRUNTIME_BUILD"
+            report phobos_build_status "$PHOBOS_BUILD"
+            report ordinary_d_compile_status "$ORDINARY_D_COMPILE"
+            report ordinary_d_execution_status "$ORDINARY_D_EXECUTION"
+            printf 'idk_source_head\t%s\n' "$compiler_head"
+            printf 'idk_base_source_head\t%s\n' "$(lock_value idk_base_source_head)"
+            printf 'historical_runtime_slice\t%s\n' "$(lock_value historical_runtime_slice)"
+            printf 'f02a_receipt_contract_head\t%s\n' "$(lock_value f02a_receipt_contract_head)"
+            printf 'lexer_path\tdmd/compiler/src/dmd/lexer.d\n'
+            printf 'lexer_sha256\t%s\n' "$(file_sha256 dmd/compiler/src/dmd/lexer.d)"
+            printf 'parser_path\tdmd/compiler/src/dmd/parse.d\n'
+            printf 'parser_sha256\t%s\n' "$(file_sha256 dmd/compiler/src/dmd/parse.d)"
+            printf 'owned_compiler_sha256\t%s\n' "$(file_sha256 dmd/generated/linux/release/64/dmd)"
+            printf 'druntime_archive_sha256\t%s\n' "$(file_sha256 .runtime-dmd/generated/linux/release/64/libdruntime.a)"
+            printf 'phobos_archive_sha256\t%s\n' "$(file_sha256 .runtime-phobos/generated/linux/release/64/libphobos2.a)"
+            printf 'execution_target\tlinux-x86_64\n'
+          }
+          {
+            common_fields dmd/qualification/idk_ordinary_runtime_smoke.d
+            printf 'receipt_kind\tordinary-d\n'
+          } > .runtime-evidence/ordinary-d-receipt.tsv
+          {
+            common_fields dmd/qualification/idk_full_runtime_smoke.d
+            printf 'receipt_kind\tdivergent-idk-syntax\n'
+            printf 'unicode_codepoints\tU+03BB U+2192 U+21D2 U+00B2 U+225F U+00D7 U+2212\n'
+            report divergent_syntax_compile_status "$DIVERGENT_COMPILE"
+            report divergent_syntax_execution_status "$DIVERGENT_EXECUTION"
+            printf 'unicode_mutation\tU+00D7 multiplication -> U+2212 minus in 3 x 4 == 12\n'
+            printf 'unicode_mutant_fixture_sha256\t%s\n' "$(file_sha256 .runtime-evidence/idk_unicode_mutant.d)"
+            printf 'unicode_mutant_expected_exit\t3\n'
+            printf 'unicode_mutant_actual_exit\t%s\n' "$(cat .runtime-evidence/unicode-mutant.exit 2>/dev/null || printf 'NOT_RUN')"
+            report unicode_mutant_compile_status "$MUTANT_COMPILE"
+            report unicode_mutant_execution_status "$MUTANT_EXECUTION"
+            printf 'conservative_control_source_head\t%s\n' "$(lock_value f02a_receipt_contract_head)"
+            printf 'conservative_control_compiler_sha256\t%s\n' "$(file_sha256 .runtime-evidence/conservative-dmd)"
+            report conservative_control_source_checkout_status "$CONSERVATIVE_SOURCE"
+            report conservative_control_build_status "$CONSERVATIVE_BUILD"
+            report conservative_control_ordinary_d_status "$CONSERVATIVE_ORDINARY"
+            report conservative_idk_rejection_status "$CONSERVATIVE_REJECTION"
+            printf 'conservative_idk_compile_exit\t%s\n' "$(cat .runtime-evidence/conservative-idk.exit 2>/dev/null || printf 'NOT_RUN')"
+          } > .runtime-evidence/divergent-syntax-receipt.tsv
+          cat .runtime-evidence/ordinary-d-receipt.tsv .runtime-evidence/divergent-syntax-receipt.tsv \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve IDK runtime receipts and control evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: idk-full-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .runtime-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
