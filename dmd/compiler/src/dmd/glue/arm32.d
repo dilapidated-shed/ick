@@ -1,5 +1,5 @@
 /**
- * Typed DMD AST -> ARMv7-A A32 BetterC code.
+ * Typed DMD AST -> ARMv7-A A32 code.
  *
  * This is the first A32 lowering slice. It uses DMD's parser and semantic
  * passes, follows AAPCS32 base PCS for one-word scalar arguments, and emits
@@ -11,6 +11,7 @@ module dmd.glue.arm32;
 
 import dmd.astenums : TY, STC, LINK, VarArg, FileType;
 import dmd.arraytypes : Dsymbols;
+import dmd.common.outbuffer : OutBuffer;
 import dmd.typesem : toBasetype;
 import dmd.backend.arm32;
 import dmd.declaration;
@@ -22,7 +23,10 @@ import dmd.expression;
 import dmd.func;
 import dmd.init;
 import dmd.location;
+import dmd.mangle : mangleToBuffer;
 import dmd.mtype;
+import dmd.globals : global;
+import dmd.root.string : toDString;
 import dmd.statement;
 import dmd.tokens : EXP;
 import std.file : write, exists, remove, mkdirRecurse, rename;
@@ -41,6 +45,45 @@ private class UnsupportedArm32 : Exception
 private void reject(Loc loc, string message)
 {
     throw new UnsupportedArm32(loc, message);
+}
+
+private void word(ref ubyte[] bytes, uint value)
+{
+    foreach (i; 0 .. 4)
+        bytes ~= cast(ubyte)(value >> (i * 8));
+}
+
+private Arm32Global scalarGlobal(string name, ulong value, uint words, bool defined)
+{
+    assert(words == 1 || words == 2);
+    ubyte[] data;
+    if (defined)
+    {
+        word(data, cast(uint)value);
+        if (words == 2)
+            word(data, cast(uint)(value >> 32));
+    }
+    return Arm32Global(name, data, defined ? words * 4 : 0, words == 2 ? 8U : 4U, defined);
+}
+
+private string moduleInfoSymbol(Module module_)
+{
+    OutBuffer mangledModule;
+    mangleToBuffer(module_, mangledModule);
+    return "_D" ~ mangledModule[].idup ~ "12__ModuleInfoZ";
+}
+
+private Arm32Global standaloneModuleInfo(Module module_)
+{
+    enum MIstandalone = 0x4;
+    enum MIname = 0x1000;
+
+    ubyte[] data;
+    word(data, MIstandalone | MIname);
+    word(data, 0); // druntime assigns _index after discovery through minfo
+    data ~= cast(const(ubyte)[])module_.toPrettyChars().toDString;
+    data ~= 0;
+    return Arm32Global(moduleInfoSymbol(module_), data, cast(uint)data.length, 4, true);
 }
 
 private bool wordType(Type t)
@@ -1316,11 +1359,11 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
     {
         if (variable._init)
             reject(variable.loc, "extern A32 global declaration cannot have an initializer");
-        return Arm32Global(name, 0, words, false);
+        return scalarGlobal(name, 0, words, false);
     }
 
     if (!variable._init)
-        return Arm32Global(name, 0, words, true);
+        return scalarGlobal(name, 0, words, true);
 
     auto initializer = variable._init.isExpInitializer();
     if (!initializer)
@@ -1328,7 +1371,7 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
 
     auto value = initializer.exp;
     if (auto integer = value.isIntegerExp())
-        return Arm32Global(name, cast(ulong)integer.value, words, true);
+        return scalarGlobal(name, cast(ulong)integer.value, words, true);
     if (auto realConstant = value.isRealExp())
     {
         if (floating(variable.type))
@@ -1340,7 +1383,7 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
             }
             Payload32 payload;
             payload.value = cast(float)realConstant.value;
-            return Arm32Global(name, payload.bits, 1, true);
+            return scalarGlobal(name, payload.bits, 1, true);
         }
         if (variable.type.toBasetype().ty == TY.Tfloat64)
         {
@@ -1351,12 +1394,12 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
             }
             Payload64 payload;
             payload.value = cast(double)realConstant.value;
-            return Arm32Global(name, payload.bits, 2, true);
+            return scalarGlobal(name, payload.bits, 2, true);
         }
         reject(variable.loc, "floating global constant is outside the float/double A32 subset");
     }
     if (value.op == EXP.null_)
-        return Arm32Global(name, 0, words, true);
+        return scalarGlobal(name, 0, words, true);
 
     reject(variable.loc, "A32 global initializer is outside the scalar constant subset");
     assert(0);
@@ -1376,7 +1419,19 @@ void generateArm32Objects(Module[] modules)
 
             Arm32Function[] functions;
             Arm32Global[] globals;
+            string[] moduleInfos;
             bool[string] names;
+
+            // A plain ordinary-D module has a standalone ModuleInfo record.
+            // Module constructors, imports that require initialization, and
+            // similar features need further ModuleInfo fields and stay
+            // rejected until the A32 data-relocation representation can
+            // describe those exact records.
+            if (!global.params.betterC && module_.needmoduleinfo)
+                reject(module_.loc,
+                       "ordinary-D ModuleInfo with lifecycle/import data is not implemented by the A32 object writer");
+            if (!global.params.betterC && (!global.params.useModuleInfo || !Module.moduleinfo))
+                reject(module_.loc, "ordinary-D A32 emission requires the druntime ModuleInfo interface");
 
             void members(Dsymbols* symbols)
             {
@@ -1420,7 +1475,16 @@ void generateArm32Objects(Module[] modules)
             }
 
             members(module_.members);
-            objects ~= arm32Object(functions, globals);
+            if (!global.params.betterC)
+            {
+                auto info = standaloneModuleInfo(module_);
+                if (info.name in names)
+                    reject(module_.loc, "ordinary-D ModuleInfo collides with an emitted A32 symbol");
+                names[info.name] = true;
+                globals ~= info;
+                moduleInfos ~= info.name;
+            }
+            objects ~= arm32Object(functions, globals, moduleInfos);
             paths ~= module_.objfile.toString().idup;
         }
 
