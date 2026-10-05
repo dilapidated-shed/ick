@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import argparse
-import struct
 import shutil
+import struct
 import subprocess
 from collections import Counter
 from pathlib import Path
@@ -1366,12 +1366,12 @@ def main() -> None:
     mutant_exe = out / "a32-smoke-add-int-zero-mutant"
     shutil.copyfile(smoke_source, mutant_source)
     original = mutant_source.read_text()
-    mutation = "extern(C) int add_int(int a, int b)\\n{\\n    return a + b;\\n}\\n"
+    mutation = "extern(C) int add_int(int a, int b)\n{\n    return a + b;\n}\n"
     if original.count(mutation) != 1:
         raise RuntimeError("could not isolate the first add_int result in smoke.d")
     mutant_source.write_text(original.replace(
         mutation,
-        "extern(C) int add_int(int a, int b)\\n{\\n    return 0;\\n}\\n",
+        "extern(C) int add_int(int a, int b)\n{\n    return 0;\n}\n",
         1,
     ))
 
