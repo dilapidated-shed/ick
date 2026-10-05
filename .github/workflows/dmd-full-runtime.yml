@@ -29,10 +29,43 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out exact compiler source
+        id: compiler_source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Verify locked DMD and runtime provenance before external checkouts
+        id: provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_head='${{ github.event.pull_request.head.sha || github.sha }}'
+          actual_head=$(git rev-parse HEAD)
+          test "$actual_head" = "$expected_head"
+
+          source_lock=dmd/SOURCE.lock
+          runtime_lock=dmd/RUNTIME.lock
+          fixture=dmd/qualification/full_runtime_smoke.d
+          test -f "$source_lock"
+          test -f "$runtime_lock"
+          test -f "$fixture"
+
+          grep -Fx 'upstream_repository=https://github.com/dlang/dmd.git' "$source_lock"
+          grep -Fx 'upstream_tag=v2.113.0' "$source_lock"
+          grep -Fx 'upstream_commit=74917954b53f7f35b13e61b4438c7253834929ed' "$source_lock"
+          grep -Fx 'upstream_compiler_src_dmd_tree=609b890e7cfc65474e5fdebd001c580e174cd22b' "$source_lock"
+
+          grep -Fx 'dmd_upstream_repository=https://github.com/dlang/dmd.git' "$runtime_lock"
+          grep -Fx 'dmd_upstream_tag=v2.113.0' "$runtime_lock"
+          grep -Fx 'dmd_upstream_commit=74917954b53f7f35b13e61b4438c7253834929ed' "$runtime_lock"
+          grep -Fx 'phobos_upstream_repository=https://github.com/dlang/phobos.git' "$runtime_lock"
+          grep -Fx 'phobos_upstream_tag=v2.113.0' "$runtime_lock"
+          grep -Fx 'phobos_upstream_commit=7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95' "$runtime_lock"
+
+          mkdir -p .runtime-evidence
+          sha256sum "$source_lock" "$runtime_lock" "$fixture" > .runtime-evidence/inputs.sha256
+          printf 'PASS: exact compiler source head and pinned runtime provenance verified before external checkout.\n'
 
       - name: Install bootstrap dependencies
         shell: bash
@@ -42,6 +75,7 @@ jobs:
           sudo apt-get install -y build-essential ldc
 
       - name: Build owned DMD
+        id: compiler_build
         shell: bash
         run: |
           set -euxo pipefail
@@ -54,6 +88,7 @@ jobs:
           printf '%s\n' "$dmd_bin" > "$GITHUB_WORKSPACE/.ick-dmd-bin"
 
       - name: Check out matching druntime source
+        id: druntime_source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: dlang/dmd
@@ -62,12 +97,23 @@ jobs:
           persist-credentials: false
 
       - name: Check out matching Phobos source
+        id: phobos_source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: dlang/phobos
           ref: 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
           path: .runtime-phobos
           persist-credentials: false
+
+      - name: Verify external runtime checkout commits against the validated lock
+        id: runtime_checkout_verify
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C .runtime-dmd rev-parse HEAD)" = 74917954b53f7f35b13e61b4438c7253834929ed
+          test "$(git -C .runtime-phobos rev-parse HEAD)" = 7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+          test -f .runtime-dmd/druntime/src/object.d
+          test -d .runtime-phobos/std
 
       - name: Install owned DMD into reconstructed toolchain
         shell: bash
@@ -79,6 +125,7 @@ jobs:
           chmod +x .runtime-dmd/generated/linux/release/64/dmd
 
       - name: Build matching druntime
+        id: druntime_build
         shell: bash
         run: |
           set -euxo pipefail
@@ -89,6 +136,7 @@ jobs:
           test -f .runtime-dmd/druntime/import/object.d
 
       - name: Build matching Phobos
+        id: phobos_build
         shell: bash
         run: |
           set -euxo pipefail
@@ -98,7 +146,8 @@ jobs:
             DMD_DIR="$GITHUB_WORKSPACE/.runtime-dmd" DMD="$dmd_bin"
           test -f .runtime-phobos/generated/linux/release/64/libphobos2.a
 
-      - name: Compile and run ordinary D
+      - name: Compile ordinary D
+        id: ordinary_d_compile
         shell: bash
         run: |
           set -euxo pipefail
@@ -110,16 +159,86 @@ jobs:
             "$GITHUB_WORKSPACE/.runtime-phobos/generated/linux/release/64/libphobos2.a" \
             -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl \
             -of=/tmp/ick_full_runtime
-          /tmp/ick_full_runtime | grep -Fx '123456789012345678901234567891'
 
-      - name: Record full-D receipt
+      - name: Run ordinary D
+        id: ordinary_d_run
         shell: bash
         run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          PASS: conservative ICK DMD built matching v2.113 druntime and Phobos.
+          set -euxo pipefail
+          /tmp/ick_full_runtime | grep -Fx '123456789012345678901234567891'
+      - name: Record conservative full-D provenance receipt
+        if: ${{ always() }}
+        id: receipt
+        env:
+          SOURCE_CHECKOUT: ${{ steps.compiler_source.outcome }}
+          PROVENANCE: ${{ steps.provenance.outcome }}
+          OWNED_COMPILER: ${{ steps.compiler_build.outcome }}
+          DRUNTIME_CHECKOUT: ${{ steps.druntime_source.outcome }}
+          PHOBOS_CHECKOUT: ${{ steps.phobos_source.outcome }}
+          RUNTIME_CHECKOUT_VERIFY: ${{ steps.runtime_checkout_verify.outcome }}
+          DRUNTIME_BUILD: ${{ steps.druntime_build.outcome }}
+          PHOBOS_BUILD: ${{ steps.phobos_build.outcome }}
+          ORDINARY_D_COMPILE: ${{ steps.ordinary_d_compile.outcome }}
+          ORDINARY_D_EXECUTION: ${{ steps.ordinary_d_run.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .runtime-evidence
+          report() {
+            case "$2" in
+              success) value=PASS ;;
+              failure) value=FAIL ;;
+              cancelled) value=CANCELLED ;;
+              *) value=NOT_RUN ;;
+            esac
+            printf '%s\t%s\n' "$1" "$value"
+          }
+          file_sha256() {
+            if test -f "$1"; then sha256sum "$1" | awk '{print $1}'; else printf 'NOT_RUN'; fi
+          }
+          lock_value() {
+            awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; found=1; exit } END { if (!found) exit 1 }' "$2"
+          }
+          value_or_unknown() {
+            if value=$(lock_value "$1" "$2"); then printf '%s' "$value"; else printf 'UNKNOWN'; fi
+          }
+          compiler_head=NOT_RUN
+          if git rev-parse HEAD >/dev/null 2>&1; then compiler_head=$(git rev-parse HEAD); fi
 
-          PASS: ordinary D executed std.bigint, GC-managed class allocation,
-          exceptions, and std.stdio without -betterC.
+          {
+            printf 'receipt_schema_version\t1\n'
+            printf 'compiler_line\tconservative-dmd\n'
+            printf 'compiler_source_head\t%s\n' "$compiler_head"
+            printf 'reconciled_f01_head\tc1448d4a14d85366e7c4294da764450e2990fd13\n'
+            printf 'source_lock_sha256\t%s\n' "$(file_sha256 dmd/SOURCE.lock)"
+            printf 'runtime_lock_sha256\t%s\n' "$(file_sha256 dmd/RUNTIME.lock)"
+            printf 'fixture_path\tdmd/qualification/full_runtime_smoke.d\n'
+            printf 'fixture_sha256\t%s\n' "$(file_sha256 dmd/qualification/full_runtime_smoke.d)"
+            printf 'dmd_upstream_repository\t%s\n' "$(value_or_unknown dmd_upstream_repository dmd/RUNTIME.lock)"
+            printf 'dmd_upstream_tag\t%s\n' "$(value_or_unknown dmd_upstream_tag dmd/RUNTIME.lock)"
+            printf 'dmd_upstream_commit\t%s\n' "$(value_or_unknown dmd_upstream_commit dmd/RUNTIME.lock)"
+            printf 'phobos_upstream_repository\t%s\n' "$(value_or_unknown phobos_upstream_repository dmd/RUNTIME.lock)"
+            printf 'phobos_upstream_tag\t%s\n' "$(value_or_unknown phobos_upstream_tag dmd/RUNTIME.lock)"
+            printf 'phobos_upstream_commit\t%s\n' "$(value_or_unknown phobos_upstream_commit dmd/RUNTIME.lock)"
+            report source_checkout_status "$SOURCE_CHECKOUT"
+            report provenance_validation_status "$PROVENANCE"
+            report owned_compiler_build_status "$OWNED_COMPILER"
+            report druntime_source_checkout_status "$DRUNTIME_CHECKOUT"
+            report phobos_source_checkout_status "$PHOBOS_CHECKOUT"
+            report runtime_checkout_verification_status "$RUNTIME_CHECKOUT_VERIFY"
+            report druntime_build_status "$DRUNTIME_BUILD"
+            report phobos_build_status "$PHOBOS_BUILD"
+            report ordinary_d_compile_status "$ORDINARY_D_COMPILE"
+            report ordinary_d_execution_status "$ORDINARY_D_EXECUTION"
+          } > .runtime-evidence/runtime-receipt.tsv
 
-          This receipt is independent of the BetterC/Android qualification.
-          EOF
+          cat .runtime-evidence/runtime-receipt.tsv >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve full-D provenance receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dmd-full-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .runtime-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
