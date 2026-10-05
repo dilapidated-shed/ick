@@ -65,6 +65,13 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Check four-lane FFT butterfly semantics
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cc -std=c11 -Wall -Wextra -Werror -O2             qualification/android-boundary/ick-armv7-neon-fft.c             qualification/android-boundary/ick-armv7-neon-fft-semantic.c             -o /tmp/ick-armv7-neon-fft-semantic
+          /tmp/ick-armv7-neon-fft-semantic
+
   qualify:
     name: ${{ matrix.abi }} source and boundary
     needs: imprecise-semantics
@@ -258,6 +265,38 @@ jobs:
               grep -q 'Tag_THUMB_ISA_use: Thumb-2' /tmp/arm.attributes
               if grep -q 'Tag_ABI_VFP_args: VFP registers' /tmp/arm.attributes; then
                 echo 'hard-float argument convention is not Android armeabi-v7a' >&2
+                exit 1
+              fi
+
+              neon_source=qualification/android-boundary/ick-armv7-neon-fft.c
+              # ARMv7 NEON binary32 arithmetic flushes subnormals rather than
+              # preserving the strict scalar IEEE behavior. Opt only this explicit
+              # SIMD qualification kernel into that numerical contract.
+              neon_fp_flags=(-funsafe-math-optimizations)
+              "$ick" "${target_flags[@]}" "${neon_fp_flags[@]}" -std=c11 -O3 -fPIC \
+                -S "$neon_source" -o /tmp/ick-armv7-neon.s
+              "$ick" "${target_flags[@]}" "${neon_fp_flags[@]}" -std=c11 -O3 -fPIC \
+                -c "$neon_source" -o /tmp/ick-armv7-neon.o
+
+              echo '--- ICK ARMv7 NEON FFT assembly ---'
+              cat /tmp/ick-armv7-neon.s
+              echo '--- end ICK ARMv7 NEON FFT assembly ---'
+
+              grep -Eq 'v(mul|mla|mls)\.f32[[:space:]]+q[0-9]+' \
+                /tmp/ick-armv7-neon.s
+              grep -Eq 'vadd\.f32[[:space:]]+q[0-9]+' /tmp/ick-armv7-neon.s
+              grep -Eq 'vsub\.f32[[:space:]]+q[0-9]+' /tmp/ick-armv7-neon.s
+
+              "$readelf" -A /tmp/ick-armv7-neon.o | tee /tmp/ick-armv7-neon.attributes
+              grep -q 'Tag_Advanced_SIMD_arch: NEONv1' /tmp/ick-armv7-neon.attributes
+
+              "${{ matrix.binutils_prefix }}-nm" -u /tmp/ick-armv7-neon.o \
+                | tee /tmp/ick-armv7-neon.undefined
+              ! grep -Eq '__aeabi_f(add|sub|mul)|(^|[[:space:]])memcpy$' \
+                /tmp/ick-armv7-neon.undefined
+
+              if grep -q 'Tag_ABI_VFP_args: VFP registers' /tmp/ick-armv7-neon.attributes; then
+                echo 'NEON FFT object escaped the Android softfp ABI' >&2
                 exit 1
               fi
               ;;
