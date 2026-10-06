@@ -12,6 +12,8 @@ module dmd.backend.arm32;
 import std.exception : enforce;
 
 enum ARM32_R_CALL = 28;
+enum ARM32_R_ABS32 = 2;
+enum ARM32_R_REL32 = 3;
 enum ARM32_R_GOT_PREL = 96;
 
 struct Arm32Code
@@ -253,8 +255,9 @@ struct Arm32Function
 struct Arm32Global
 {
     string name;
-    ulong value;
-    uint words;
+    ubyte[] data;
+    uint size;
+    uint alignment;
     bool defined;
 }
 
@@ -270,14 +273,55 @@ private void half(ref ubyte[] bytes, uint value)
     bytes ~= cast(ubyte)(value >> 8);
 }
 
+/** DMD's ELF CompilerDSOData v1, with 32-bit pointers and base PCS.
+ * The three address literals use S + A - P, then add the architectural PC.
+ * Thus no absolute address relocation is needed in executable code (Android PIC).
+ */
+private Arm32Function dsoInitializer()
+{
+    Arm32Code code;
+    code.instruction(0xE92D4010); // PUSH {r4,lr}: preserve 8-byte public alignment
+    code.adjustStack(16, true);
+    code.instruction(0xE3A00001); // MOV r0,#1 (CompilerDSOData._version)
+    code.storeStackOffset(0);
+    size_t[3] loads;
+    size_t[3] adds;
+    foreach (i; 0 .. 3)
+    {
+        loads[i] = code.loadLiteral();
+        adds[i] = code.bytes.length;
+        code.instruction(0xE08F0000); // ADD r0,pc,r0
+        code.storeStackOffset(cast(uint)(i + 1) * 4);
+    }
+    code.stackAddress(0, 0); // r0 = &CompilerDSOData on stack
+    Arm32Relocation[] relocations =
+        [Arm32Relocation(cast(uint)code.call(), "_d_dso_registry", ARM32_R_CALL)];
+    code.adjustStack(16, false);
+    code.instruction(0xE8BD8010); // POP {r4,pc}
+    const dataOffset = cast(uint)code.bytes.length;
+    foreach (i, target; [".data.d_dso_rec", "__start_minfo", "__stop_minfo"])
+    {
+        const at = code.bytes.length;
+        code.patchLoadLiteral(loads[i], at);
+        code.instruction(cast(uint)(at - adds[i] - 8));
+        relocations ~= Arm32Relocation(cast(uint)at, target, ARM32_R_REL32);
+    }
+    return Arm32Function("__d_dso_init", code.bytes, relocations, [dataOffset]);
+}
+
 /**
- * ELF32 ARM object containing A32 functions, scalar data and relocations.
+ * ELF32 ARM object containing A32 functions, data and relocations.
  *
  * Calls use R_ARM_CALL. Default-visible scalar global addresses use
  * R_ARM_GOT_PREL so the resulting code remains suitable for Android PIC.
+ * Ordinary-D ModuleInfo pointers use R_ARM_ABS32 in the dedicated `minfo`
+ * section expected by druntime.
  */
-ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
+ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals,
+                    string[] moduleInfos = null)
 {
+    const hasModuleInfo = moduleInfos.length != 0;
+    auto dso = hasModuleInfo ? dsoInitializer() : Arm32Function.init;
     struct Mapping
     {
         uint offset;
@@ -309,14 +353,12 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
     {
         if (!global_.defined)
             continue;
-        enforce(global_.words == 1 || global_.words == 2, "A32 scalar global must be one or two words");
-        const alignment = global_.words == 2 ? 8U : 4U;
-        while (data.length % alignment)
+        enforce(global_.size == global_.data.length && global_.alignment != 0,
+                "A32 data symbol must provide aligned bytes");
+        while (data.length % global_.alignment)
             data ~= 0;
         globalOffsets[global_.name] = cast(uint)data.length;
-        word(data, cast(uint)global_.value);
-        if (global_.words == 2)
-            word(data, cast(uint)(global_.value >> 32));
+        data ~= global_.data;
     }
 
     ubyte[] strings = [0];
@@ -332,20 +374,32 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
         return start;
     }
 
-    uint symbol(uint nameOffset, uint value, uint size, ubyte info, ushort section)
+    uint symbol(uint nameOffset, uint value, uint size, ubyte info, ushort section, ubyte visibility = 0)
     {
         const index = cast(uint)(symbols.length / 16);
         word(symbols, nameOffset);
         word(symbols, value);
         word(symbols, size);
         symbols ~= info;
-        symbols ~= 0;
+        symbols ~= visibility;
         half(symbols, section);
         return index;
     }
 
     foreach (mapping; mappings)
         symbol(name(mapping.name), mapping.offset, 0, 0, 1);
+    uint dsoSignature;
+    uint dsoFunction;
+    if (hasModuleInfo)
+    {
+        // A local section symbol is the same group signature used by DMD's
+        // general ELF writer: one registration slot/thunk per linked DSO.
+        dsoSignature = symbol(name(".data.d_dso_rec"), 0, 0, 3, 12);
+        symbolIndex[".data.d_dso_rec"] = dsoSignature;
+        dsoFunction = symbol(name(dso.name), 0, cast(uint)dso.code.length, 2, 13);
+        symbol(name("$a"), 0, 0, 0, 13);
+        symbol(name("$d"), dso.dataOffsets[0], 0, 0, 13);
+    }
     const firstGlobal = cast(uint)(symbols.length / 16);
 
     foreach (function_; functions)
@@ -362,7 +416,7 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
         const section = cast(ushort)(global_.defined ? 3 : 0);
         const value = global_.defined ? globalOffsets[global_.name] : 0U;
         const index = symbol(name(global_.name), value,
-                             global_.defined ? global_.words * 4 : 0U,
+                             global_.defined ? global_.size : 0U,
                              0x11, section); // GLOBAL OBJECT
         symbolIndex[global_.name] = index;
     }
@@ -375,6 +429,16 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
         const index = symbol(name(relocation.symbol), 0, 0, info, 0);
         symbolIndex[relocation.symbol] = index;
     }
+    if (hasModuleInfo)
+    {
+        foreach (boundary; ["__start_minfo", "__stop_minfo"])
+        {
+            enforce(boundary !in symbolIndex, "A32 module uses a reserved ELF runtime symbol");
+            symbolIndex[boundary] = symbol(name(boundary), 0, 0, 0x10, 0, 2); // GLOBAL NOTYPE HIDDEN
+        }
+        if ("_d_dso_registry" !in symbolIndex)
+            symbolIndex["_d_dso_registry"] = symbol(name("_d_dso_registry"), 0, 0, 0x12, 0);
+    }
 
     ubyte[] relText;
     foreach (relocation; relocations)
@@ -384,6 +448,33 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
         enforce(relocation.type < 256, "ELF32 ARM relocation type exceeds r_info field");
         word(relText, relocation.offset);
         word(relText, (*index << 8) | relocation.type);
+    }
+
+    ubyte[] minfo;
+    ubyte[] relMinfo;
+    foreach (i, moduleInfo; moduleInfos)
+    {
+        auto index = moduleInfo in symbolIndex;
+        enforce(index !is null, "A32 ModuleInfo pointer references missing symbol");
+        word(minfo, 0);
+        word(relMinfo, (cast(uint)i * 4));
+        word(relMinfo, (*index << 8) | ARM32_R_ABS32);
+    }
+
+    ubyte[] dsoGroup, relDso, dsoPointer, relDsoPointer;
+    if (hasModuleInfo)
+    {
+        word(dsoGroup, 1); // GRP_COMDAT
+        foreach (section; [12U, 13, 14, 15, 16, 17, 18])
+            word(dsoGroup, section);
+        foreach (relocation; dso.relocations)
+        {
+            word(relDso, relocation.offset);
+            word(relDso, (symbolIndex[relocation.symbol] << 8) | relocation.type);
+        }
+        word(dsoPointer, 0);
+        word(relDsoPointer, 0);
+        word(relDsoPointer, (dsoFunction << 8) | ARM32_R_ABS32);
     }
 
     bool usesNeon;
@@ -405,9 +496,14 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
     attributes ~= tags;
 
     ubyte[] sectionNames = [0];
-    uint[9] sectionNameOffsets;
-    immutable string[9] sectionNameValues =
+    string[] sectionNameValues =
         ["", ".text", ".rel.text", ".data", ".symtab", ".strtab", ".shstrtab", ".ARM.attributes", ".note.GNU-stack"];
+    if (hasModuleInfo)
+        sectionNameValues ~= ["minfo", ".relminfo", ".group.d_dso", ".data.d_dso_rec",
+                              ".text.d_dso_init", ".rel.text.d_dso_init",
+                              ".init_array.d_dso_ctor", ".rel.init_array.d_dso_ctor",
+                              ".fini_array.d_dso_dtor", ".rel.fini_array.d_dso_dtor"];
+    auto sectionNameOffsets = new uint[](sectionNameValues.length);
     foreach (i; 1 .. sectionNameValues.length)
     {
         sectionNameOffsets[i] = cast(uint)sectionNames.length;
@@ -416,7 +512,10 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
     }
 
     ubyte[][] contents = [null, text, relText, data, symbols, strings, sectionNames, attributes, null];
-    uint[9] offsets;
+    if (hasModuleInfo)
+        contents ~= [minfo, relMinfo, dsoGroup, new ubyte[4], dso.code, relDso,
+                     dsoPointer, relDsoPointer, dsoPointer, relDsoPointer];
+    auto offsets = new uint[](contents.length);
     ubyte[] result;
     result.length = 52;
 
@@ -432,20 +531,25 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
         result ~= 0;
     const sectionOffset = cast(uint)result.length;
 
-    immutable uint[9] types = [0, 1, 9, 1, 2, 3, 3, 0x70000003, 1];
-    foreach (i; 0 .. 9)
+    uint[] types = [0, 1, 9, 1, 2, 3, 3, 0x70000003, 1];
+    if (hasModuleInfo)
+        types ~= [1, 9, 17, 1, 1, 9, 14, 9, 15, 9];
+    foreach (i; 0 .. contents.length)
     {
         word(result, sectionNameOffsets[i]);
         word(result, types[i]);
-        const flags = i == 1 ? 6U : i == 3 ? 3U : 0U; // text AX; data WA
+        const flags = i == 1 ? 6U : (i == 3 || i == 9) ? 3U :
+                      i == 13 ? 0x206U : (i == 12 || i == 15 || i == 17) ? 0x203U :
+                      (i == 14 || i == 16 || i == 18) ? 0x200U : 0U;
         word(result, flags);
         word(result, 0);
         word(result, offsets[i]);
         word(result, cast(uint)contents[i].length);
-        word(result, i == 2 ? 4 : i == 4 ? 5 : 0); // rel->symtab; symtab->strtab
-        word(result, i == 2 ? 1 : i == 4 ? firstGlobal : 0); // rel applies to .text
-        word(result, i == 0 ? 0 : (i == 1 || i == 2 || i == 3 || i == 4 ? 4 : 1));
-        word(result, i == 2 ? 8 : i == 4 ? 16 : 0);
+        const isRel = types[i] == 9;
+        word(result, (isRel || i == 11) ? 4 : i == 4 ? 5 : 0); // rel/group->symtab; symtab->strtab
+        word(result, isRel ? cast(uint)(i - 1) : i == 4 ? firstGlobal : i == 11 ? dsoSignature : 0);
+        word(result, i == 0 ? 0 : (i <= 4 || i >= 9) ? 4 : 1);
+        word(result, isRel ? 8 : i == 4 ? 16 : i == 11 ? 4 : 0);
     }
 
     ubyte[] header = [0x7F, 'E', 'L', 'F', 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -460,7 +564,7 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals)
     half(header, 0);
     half(header, 0);
     half(header, 40);
-    half(header, 9);
+    half(header, cast(ushort)contents.length);
     half(header, 6);
     result[0 .. 52] = header;
     return result;

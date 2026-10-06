@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import struct
 import subprocess
@@ -1296,6 +1297,257 @@ fail:
 """
 
 
+def elf32_sections(path: Path) -> tuple[bytes, dict[str, tuple[int, tuple[int, ...]]]]:
+    data = path.read_bytes()
+    if len(data) < 52 or data[:4] != b"\x7fELF":
+        raise RuntimeError("not an ELF object")
+    if data[4:9] != bytes([1, 1, 1, 0, 0]):
+        raise RuntimeError("expected ELF32 little-endian System-V object")
+    e_type, e_machine = struct.unpack_from("<HH", data, 16)
+    if (e_type, e_machine) != (1, 40):
+        raise RuntimeError(f"expected ET_REL/EM_ARM, got {e_type}/{e_machine}")
+    flags = struct.unpack_from("<I", data, 36)[0]
+    if flags != 0x05000000:
+        raise RuntimeError(f"expected EABI5 without hard-float flag, got {flags:#x}")
+
+    shoff = struct.unpack_from("<I", data, 32)[0]
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 46)
+    if shentsize != 40 or shnum < 11 or shstrndx >= shnum:
+        raise RuntimeError("unexpected ordinary-D ELF32 section table")
+    sections = [
+        struct.unpack_from("<IIIIIIIIII", data, shoff + i * shentsize)
+        for i in range(shnum)
+    ]
+    shstr = sections[shstrndx]
+    shstr_data = data[shstr[4]:shstr[4] + shstr[5]]
+
+    def cstring(blob: bytes, offset: int) -> str:
+        end = blob.find(b"\0", offset)
+        if end < 0:
+            raise RuntimeError("unterminated ELF string")
+        return blob[offset:end].decode("ascii")
+
+    by_name = {
+        cstring(shstr_data, section[0]) if section[0] else "": (i, section)
+        for i, section in enumerate(sections)
+    }
+    return data, by_name
+
+
+def check_ordinary_d_elf(path: Path, module_name: str = "ordinary_d") -> None:
+    data, sections = elf32_sections(path)
+    required = [
+        ".text", ".rel.text", ".data", ".symtab", ".strtab",
+        ".ARM.attributes", "minfo", ".relminfo",
+        ".group.d_dso", ".data.d_dso_rec", ".text.d_dso_init", ".rel.text.d_dso_init",
+        ".init_array.d_dso_ctor", ".rel.init_array.d_dso_ctor",
+        ".fini_array.d_dso_dtor", ".rel.fini_array.d_dso_dtor",
+    ]
+    for name in required:
+        if name not in sections:
+            raise RuntimeError(f"ordinary-D object is missing {name}")
+
+    text_index, _ = sections[".text"]
+    data_index, data_section = sections[".data"]
+    sym_index, sym_section = sections[".symtab"]
+    str_index, strings_section = sections[".strtab"]
+    minfo_index, minfo_section = sections["minfo"]
+    rel_minfo_index, rel_minfo_section = sections[".relminfo"]
+    if sym_section[1] != 2 or sym_section[6] != str_index or sym_section[9] != 16:
+        raise RuntimeError("ordinary-D symbol table linkage is malformed")
+    if minfo_section[1] != 1 or minfo_section[2] != 3 or minfo_section[5] != 4:
+        raise RuntimeError("ordinary-D minfo section is not writable 32-bit data")
+    if (rel_minfo_section[1], rel_minfo_section[6], rel_minfo_section[7], rel_minfo_section[9]) != (
+        9, sym_index, minfo_index, 8,
+    ):
+        raise RuntimeError("ordinary-D ModuleInfo relocation section is malformed")
+
+    strings = data[strings_section[4]:strings_section[4] + strings_section[5]]
+
+    def cstring(blob: bytes, offset: int) -> str:
+        end = blob.find(b"\0", offset)
+        if end < 0:
+            raise RuntimeError("unterminated ELF string")
+        return blob[offset:end].decode("ascii")
+
+    symbols = []
+    for at in range(sym_section[4], sym_section[4] + sym_section[5], 16):
+        name_off, value, size = struct.unpack_from("<III", data, at)
+        info, other, shndx = struct.unpack_from("<BBH", data, at + 12)
+        symbols.append((cstring(strings, name_off) if name_off else "", value, size, info, other, shndx))
+
+    by_symbol = {symbol[0]: (index, symbol) for index, symbol in enumerate(symbols) if symbol[0]}
+    if module_name == "ordinary_d":
+        ordinary = by_symbol.get("ordinary_d_add")
+        if not ordinary or ordinary[1][5] != text_index or (ordinary[1][3] & 0xF) != 2:
+            raise RuntimeError("ordinary-D scalar function is not an A32 text symbol")
+
+    module_info_name = f"_D{len(module_name)}{module_name}12__ModuleInfoZ"
+    module_info = by_symbol.get(module_info_name)
+    if not module_info or module_info[1][5] != data_index or (module_info[1][3] & 0xF) != 1:
+        raise RuntimeError("ordinary-D ModuleInfo is not a defined data symbol")
+    _, (name, value, size, _, _, _) = module_info
+    expected = struct.pack("<II", 0x1004, 0) + module_name.encode("ascii") + b"\0"
+    if size != len(expected):
+        raise RuntimeError(f"ordinary-D ModuleInfo size is {size}, expected {len(expected)}")
+    payload_at = data_section[4] + value
+    if data[payload_at:payload_at + size] != expected:
+        raise RuntimeError("ordinary-D standalone ModuleInfo payload mismatch")
+
+    if minfo_section[5] != 4 or struct.unpack_from("<I", data, minfo_section[4])[0] != 0:
+        raise RuntimeError("ordinary-D minfo pointer must be a zero-addend relocation slot")
+    if rel_minfo_section[5] != 8:
+        raise RuntimeError("ordinary-D minfo must contain one pointer relocation")
+    relocation_offset, relocation_info = struct.unpack_from("<II", data, rel_minfo_section[4])
+    if relocation_offset != 0 or (relocation_info & 0xFF) != 2 or relocation_info >> 8 != module_info[0]:
+        raise RuntimeError("ordinary-D minfo must reference its ModuleInfo with R_ARM_ABS32")
+
+    if b"$a\0" not in data or b"$t\0" in data:
+        raise RuntimeError("ordinary-D object escaped A32 mapping symbols")
+    base_pcs_tags = bytes([6, 10, 7, 65, 8, 1, 9, 0, 10, 4, 24, 1, 25, 1, 28, 0])
+    if base_pcs_tags not in data:
+        raise RuntimeError("ordinary-D object lost AAPCS32 base-PCS softfp attributes")
+
+    undefined = [name for name, _, _, _, _, shndx in symbols if name and shndx == 0]
+    print("ordinary-D undefined symbols:", ", ".join(undefined) if undefined else "(none)")
+    if sorted(undefined) != ["__start_minfo", "__stop_minfo", "_d_dso_registry"]:
+        raise RuntimeError(f"ordinary-D runtime dependencies mismatch: {undefined}")
+    for name in ["__start_minfo", "__stop_minfo"]:
+        if by_symbol[name][1][3:5] != (0x10, 2):
+            raise RuntimeError("minfo boundaries must be global hidden linker symbols")
+    if by_symbol["_d_dso_registry"][1][3] != 0x12:
+        raise RuntimeError("druntime registration must be a strong external function")
+
+    group_index, group = sections[".group.d_dso"]
+    grouped_names = [
+        ".data.d_dso_rec", ".text.d_dso_init", ".rel.text.d_dso_init",
+        ".init_array.d_dso_ctor", ".rel.init_array.d_dso_ctor",
+        ".fini_array.d_dso_dtor", ".rel.fini_array.d_dso_dtor",
+    ]
+    expected_group = [1] + [sections[name][0] for name in grouped_names]
+    if (group[1], group[6], group[7], group[8], group[9]) != (
+        17, sym_index, by_symbol[".data.d_dso_rec"][0], 4, 4,
+    ) or list(struct.unpack_from("<8I", data, group[4])) != expected_group:
+        raise RuntimeError("ordinary-D registration COMDAT group is malformed")
+    for name in grouped_names:
+        if not sections[name][1][2] & 0x200:
+            raise RuntimeError(f"registration section {name} is not grouped")
+
+    def relocations(name: str, target: str) -> list[tuple[int, str, int]]:
+        _, section = sections[name]
+        if (section[1], section[6], section[7], section[9]) != (
+            9, sym_index, sections[target][0], 8,
+        ):
+            raise RuntimeError(f"malformed relocation section {name}")
+        result = []
+        for at in range(section[4], section[4] + section[5], 8):
+            offset, info = struct.unpack_from("<II", data, at)
+            result.append((offset, symbols[info >> 8][0], info & 255))
+        return result
+
+    if relocations(".rel.text.d_dso_init", ".text.d_dso_init") != [
+        (56, "_d_dso_registry", 28), (68, ".data.d_dso_rec", 3),
+        (72, "__start_minfo", 3), (76, "__stop_minfo", 3),
+    ]:
+        raise RuntimeError("registration must use a druntime call and PC-relative address literals")
+    _, thunk = sections[".text.d_dso_init"]
+    if thunk[2] != 0x206 or thunk[5] != 80 or thunk[8] != 4:
+        raise RuntimeError("registration thunk is not word-aligned grouped A32 code")
+    instructions = struct.unpack_from("<20I", data, thunk[4])
+    if instructions[:4] != (0xE92D4010, 0xE24DD010, 0xE3A00001, 0xE58D0000) or \
+            instructions[13:17] != (0xE1A0000D, 0xEBFFFFFE, 0xE28DD010, 0xE8BD8010):
+        raise RuntimeError("registration thunk lost its aligned stack/CompilerDSOData frame")
+    for prefix, kind in [("init", 14), ("fini", 15)]:
+        name = f".{prefix}_array.d_dso_{'ctor' if prefix == 'init' else 'dtor'}"
+        _, section = sections[name]
+        if (section[1], section[2], section[5], section[8]) != (kind, 0x203, 4, 4) or \
+                struct.unpack_from("<I", data, section[4])[0] != 0 or \
+                relocations(".rel" + name, name) != [(0, "__d_dso_init", 2)]:
+            raise RuntimeError(f"malformed ordinary-D loader hook {name}")
+    print("ordinary-D runtime reference: minfo R_ARM_ABS32 ->", module_info_name)
+
+
+def check_ordinary_d_boundary(compiler: Path, imports: Path, here: Path, out: Path,
+                              clang: str, linker: str, qemu: str) -> None:
+    ordinary_obj = out / "ordinary-d-arm32.o"
+    run([
+        str(compiler),
+        "-target=armv7a-linux-androideabi21",
+        "-c",
+        f"-I{imports}",
+        str(here / "ordinary_d.d"),
+        f"-of={ordinary_obj}",
+    ])
+    check_ordinary_d_elf(ordinary_obj)
+
+    empty_obj = out / "ordinary-d-empty.o"
+    run([str(compiler), "-target=armv7a-linux-androideabi21", "-c", f"-I{imports}",
+         str(here / "ordinary_d_empty.d"), f"-of={empty_obj}"])
+    check_ordinary_d_elf(empty_obj, "ordinary_d_empty")
+
+    rows = []
+    for fixture, diagnostic, requirement, blocker in [
+        ("ordinary_d_empty", None, "ModuleInfo; _d_dso_registry; __start_minfo; __stop_minfo",
+         "matching Android ARM32 druntime body providing _d_dso_registry; no Android runtime link qualified"),
+        ("ordinary_d", None, "ModuleInfo; _d_dso_registry; __start_minfo; __stop_minfo",
+         "matching Android ARM32 druntime body providing _d_dso_registry; no Android runtime link qualified"),
+        ("ordinary_d_linkage", "top-level extern(C) functions only", "D function ABI/name mangling",
+         "qualify D linkage/calling convention before admitting ordinary D-linkage functions"),
+        ("ordinary_d_assert", "unsupported expression", "assert runtime call and source-file D slice",
+         "represent D slices/source data and lower assert to the matching druntime entrypoint"),
+        ("ordinary_d_static_ctor", "ordinary-D ModuleInfo with lifecycle/import data is not implemented",
+         "ModuleInfo lifecycle callback relocation", "emit exact lifecycle/import ModuleInfo fields and callbacks"),
+    ]:
+        common = [str(compiler), "-target=armv7a-linux-androideabi21", "-c", f"-I{imports}",
+                  str(here / (fixture + ".d"))]
+        # Separate actual frontend success from reaching/rejection by the object backend.
+        run(common + ["-o-"])
+        if diagnostic:
+            rejected_obj = out / (fixture + ".o")
+            rejected_obj.write_bytes(b"stale ordinary-D output must not survive")
+            command = common + [f"-of={rejected_obj}"]
+            print("+", " ".join(command))
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, timeout=60)
+            print(result.stdout, end="")
+            if result.returncode == 0 or rejected_obj.exists() or \
+                    "A32 backend:" not in result.stdout or diagnostic not in result.stdout:
+                raise RuntimeError(f"{fixture} did not fail closed at the expected ARM32 boundary")
+        rows.append("\t".join([fixture, "PASS", "REACHED", "NONE" if diagnostic else "PASS",
+                               "not emitted: " + requirement if diagnostic else requirement,
+                               "FAIL_CLOSED" if diagnostic else "SUPPORTED", blocker]))
+
+    harness_obj = out / "ordinary-d-registry-harness.o"
+    run([clang, "--target=armv7a-linux-androideabi21", "-march=armv7-a", "-marm",
+         "-mfloat-abi=softfp", "-c", str(here / "ordinary_d_registry_harness.s"), "-o", str(harness_obj)])
+    executable = out / "ordinary-d-registry-oracle"
+    run([linker, "-m", "armelf_linux_eabi", "-e", "_start", str(harness_obj),
+         str(ordinary_obj), str(empty_obj), "-o", str(executable)])
+    run([qemu, str(executable)])
+    # Linking with -z text proves the registration thunk does not need dynamic text relocations.
+    run([linker, "-m", "armelf_linux_eabi", "-shared", "-z", "text", str(ordinary_obj),
+         str(empty_obj), "-o", str(out / "ordinary-d-boundary.so")])
+
+    receipt = out / "ordinary-d-boundary.tsv"
+    receipt.write_text(
+        "construct\tparse_semantic\tarm32_backend\telf_object\truntime_references\tbackend_support\tnext_blocker\n"
+        + "\n".join(rows) + "\n"
+    )
+    inspection = subprocess.run(
+        ["readelf", "-h", "-SW", "-sW", "-rW", "-g", "-A", str(ordinary_obj)],
+        check=True, stdout=subprocess.PIPE, text=True, timeout=60)
+    (out / "ordinary-d-readelf.txt").write_text(inspection.stdout)
+    print(inspection.stdout, end="")
+    (out / "ordinary-d-provenance.txt").write_text(
+        "target=armv7a-linux-androideabi21\nflags=-c (no -betterC)\n"
+        f"compiler_sha256={hashlib.sha256(compiler.read_bytes()).hexdigest()}\n"
+        f"object_sha256={hashlib.sha256(ordinary_obj.read_bytes()).hexdigest()}\n"
+        "runtime_link=NOT_QUALIFIED\nphysical_device_execution=NOT_RUN\n")
+    print("PASS: ordinary-D ARM32 ModuleInfo and explicit druntime registration dependency")
+    print("PASS: two-module COMDAT registration ABI oracle (not Android druntime), PIC link")
+    print("PASS: ordinary-D unsupported constructs fail closed without stale output")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", required=True)
@@ -1320,6 +1572,10 @@ def main() -> None:
         f"-of={obj}",
     ])
     check_elf(obj)
+
+    check_ordinary_d_boundary(
+        Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
+        args.clang, args.linker, args.qemu)
 
     neon_obj = out / "android-arm32-neon-fft.o"
     run([

@@ -111,6 +111,14 @@ jobs:
           test -x "$dmd_bin"
           python3 "$verify"             --compiler "$dmd_bin"             --imports /tmp/dmd-arm32-bootstrap/dmd2/src/druntime/import             --output /tmp/dmd-arm32-qualification
 
+      - name: Preserve Android ARM32 object boundary receipt
+        if: steps.source.outputs.loaded == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-arm32-object-boundary-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/dmd-arm32-qualification
+          if-no-files-found: ignore
+
       - name: Qualify AArch64 floating comparisons when present
         if: steps.source.outputs.loaded == 'true'
         shell: bash

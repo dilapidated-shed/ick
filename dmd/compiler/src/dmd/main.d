@@ -355,10 +355,10 @@ private int tryMain(const(char)[][] argv, out Param params)
     {
         if (target.os != Target.OS.linux)
             error(Loc.initial, "Android armeabi-v7a requires the Linux target OS");
-        if (!params.betterC || driverParams.link || driverParams.lib || params.run ||
+        if (driverParams.link || driverParams.lib || params.run ||
             params.cov || params.trace || params.tracegc || params.useUnitTests ||
             driverParams.symdebug || driverParams.symdebugref)
-            error(Loc.initial, "Android ARM32 A32 bring-up requires -betterC -c without runtime, linking, profiling, unit tests or debug information");
+            error(Loc.initial, "Android ARM32 A32 bring-up requires -c without linking, profiling, unit tests or debug information");
     }
 
     target.setCPU();
