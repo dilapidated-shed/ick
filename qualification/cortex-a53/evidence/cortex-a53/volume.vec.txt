@@ -1,0 +1,8 @@
+qualification/cortex-a53/volume.c:8:28: missed: couldn't vectorize loop
+qualification/cortex-a53/volume.c:8:28: missed: not vectorized: multiple nested loops.
+qualification/cortex-a53/volume.c:10:32: optimized: loop vectorized using 16 byte vectors and unroll factor 4
+qualification/cortex-a53/volume.c:13:46: missed: couldn't vectorize loop
+qualification/cortex-a53/volume.c:13:46: missed: outer-loop already vectorized.
+qualification/cortex-a53/volume.c:6:6: note: vectorized 1 loops in function.
+qualification/cortex-a53/volume.c:27:47: missed: not vectorized: more than one data ref in stmt: MEM <float[12]> [(float *)vectp.56_312] = .STORE_LANES (vect_array.58);
+qualification/cortex-a53/volume.c:32:1: note: ***** Analysis failed with vector mode VOID

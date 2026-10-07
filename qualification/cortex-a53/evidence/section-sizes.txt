@@ -1,0 +1,90 @@
+generic/scalar.o  :
+section           size   addr
+.text              136      0
+.data                0      0
+.bss                 0      0
+.comment            43      0
+.note.GNU-stack      0      0
+.eh_frame           40      0
+Total              219
+
+
+generic/vector.o  :
+section           size   addr
+.text              212      0
+.data                0      0
+.bss                 0      0
+.comment            43      0
+.note.GNU-stack      0      0
+.eh_frame           40      0
+Total              295
+
+
+generic/branch.o  :
+section           size   addr
+.text              120      0
+.data                0      0
+.bss                 0      0
+.comment            43      0
+.note.GNU-stack      0      0
+.eh_frame           40      0
+Total              203
+
+
+generic/volume.o  :
+section           size   addr
+.text              392      0
+.data                0      0
+.bss                 0      0
+.rodata             32      0
+.comment            43      0
+.note.GNU-stack      0      0
+.eh_frame           80      0
+Total              547
+
+
+cortex-a53/scalar.o  :
+section           size   addr
+.text              136      0
+.data                0      0
+.bss                 0      0
+.comment            43      0
+.note.GNU-stack      0      0
+.eh_frame           40      0
+Total              219
+
+
+cortex-a53/vector.o  :
+section           size   addr
+.text              212      0
+.data                0      0
+.bss                 0      0
+.comment            43      0
+.note.GNU-stack      0      0
+.eh_frame           40      0
+Total              295
+
+
+cortex-a53/branch.o  :
+section           size   addr
+.text              120      0
+.data                0      0
+.bss                 0      0
+.comment            43      0
+.note.GNU-stack      0      0
+.eh_frame           40      0
+Total              203
+
+
+cortex-a53/volume.o  :
+section           size   addr
+.text              400      0
+.data                0      0
+.bss                 0      0
+.rodata             48      0
+.comment            43      0
+.note.GNU-stack      0      0
+.eh_frame           88      0
+Total              579
+
+

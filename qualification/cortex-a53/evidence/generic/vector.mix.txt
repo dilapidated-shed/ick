@@ -1,0 +1,17 @@
+fadd	4
+lsl	2
+str	4
+sub	1
+b.eq	1
+b.ne	1
+b.ls	3
+ldr	8
+cbz	1
+b	1
+fmul	8
+cmp	5
+ret	1
+fmov	4
+lsr	2
+add	3
+mov	4
