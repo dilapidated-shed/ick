@@ -143,7 +143,9 @@ The pasteable invocation, after delivery, is the **verified absolute native
 benchmark path** with no arguments. No shell state or current directory is
 required. `measure.grease` additionally verifies SHA-256, runs both Android
 oracles, writes their output and the timing TSV, and checks identity before
-execution. Invoke it through the target's verified Grease entrypoint; do not
+execution. Every invocation keeps a fresh receipt folder, including source and
+artifact identities, so reruns preserve earlier measurements. Invoke it through
+the target's verified Grease entrypoint; do not
 run it through Bash. The C67 Grease runtime and physical procedure are
 **NOT_RUN** in this environment; host Grease parsing is narrower evidence.
 No delivery path or runtime installation is guessed.

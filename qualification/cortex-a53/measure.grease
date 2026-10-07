@@ -16,9 +16,12 @@ fi
 cd -- "$root"
 sha256sum -c native.sha256
 test -x "$root/benchmark"
-"$root/generic/android-oracle" > "$root/generic-physical-oracle.tsv"
-"$root/cortex-a53/android-oracle" > "$root/a53-physical-oracle.tsv"
-cmp "$root/generic-physical-oracle.tsv" "$root/a53-physical-oracle.tsv"
-"$root/benchmark" > "$root/physical-timing.tsv"
-cat "$root/physical-timing.tsv"
+receipt=$(mktemp -d "$root/c67-measurement.XXXXXX")
+cp native.sha256 ick.commit SOURCE.lock ndk-compiler.txt "$receipt/"
+printf 'receipt_path\t%s\n' "$receipt"
+"$root/generic/android-oracle" > "$receipt/generic-physical-oracle.tsv"
+"$root/cortex-a53/android-oracle" > "$receipt/a53-physical-oracle.tsv"
+cmp "$receipt/generic-physical-oracle.tsv" "$receipt/a53-physical-oracle.tsv"
+"$root/benchmark" > "$receipt/physical-timing.tsv"
+cat "$receipt/physical-timing.tsv"
 printf '%sPASS: measured repeated pairs; retain native.sha256 and all TSV receipts%s\n' "$green" "$reset"
