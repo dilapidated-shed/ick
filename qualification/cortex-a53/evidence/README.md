@@ -1,4 +1,4 @@
-# Compiler comparison receipt — 2026-10-06
+# Compiler comparison receipt
 
 Executed on Linux x86_64 using materialized ICK from base
 `e3c2a40b4edafc4d9caca55d1f7c094e6aab9589` plus the fixture bytes bound in
@@ -103,7 +103,7 @@ Quality limits and next experiments:
 [`compiler-output.sha256`](compiler-output.sha256) binds all eight object hashes
 and retained assemblies. [`native.sha256`](native.sha256) binds the locally built
 native Android binaries and measurement procedure. These exact local native
-hashes are a dated build receipt; CI artifacts independently bind their own
+hashes are a local build receipt; CI artifacts independently bind their own
 executed PR head. Toolchain startup/archive differences may change executable
 bytes without changing kernel objects. Do not relabel one receipt as another.
 

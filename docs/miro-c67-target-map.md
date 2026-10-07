@@ -32,7 +32,7 @@ operating environment             Android (retail listing: Android 14)
 GPU family                        PowerVR GE8320
 ```
 
-New physical application evidence (user report, 2026-10-06):
+New physical application evidence (user report):
 
 - [isomorphismes/pauli PR #23, “Drive Android orbital rendering with checked hydrogen states”](https://github.com/isomorphismes/pauli/pull/23)
 - Pauli source: `5f9f8a0fc08e4d4dd978298f47112af0ad02f196`
