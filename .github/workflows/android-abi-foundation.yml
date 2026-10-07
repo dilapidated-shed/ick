@@ -136,7 +136,7 @@ jobs:
           set -euxo pipefail
           . ick/SOURCE.lock
           test "$(git -C gcc rev-parse HEAD)" = "$gcc_commit"
-          sh ick/materialize.sh gcc source
+          bash ick/materialize.sh gcc source
           test -s source/COPYING3
           test -s source/COPYING.RUNTIME
           test -s source/gcc/config/linux-android.h
@@ -360,11 +360,24 @@ jobs:
           grep -Eqi 'requires Android API 26' /tmp/bionic-availability-api25.log
           test ! -e /tmp/bionic-availability-api25.o
 
-          "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"             -h -A /tmp/bionic-headers.o | tee /tmp/bionic-headers.abi
+          arm-linux-gnueabi-readelf -h -A /tmp/bionic-headers.o | tee /tmp/bionic-headers.abi
           grep -q 'Class:.*ELF32' /tmp/bionic-headers.abi
           grep -q 'Machine:.*ARM' /tmp/bionic-headers.abi
-          grep -Uq 'TagName: ARM_ISA_use.*Description: Permitted'             /tmp/bionic-headers.abi
-          ! grep -Uq 'TagName: ABI_VFP_args.*Description: VFP registers'             /tmp/bionic-headers.abi
+          grep -q 'Tag_ARM_ISA_use: Yes' /tmp/bionic-headers.abi
+          ! grep -q 'Tag_ABI_VFP_args: VFP registers' /tmp/bionic-headers.abi
+
+      - name: Preserve the A1 compiler for consumer qualification
+        if: matrix.abi == 'armeabi-v7a'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ick-a1-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            build/gcc/xgcc
+            build/gcc/cc1
+            build/gcc/collect2
+            build/gcc/include/
+            build/gcc/include-fixed/
 
       - name: Verify API floor and scalar ABI sizes
         shell: bash
