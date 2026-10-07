@@ -30,3 +30,6 @@ The existing Android foundation matrix compiles the positive fixture with
 its freshly built ICK, without delegating C compilation to Clang. That is
 compile evidence only; runtime evidence is recorded separately in
 `qualification/c-assignment-arrow/`.
+
+The [hidden-gap and downstream-review note](hidden-c-assignment-gap.md)
+records the older rejection and the still-open cross-repository C-source audit.
