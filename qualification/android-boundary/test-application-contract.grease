@@ -33,11 +33,13 @@ if @runtime "$qualify" "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-li
   exit 1
 fi
 for feature in (['bionic-nullability', 'bionic-availability', 'bionic-headers']) {
-  if @runtime "$qualify" "$compiler" "$ndk" 26 "$root/$feature.c" "$output/$feature.o" -Wall > "$output/$feature.log" 2>&1; then
-    printf '%s\tSUPPORTED\n' "$feature"
-  else
-    printf '%s\tICK_BLOCKED\n' "$feature"
-    rg -q '(error:|fatal error:)' "$output/$feature.log"
-  fi
+  @runtime "$qualify" "$compiler" "$ndk" 26 "$root/$feature.c" "$output/$feature.o" -Wall
+  printf '%s\tSUPPORTED\n' "$feature"
 }
-echo 'PASS A32/softfp positive control, wrong ABI rejections, Clang rejection, terminal compiler failure; header support reported separately'
+if @runtime "$qualify" "$compiler" "$ndk" 25 "$root/bionic-availability.c" "$output/bionic-availability-api25.o" -Wall > "$output/bionic-availability-api25.log" 2>&1; then
+  echo 'FAIL strict API-26 declaration was callable from API 25'
+  exit 1
+fi
+rg -qi 'unavailable' "$output/bionic-availability-api25.log"
+test ! -e "$output/bionic-availability-api25.o"
+echo 'PASS A32/softfp positive control, wrong ABI rejections, Clang rejection, terminal compiler failure, Bionic syntax, and strict API floor'
