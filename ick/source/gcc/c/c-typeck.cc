@@ -56,6 +56,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "builtins.h"
 #include "tree-pretty-print-markup.h"
 #include "gcc-urlifier.h"
+#include "cpplib.h"
+#include "c-family/c-pragma.h"
+#include "ick-android-availability.h"
 
 /* Possible cases of implicit conversions.  Used to select diagnostic messages
    and control folding initializers in convert_for_assignment.  */
@@ -3902,6 +3905,7 @@ build_external_ref (location_t loc, tree id, bool fun, tree *type)
       && !c_omp_array_section_p)
     return error_mark_node;
 
+  ick_check_android_availability (loc, ref);
   if (TREE_UNAVAILABLE (ref))
     error_unavailable_use (ref, NULL_TREE);
   else if (TREE_DEPRECATED (ref))
@@ -8457,6 +8461,13 @@ convert_for_assignment (location_t location, location_t expr_loc, tree type,
 {
   enum tree_code codel = TREE_CODE (type);
   tree orig_rhs = rhs;
+  if (null_pointer_constant && POINTER_TYPE_P (type))
+    {
+      tree annotation = lookup_attribute ("ick_nullability", TYPE_ATTRIBUTES (type));
+      if (annotation
+          && strcmp (IDENTIFIER_POINTER (TREE_VALUE (TREE_VALUE (annotation))), "_Nonnull") == 0)
+        warning_at (location, OPT_Wnonnull, "null assigned to a _Nonnull pointer");
+    }
   tree rhstype;
   enum tree_code coder;
   tree rname = NULL_TREE;

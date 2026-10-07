@@ -346,7 +346,7 @@ jobs:
             -D__ANDROID__
             -std=c17 -O2 -fPIC
             -marm -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16
-            -Wall
+            -Wall -DBIONIC_IOCTL_NO_SIGNEDNESS_OVERLOAD
           )
 
           "$ick" "${common[@]}" -D__ANDROID_API__=26             -c qualification/android-boundary/bionic-nullability.c             -o /tmp/bionic-nullability.o
@@ -357,7 +357,7 @@ jobs:
             echo 'strict API-26 availability was accepted from API 25' >&2
             exit 1
           fi
-          grep -Eqi 'unavailable' /tmp/bionic-availability-api25.log
+          grep -Eqi 'requires Android API 26' /tmp/bionic-availability-api25.log
           test ! -e /tmp/bionic-availability-api25.o
 
           "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"             -h -A /tmp/bionic-headers.o | tee /tmp/bionic-headers.abi

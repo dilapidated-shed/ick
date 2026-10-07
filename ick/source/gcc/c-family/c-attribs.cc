@@ -136,6 +136,7 @@ static tree handle_callback_only_attribute (tree *, tree, tree, int, bool *);
 static tree handle_novops_attribute (tree *, tree, tree, int, bool *);
 static tree handle_unavailable_attribute (tree *, tree, tree, int,
 					  bool *);
+static tree handle_ick_nullability (tree *, tree, tree, int, bool *);
 static tree handle_availability_attribute (tree *, tree, tree, int,
 					   bool *);
 static tree handle_vector_size_attribute (tree *, tree, tree, int,
@@ -508,6 +509,8 @@ const struct attribute_spec c_common_gnu_attributes[] =
 			      handle_deprecated_attribute, NULL },
   { "unavailable",            0, 1, false, false, false, false,
 			      handle_unavailable_attribute, NULL },
+  { "ick_nullability",        1, 1, false, true, false, false,
+                              handle_ick_nullability, NULL },
   { "availability",           1, -1, false, false, false, false,
 			      handle_availability_attribute, NULL },
   { "vector_size",	      1, 1, false, true, false, true,
@@ -4996,122 +4999,63 @@ handle_unavailable_attribute (tree *node, tree name,
 }
 
 
-/* Return the Android API level selected for this translation unit.  ICK's
-   Android driver contract supplies __ANDROID_API__ exactly as the NDK driver
-   does.  Return -1 when the macro is absent or is not a simple integer.  */
-static int
-android_target_api_level ()
-{
-  static const unsigned char name[] = "__ANDROID_API__";
-  cpp_hashnode *node = cpp_lookup (parse_in, name, sizeof (name) - 1);
-  if (!node || !cpp_user_macro_p (node))
-    return -1;
-
-  const unsigned char *definition = cpp_macro_definition (parse_in, node);
-  if (!definition)
-    return -1;
-
-  unsigned int api_level;
-  if (sscanf ((const char *) definition, "__ANDROID_API__ %u", &api_level)
-      != 1)
-    return -1;
-  if (api_level > INT_MAX)
-    return -1;
-  return (int) api_level;
-}
-
-static bool
-availability_identifier_p (tree value, const char *name)
-{
-  return value
-    && TREE_CODE (value) == IDENTIFIER_NODE
-    && strcmp (IDENTIFIER_POINTER (value), name) == 0;
-}
-
-static bool
-availability_integer_value (tree value, HOST_WIDE_INT *result)
-{
-  if (!value || TREE_CODE (value) != INTEGER_CST || !tree_fits_shwi_p (value))
-    return false;
-  *result = tree_to_shwi (value);
-  return true;
-}
-
-/* Handle Clang-compatible availability(android, ...) attributes emitted by
-   Bionic.  The C parser preserves option names rather than treating
-   introduced=NN as a C assignment expression.  For strict Android
-   availability, a declaration introduced after __ANDROID_API__ is marked with
-   GCC's native unavailable bit, so ordinary use-site diagnostics enforce the
-   minimum API rather than merely swallowing the annotation.  */
+/* Retain nullability as metadata without asserting nonnull to optimizers. */
 static tree
-handle_availability_attribute (tree *node, tree name, tree args,
-			       int ARG_UNUSED (flags), bool *no_add_attrs)
+handle_ick_nullability (tree *node, tree, tree arguments, int,
+                       bool *no_add_attrs)
 {
-  *no_add_attrs = true;
-
-  if (!args
-      || !availability_identifier_p (TREE_VALUE (args), "android"))
+  if (!POINTER_TYPE_P (*node))
     {
-      warning (OPT_Wattributes, "%qE attribute ignored for non-Android platform",
-	       name);
+      error ("nullability annotation requires a pointer type");
+      *no_add_attrs = true;
       return NULL_TREE;
     }
-
-  bool strict = false;
-  HOST_WIDE_INT introduced = -1;
-  HOST_WIDE_INT deprecated = -1;
-  HOST_WIDE_INT obsoleted = -1;
-
-  for (tree arg = TREE_CHAIN (args); arg; arg = TREE_CHAIN (arg))
+  tree previous = lookup_attribute ("ick_nullability", TYPE_ATTRIBUTES (*node));
+  if (previous && TREE_VALUE (TREE_VALUE (previous)) != TREE_VALUE (arguments))
     {
-      tree option = TREE_VALUE (arg);
-      if (availability_identifier_p (option, "strict"))
-	{
-	  strict = true;
-	  continue;
-	}
-
-      HOST_WIDE_INT *destination = NULL;
-      if (availability_identifier_p (option, "introduced"))
-	destination = &introduced;
-      else if (availability_identifier_p (option, "deprecated"))
-	destination = &deprecated;
-      else if (availability_identifier_p (option, "obsoleted"))
-	destination = &obsoleted;
-      else if (availability_identifier_p (option, "message")
-	       || availability_identifier_p (option, "replacement"))
-	{
-	  if (TREE_CHAIN (arg))
-	    arg = TREE_CHAIN (arg);
-	  continue;
-	}
-      else
-	continue;
-
-      if (!TREE_CHAIN (arg))
-	{
-	  error ("missing value for Android availability option %qE", option);
-	  return NULL_TREE;
-	}
-      arg = TREE_CHAIN (arg);
-      if (!availability_integer_value (TREE_VALUE (arg), destination))
-	{
-	  error ("Android availability option %qE requires an integer API level",
-		 option);
-	  return NULL_TREE;
-	}
+      error ("conflicting pointer nullability annotations");
+      *no_add_attrs = true;
     }
+  return NULL_TREE;
+}
 
-  int api_level = android_target_api_level ();
-  if (api_level < 0 || !DECL_P (*node))
-    return NULL_TREE;
-
-  if ((obsoleted >= 0 && api_level >= obsoleted)
-      || (strict && introduced >= 0 && api_level < introduced))
-    TREE_UNAVAILABLE (*node) = 1;
-  else if (deprecated >= 0 && api_level >= deprecated)
-    TREE_DEPRECATED (*node) = 1;
-
+/* Preserve validated named Android metadata for use-site checks. */
+static tree
+handle_availability_attribute (tree *, tree, tree arguments, int,
+                               bool *no_add_attrs)
+{
+  if (!arguments || TREE_CODE (TREE_VALUE (arguments)) != IDENTIFIER_NODE
+      || strcmp (IDENTIFIER_POINTER (TREE_VALUE (arguments)), "android") != 0)
+    {
+      error ("ICK availability requires the android platform");
+      *no_add_attrs = true;
+      return NULL_TREE;
+    }
+  for (tree field = TREE_CHAIN (arguments); field; field = TREE_CHAIN (field))
+    {
+      const char *name = IDENTIFIER_POINTER (TREE_PURPOSE (field));
+      tree value = TREE_VALUE (field);
+      bool version = strcmp (name, "introduced") == 0
+                     || strcmp (name, "deprecated") == 0
+                     || strcmp (name, "obsoleted") == 0;
+      bool marker = strcmp (name, "strict") == 0 || strcmp (name, "unavailable") == 0;
+      bool message = strcmp (name, "message") == 0 || strcmp (name, "replacement") == 0;
+      if ((!version && !marker && !message)
+          || ((version || marker) && (TREE_CODE (value) != INTEGER_CST || !tree_fits_uhwi_p (value)))
+          || (version && TREE_CODE (value) == INTEGER_CST
+              && tree_fits_uhwi_p (value) && tree_to_uhwi (value) > INT_MAX)
+          || (message && TREE_CODE (value) != STRING_CST))
+        {
+          error ("invalid Android availability field %qs", name);
+          *no_add_attrs = true;
+        }
+      for (tree earlier = TREE_CHAIN (arguments); earlier != field; earlier = TREE_CHAIN (earlier))
+        if (TREE_PURPOSE (earlier) == TREE_PURPOSE (field))
+          {
+            error ("duplicate Android availability field %qs", name);
+            *no_add_attrs = true;
+          }
+    }
   return NULL_TREE;
 }
 

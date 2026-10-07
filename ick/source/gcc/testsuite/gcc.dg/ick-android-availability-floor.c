@@ -7,5 +7,5 @@ extern int api26_function (void)
 int
 use_api26_function (void)
 {
-  return api26_function (); /* { dg-error "unavailable" } */
+  return api26_function (); /* { dg-error "requires Android API 26" } */
 }

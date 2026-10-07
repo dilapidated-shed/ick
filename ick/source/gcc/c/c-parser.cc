@@ -786,22 +786,6 @@ c_parser_next_token_is_qualifier (c_parser *parser)
   return c_token_is_qualifier (token);
 }
 
-/* Android's Bionic headers use Clang nullability spellings as pointer
-   annotations.  They are not general C type qualifiers: accept them only
-   while parsing the qualifier sequence belonging to a pointer declarator.  */
-static bool
-c_parser_next_token_is_pointer_nullability (c_parser *parser)
-{
-  c_token *token = c_parser_peek_token (parser);
-  if (token->type != CPP_NAME || token->id_kind != C_ID_ID)
-    return false;
-
-  const char *name = IDENTIFIER_POINTER (token->value);
-  return strcmp (name, "_Nonnull") == 0
-    || strcmp (name, "_Nullable") == 0
-    || strcmp (name, "_Null_unspecified") == 0;
-}
-
 /* Return true if TOKEN can start declaration specifiers (not
    including standard attributes), false otherwise.  */
 static bool
@@ -3779,6 +3763,27 @@ c_parser_declspecs (c_parser *parser, struct c_declspecs *specs,
 	  tree value = name_token->value;
 	  c_id_kind kind = name_token->id_kind;
 
+          /* Keep Bionic annotations as pointer metadata, without turning
+             _Nonnull into an optimizer assumption.  A pointer typedef's
+             annotation belongs to the base type, including function returns. */
+          if ((!typespec_ok || seen_type) && kind == C_ID_ID
+              && (strcmp (IDENTIFIER_POINTER (value), "_Nonnull") == 0
+                  || strcmp (IDENTIFIER_POINTER (value), "_Nullable") == 0
+                  || strcmp (IDENTIFIER_POINTER (value), "_Null_unspecified") == 0
+                  || strcmp (IDENTIFIER_POINTER (value), "_Nullable_result") == 0))
+            {
+              tree annotation = build_tree_list
+                (get_identifier ("ick_nullability"),
+                 build_tree_list (NULL_TREE, value));
+              if (specs->type)
+                specs->postfix_attrs = chainon (specs->postfix_attrs, annotation);
+              else
+                declspecs_add_attrs (loc, specs, annotation);
+              c_parser_consume_token (parser);
+              attrs_ok = true;
+              continue;
+            }
+
 	  if (kind == C_ID_ADDRSPACE)
 	    {
 	      addr_space_t as
@@ -5034,12 +5039,6 @@ c_parser_declarator (c_parser *parser, bool type_seen_p, c_dtr_syn kind,
       c_parser_consume_token (parser);
       c_parser_declspecs (parser, quals_attrs, false, false, true,
 			  false, false, true, false, cla_prefer_id);
-      while (c_parser_next_token_is_pointer_nullability (parser))
-	{
-	  c_parser_consume_token (parser);
-	  c_parser_declspecs (parser, quals_attrs, false, false, true,
-			      false, false, true, false, cla_prefer_id);
-	}
       inner = c_parser_declarator (parser, type_seen_p, kind, seen_id);
       if (inner == NULL)
 	return NULL;
@@ -5817,7 +5816,7 @@ c_parser_attribute_arguments (c_parser *parser, bool takes_identifier,
 /* Parse Clang's availability(platform, option[, option]...) argument syntax.
    GCC's generic GNU-attribute argument parser treats "introduced=26" as an
    assignment expression and diagnoses the option name as undeclared.  Keep
-   the option names as identifiers and their values as following list items so
+   the option names as list purposes and their values as list values so
    the availability attribute handler can preserve Android API-floor checks.  */
 static tree
 c_parser_availability_attribute_arguments (c_parser *parser)
@@ -5845,15 +5844,15 @@ c_parser_availability_attribute_arguments (c_parser *parser)
 	}
 
       tree option = c_parser_peek_token (parser)->value;
-      args = chainon (args, build_tree_list (NULL_TREE, option));
       c_parser_consume_token (parser);
-
+      tree value = integer_one_node;
       if (c_parser_next_token_is (parser, CPP_EQ))
 	{
 	  c_parser_consume_token (parser);
-	  c_expr value = c_parser_expr_no_commas (parser, NULL);
-	  args = chainon (args, build_tree_list (NULL_TREE, value.value));
+	  c_expr expression = c_parser_expr_no_commas (parser, NULL);
+          value = expression.value;
 	}
+      args = chainon (args, build_tree_list (option, value));
     }
 
   return args;
