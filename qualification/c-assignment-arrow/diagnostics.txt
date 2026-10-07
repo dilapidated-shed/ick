@@ -1,0 +1,50 @@
+const
+exit_code	1
+/workspace/scratch/f48f7b33f935/ick-assignment/ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-const.c: In function 'reject_const_destination':
+/workspace/scratch/f48f7b33f935/ick-assignment/ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-const.c:7:13: error: assignment of read-only variable 'immutable'
+    7 |   immutable ← 2; /* { dg-error "assignment of read-only variable" } */
+      |             ^
+
+lvalue
+exit_code	1
+/workspace/scratch/f48f7b33f935/ick-assignment/ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-lvalue.c: In function 'reject_non_lvalue_destination':
+/workspace/scratch/f48f7b33f935/ick-assignment/ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-lvalue.c:6:5: error: lvalue required as left operand of assignment
+    6 |   3 ← 4; /* { dg-error "lvalue required" } */
+      |     ^
+
+neighbor
+exit_code	1
+/workspace/scratch/f48f7b33f935/ick-assignment/ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-neighbor.c: In function 'reject_unimplemented_neighbor':
+/workspace/scratch/f48f7b33f935/ick-assignment/ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-neighbor.c:7:15: error: stray '\342' in program
+    7 |   destination <U+2192> 2; /* { dg-error "stray" } */ /* { dg-error "expected" } */
+      |               ^~~~~~~~
+/workspace/scratch/f48f7b33f935/ick-assignment/ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-neighbor.c:7:14: error: expected ';' before numeric constant
+    7 |   destination → 2; /* { dg-error "stray" } */ /* { dg-error "expected" } */
+      |              ^  ~
+      |              ;
+
+baseline-reject
+exit_code	1
+/workspace/scratch/f48f7b33f935/fastchat-probe/assignment-arrow.c: In function 'initialize_append_address':
+/workspace/scratch/f48f7b33f935/fastchat-probe/assignment-arrow.c:9:21: error: stray '\342' in program
+    9 |     address->stream <U+2190> 1;
+      |                     ^~~~~~~~
+/workspace/scratch/f48f7b33f935/fastchat-probe/assignment-arrow.c:9:20: error: expected ';' before numeric constant
+    9 |     address->stream ← 1;
+      |                    ^  ~
+      |                    ;
+/workspace/scratch/f48f7b33f935/fastchat-probe/assignment-arrow.c:10:21: error: stray '\342' in program
+   10 |     address->offset <U+2190> 0;
+      |                     ^~~~~~~~
+/workspace/scratch/f48f7b33f935/fastchat-probe/assignment-arrow.c:10:20: error: expected ';' before numeric constant
+   10 |     address->offset ← 0;
+      |                    ^  ~
+      |                    ;
+/workspace/scratch/f48f7b33f935/fastchat-probe/assignment-arrow.c: In function 'advance_written_extent':
+/workspace/scratch/f48f7b33f935/fastchat-probe/assignment-arrow.c:15:20: error: stray '\342' in program
+   15 |     written_extent <U+2190> written_extent + 1;
+      |                    ^~~~~~~~
+/workspace/scratch/f48f7b33f935/fastchat-probe/assignment-arrow.c:15:19: error: expected ';' before 'written_extent'
+   15 |     written_extent ← written_extent + 1;
+      |                   ^  ~~~~~~~~~~~~~~
+      |                   ;
