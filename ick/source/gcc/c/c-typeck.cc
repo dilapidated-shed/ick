@@ -8461,7 +8461,9 @@ convert_for_assignment (location_t location, location_t expr_loc, tree type,
 {
   enum tree_code codel = TREE_CODE (type);
   tree orig_rhs = rhs;
-  if (null_pointer_constant && POINTER_TYPE_P (type))
+  if (POINTER_TYPE_P (type)
+      && (null_pointer_constant
+          || (POINTER_TYPE_P (TREE_TYPE (rhs)) && integer_zerop (rhs))))
     {
       tree annotation = lookup_attribute ("ick_nullability", TYPE_ATTRIBUTES (type));
       if (annotation

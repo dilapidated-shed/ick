@@ -3,12 +3,16 @@ f3040ceab2d00ed41e8c5a82fbc9cdd80e857fefc15049d80957db46ec9708f4  ick/source/gcc
 c084c5eee315bf0b0650d1b9684ea3113614d01f6d6a67e1d2876f71a9ad8a49  ick/source/gcc/c-family/c-attribs.cc
 eb5224f958342e3f90ea592e46bb6a1df25a40ec15e46a9c8c573191bbd51148  ick/source/gcc/c-family/c-common.def
 01ec5949f5b8113d0de1913f91b4e44ce25ff05f53b0d1aecd6179053885c65b  ick/source/gcc/c-family/c-lex.cc
+37e6af08ca57e3596f03e560db6c4e52010cfb8da39003a114ab9a1fb6f9007a  ick/source/gcc/c/c-decl.cc
 5b7b93f4cc8aff0a60e3e01ec7babfad7c11b504ea6bd7eba554d09f1788f0ef  ick/source/gcc/c/c-parser.cc
-d13a2ba3dd62866206b635b98b091dc49a6e1c4f0bc86d685a66200c518c9d54  ick/source/gcc/c/c-typeck.cc
+4899484bb96f27353366f1ea667bacbf775a42b8a210f0fb43beeabf8b52b537  ick/source/gcc/c/c-typeck.cc
 e79306adbfa5904ae520e36d03c52e693bb04b61c0ed2b11256b6a11edb91e75  ick/source/gcc/c/ick-android-availability.h
 83247d67c48e8587f6b762bf932e88f2b0c3bd356142afed5254dee9005eb874  ick/source/gcc/fold-const.cc
 85b6a87aebfa02b41f80bb86278effefc109432fb8a730f5d3c94557a3d8484e  ick/source/gcc/ipa-icf.cc
 6880e7e43f7fb53f7faa28bae0742910973758eafd27350c28f4caad547a9661  ick/source/gcc/testsuite/gcc.dg/ick-android-address-api.c
+d9f2969a4812ec01632f33bbd17e5dc63e816fdce76e9d91617fbd4199952b4d  ick/source/gcc/testsuite/gcc.dg/ick-android-array-conflict.c
+5445932307c8b778aea88f416873e91f1d8a6ae1991e8ff3725c24a783e9bac3  ick/source/gcc/testsuite/gcc.dg/ick-android-array-null-call.c
+d59d1ed01fac80b9ffaa9ae0ce16297f2e8336ae89a225e0a5e561b8f668f329  ick/source/gcc/testsuite/gcc.dg/ick-android-array-nullability.c
 e0a1bc88a7d6831d643ed9d500e20176e9a9e3ff095b6e240ee2157b65315178  ick/source/gcc/testsuite/gcc.dg/ick-android-availability-floor.c
 39aff9a35330cb5703cc20b14edd755c69c0c215f36096aab68082535154ab85  ick/source/gcc/testsuite/gcc.dg/ick-android-availability-inline.c
 a312fc14ee866598b8c2ba220dd14c3bd9e7c20e49e694989c6eab0dbde732ac  ick/source/gcc/testsuite/gcc.dg/ick-android-declarations.c
