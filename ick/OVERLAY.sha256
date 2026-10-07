@@ -1,9 +1,14 @@
 f3040ceab2d00ed41e8c5a82fbc9cdd80e857fefc15049d80957db46ec9708f4  ick/source/gcc/builtins.cc
 589500efe5456273cb241201dce6443c3667a345904bf461c755e0a4ca8f2941  ick/source/gcc/builtins.def
 eb5224f958342e3f90ea592e46bb6a1df25a40ec15e46a9c8c573191bbd51148  ick/source/gcc/c-family/c-common.def
+01ec5949f5b8113d0de1913f91b4e44ce25ff05f53b0d1aecd6179053885c65b  ick/source/gcc/c-family/c-lex.cc
 6dc742c49353a996188e0112c0f9ae68cc2f2d084b68c496c09316ed9df86450  ick/source/gcc/c/c-typeck.cc
 83247d67c48e8587f6b762bf932e88f2b0c3bd356142afed5254dee9005eb874  ick/source/gcc/fold-const.cc
 85b6a87aebfa02b41f80bb86278effefc109432fb8a730f5d3c94557a3d8484e  ick/source/gcc/ipa-icf.cc
+35556a69731be76b0b61b17ab79e52635b3144fe13e23da46cdbb50ebce6f01a  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-const.c
+47d9d517bb15b8685b0dd97b031c91bc676f735cc306232a3a4b4f133c6b30dc  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-lvalue.c
+0192fde7cf253856eb503d912111c5e124c4c57f3ca76f090d7bd22076b49ff5  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-neighbor.c
+fda547c56326840401e9aeee6f5a8f600d61c9306a87f473fb920e7bacce8831  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow.c
 bae0c71f56075b442e2e36e9a8913ae608b67d0d4d7e5536d7b396d0ca567053  ick/source/gcc/testsuite/gcc.dg/ick-complex-object-byte-fold.c
 b86d5dcdf4c0d63dfcaf87b0224dd91ec4bb20b6ab08f6f441b22c2a23a8aa54  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float128.c
 03c65d49694145bec18339a5276d7ea1631aa0f0d527c3836b8cbc6baea30091  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float16.c
