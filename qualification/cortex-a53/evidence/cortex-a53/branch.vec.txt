@@ -1,0 +1,9 @@
+qualification/cortex-a53/branch.c:6:36: missed: couldn't vectorize loop
+qualification/cortex-a53/branch.c:6:36: missed: not vectorized: unsupported control flow in loop.
+qualification/cortex-a53/branch.c:3:10: note: vectorized 0 loops in function.
+qualification/cortex-a53/branch.c:9:19: note: ***** Analysis failed with vector mode V4SI
+qualification/cortex-a53/branch.c:9:19: note: ***** The result for vector mode V16QI would be the same
+qualification/cortex-a53/branch.c:9:19: note: ***** The result for vector mode V8QI would be the same
+qualification/cortex-a53/branch.c:9:19: note: ***** The result for vector mode V4HI would be the same
+qualification/cortex-a53/branch.c:9:19: note: ***** Re-trying analysis with vector mode V2SI
+qualification/cortex-a53/branch.c:9:19: note: ***** Analysis failed with vector mode V2SI

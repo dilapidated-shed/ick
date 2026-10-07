@@ -32,7 +32,8 @@ Named devices map onto the independent dimensions above; they do not become new
 compiler ABIs.
 
 - [MIRO C67 target map](miro-c67-target-map.md) — Helio G36 / Cortex-A53 model
-  facts are known, while the physical Android ABI is still unverified.
+  facts and physical arm64-v8a Pauli package execution are recorded. The full ABI
+  receipt and physical ICK performance remain separate acceptance boundaries.
 
 ## Android API floors
 

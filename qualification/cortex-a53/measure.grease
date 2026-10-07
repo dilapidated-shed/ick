@@ -1,0 +1,24 @@
+#!/usr/bin/env grease
+# Run through the C67's verified Grease entrypoint; no compilation on device.
+set -eu
+root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+cyan=''; green=''; red=''; reset=''
+if test -t 1; then
+  cyan=$(printf '\033[36m'); green=$(printf '\033[32m'); red=$(printf '\033[31m')
+  reset=$(printf '\033[0m')
+fi
+printf '%sC67 CPU benchmark%s\n' "$cyan" "$reset"
+model=$(/system/bin/getprop ro.product.model)
+if test "$model" != 'Miro C67'; then
+  printf '%sFAIL: requires physical Miro C67%s\n' "$red" "$reset" >&2
+  exit 1
+fi
+cd -- "$root"
+sha256sum -c native.sha256
+test -x "$root/benchmark"
+"$root/generic/android-oracle" > "$root/generic-physical-oracle.tsv"
+"$root/cortex-a53/android-oracle" > "$root/a53-physical-oracle.tsv"
+cmp "$root/generic-physical-oracle.tsv" "$root/a53-physical-oracle.tsv"
+"$root/benchmark" > "$root/physical-timing.tsv"
+cat "$root/physical-timing.tsv"
+printf '%sPASS: measured repeated pairs; retain native.sha256 and all TSV receipts%s\n' "$green" "$reset"

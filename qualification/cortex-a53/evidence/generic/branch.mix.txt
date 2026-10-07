@@ -1,0 +1,13 @@
+tbnz	1
+msub	2
+b.eq	1
+b.ne	1
+udiv	2
+ldr	3
+cbz	1
+b	1
+cmp	2
+ret	2
+add	8
+mov	5
+eor	1
