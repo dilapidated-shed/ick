@@ -45,5 +45,5 @@ This receipt claims no Android APK, installed compiler release, or physical
 MIRO A1 execution. Both remain `BLOCKED/NOT_RUN` for this task.
 
 Files: `receipt.tsv`, `commands.txt`, `diagnostics.txt`, and
-`compiler-trace.txt`. Fixture source is owned under
+`compiler-trace.txt` (trailing line blanks normalized). Fixture source is owned under
 `ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow*.c`.
