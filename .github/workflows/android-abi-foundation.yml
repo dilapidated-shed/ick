@@ -476,9 +476,9 @@ jobs:
             adb shell chmod 755 /data/local/tmp/ick-android-runtime-probe
             adb pull /data/local/tmp/ick-android-runtime-probe /tmp/ick-android-runtime-receipt/executed-probe
             cmp /tmp/ick-android-runtime-probe /tmp/ick-android-runtime-receipt/executed-probe
-            adb shell '/system/bin/sh -c "exit 43"; printf "ick_runtime_exit=%s\n" "$?"' > /tmp/ick-android-runtime-receipt/negative-control.txt
+            adb shell '/system/bin/sh -c "exit 43"; echo "ick_runtime_exit=$?"' > /tmp/ick-android-runtime-receipt/negative-control.txt
             tr -d '\r' < /tmp/ick-android-runtime-receipt/negative-control.txt | grep -qx 'ick_runtime_exit=43'
-            adb shell '/data/local/tmp/ick-android-runtime-probe; printf "ick_runtime_exit=%s\n" "$?"' > /tmp/ick-android-runtime-receipt/execution.txt
+            adb shell '/data/local/tmp/ick-android-runtime-probe; echo "ick_runtime_exit=$?"' > /tmp/ick-android-runtime-receipt/execution.txt
             cat /tmp/ick-android-runtime-receipt/execution.txt
             tr -d '\r' < /tmp/ick-android-runtime-receipt/execution.txt | grep -qx 'ick_runtime_exit=0'
 
