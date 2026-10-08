@@ -136,7 +136,7 @@ jobs:
           set -euxo pipefail
           . ick/SOURCE.lock
           test "$(git -C gcc rev-parse HEAD)" = "$gcc_commit"
-          sh ick/materialize.sh gcc source
+          bash ick/materialize.sh gcc source
           test -s source/COPYING3
           test -s source/COPYING.RUNTIME
           test -s source/gcc/config/linux-android.h
@@ -332,6 +332,55 @@ jobs:
         run: |
           set -euxo pipefail
           sdkmanager "ndk;$ANDROID_NDK_VERSION"
+
+      - name: Verify ARM32 ICK against unmodified Bionic headers
+        if: matrix.abi == 'armeabi-v7a'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          ndk="$sdk_root/ndk/$ANDROID_NDK_VERSION"
+          sysroot="$ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          ick="$GITHUB_WORKSPACE/stage/bin/arm-linux-gnueabi-gcc"
+          common=(
+            --sysroot="$sysroot"
+            -isystem "$sysroot/usr/include"
+            -isystem "$sysroot/usr/include/arm-linux-androideabi"
+            -D__ANDROID__
+            -std=c17 -O2 -fPIC
+            -marm -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16
+            -Wall -DBIONIC_IOCTL_NO_SIGNEDNESS_OVERLOAD
+          )
+
+          "$ick" "${common[@]}" -D__ANDROID_API__=26             -c qualification/android-boundary/bionic-nullability.c             -o /tmp/bionic-nullability.o
+          "$ick" "${common[@]}" -D__ANDROID_API__=26             -c qualification/android-boundary/bionic-availability.c             -o /tmp/bionic-availability-api26.o
+          "$ick" "${common[@]}" -D__ANDROID_API__=26             -c qualification/android-boundary/bionic-headers.c             -o /tmp/bionic-headers.o
+
+          if "$ick" "${common[@]}" -D__ANDROID_API__=25               -c qualification/android-boundary/bionic-availability.c               -o /tmp/bionic-availability-api25.o               >/tmp/bionic-availability-api25.log 2>&1; then
+            echo 'strict API-26 availability was accepted from API 25' >&2
+            exit 1
+          fi
+          grep -Eqi 'requires Android API 26' /tmp/bionic-availability-api25.log
+          test ! -e /tmp/bionic-availability-api25.o
+
+          arm-linux-gnueabi-readelf -h -A /tmp/bionic-headers.o | tee /tmp/bionic-headers.abi
+          grep -q 'Class:.*ELF32' /tmp/bionic-headers.abi
+          grep -q 'Machine:.*ARM' /tmp/bionic-headers.abi
+          grep -q 'Tag_ARM_ISA_use: Yes' /tmp/bionic-headers.abi
+          ! grep -q 'Tag_ABI_VFP_args: VFP registers' /tmp/bionic-headers.abi
+
+      - name: Preserve the A1 compiler for consumer qualification
+        if: matrix.abi == 'armeabi-v7a'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ick-a1-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            build/gcc/xgcc
+            build/gcc/cc1
+            build/gcc/collect2
+            build/gcc/include/
+            build/gcc/include-fixed/
 
       - name: Verify API floor and scalar ABI sizes
         shell: bash
