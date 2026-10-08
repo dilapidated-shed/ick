@@ -1,0 +1,8 @@
+qualification/cortex-a53/vector.c:7:36: optimized: loop vectorized using 16 byte vectors and unroll factor 4
+qualification/cortex-a53/vector.c:4:6: note: vectorized 1 loops in function.
+qualification/cortex-a53/vector.c:8:45: note: ***** Analysis failed with vector mode V4SF
+qualification/cortex-a53/vector.c:8:45: note: ***** The result for vector mode V16QI would be the same
+qualification/cortex-a53/vector.c:8:45: note: ***** The result for vector mode V8QI would be the same
+qualification/cortex-a53/vector.c:8:45: note: ***** The result for vector mode V4HI would be the same
+qualification/cortex-a53/vector.c:8:45: note: ***** Re-trying analysis with vector mode V2SI
+qualification/cortex-a53/vector.c:8:45: note: ***** Analysis failed with vector mode V2SI

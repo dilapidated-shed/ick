@@ -210,6 +210,9 @@ jobs:
           grep -q 'Machine:' /tmp/plain.elf
           grep -Fq '${{ matrix.elf_machine }}' /tmp/plain.elf
 
+      - name: Compile C assignment-arrow regression with the owned ICK
+        run: ./stage/bin/${{ matrix.gnu_target }}-gcc ${{ matrix.target_flags }} -std=c11 -O2 -Wall -Wextra -Werror -fPIC -c source/gcc/testsuite/gcc.dg/ick-assignment-arrow.c -o /tmp/ick-assignment-arrow.o
+
       - name: Verify five numeric types and Circle96 with ICK
         shell: bash
         run: |
@@ -476,6 +479,35 @@ jobs:
           for align in "${aligns[@]}"; do
             test "$((align))" -ge ${{ matrix.required_load_alignment }}
           done
+
+      - name: Check reproducible materialization and unchanged AArch64 backend
+        if: matrix.abi == 'arm64-v8a'
+        run: |
+          sh ick/materialize.sh gcc source-replay
+          diff -qr source source-replay
+          diff -qr gcc/gcc/config/aarch64 source/gcc/config/aarch64
+          cmp gcc/gcc/config/arm/cortex-a53.md source/gcc/config/arm/cortex-a53.md
+
+      - name: Install correctness-only AArch64 execution tools
+        if: matrix.abi == 'arm64-v8a'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
+
+      - name: Qualify generic and Cortex-A53 Android code
+        if: matrix.abi == 'arm64-v8a'
+        run: |
+          make -f qualification/cortex-a53/Makefile \
+            ICK="$GITHUB_WORKSPACE/stage/bin/aarch64-linux-gnu-gcc" \
+            NDK_CC="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/ndk/$ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" \
+            all regression
+
+      - name: Retain A53 assembly, hashes, reports and native Android benchmarks
+        if: always() && matrix.abi == 'arm64-v8a'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cortex-a53-qualification-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/cortex-a53/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Record qualification boundary
         shell: bash

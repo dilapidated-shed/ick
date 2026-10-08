@@ -1,0 +1,68 @@
+The following options are target specific:
+  -Wexperimental-fmv-target   		[enabled]
+  -fdump-tuning-model=        		
+  -ffuse-ops-with-volatile-access 	[enabled]
+  -mabi=                      		lp64
+  -march=                     		armv8-a
+  -mautovec-preference=       		default
+  -mbig-endian                		[disabled]
+  -mbionic                    		[disabled]
+  -mbranch-protection=        		
+  -mcmodel=                   		small
+  -mcpu=                      		
+  -mearly-ldp-fusion          		[enabled]
+  -mearly-ra=                 		all
+  -menable-sysreg-checking    		[disabled]
+  -mfix-cortex-a53-835769     		[enabled]
+  -mfix-cortex-a53-843419     		[enabled]
+  -mgeneral-regs-only         		[disabled]
+  -mglibc                     		[enabled]
+  -mharden-sls=               		
+  -mlate-ldp-fusion           		[enabled]
+  -mlittle-endian             		[enabled]
+  -mlow-precision-div         		[disabled]
+  -mlow-precision-recip-sqrt  		[disabled]
+  -mlow-precision-sqrt        		[disabled]
+  -mmax-vectorization         		[disabled]
+  -mmusl                      		[disabled]
+  -mnarrow-gp-writes          		[enabled]
+  -momit-leaf-frame-pointer   		[enabled]
+  -moutline-atomics           		[enabled]
+  -moverride=<string>         		
+  -mpc-relative-literal-loads 		[enabled]
+  -msign-return-address=      		none
+  -mstack-protector-guard-offset= 	
+  -mstack-protector-guard-reg= 		
+  -mstack-protector-guard=    		global
+  -mstrict-align              		[disabled]
+  -msve-vector-bits=<number>  		scalable
+  -mtls-dialect=              		desc
+  -mtls-size=                 		24
+  -mtp=                       		el0
+  -mtrack-speculation         		[disabled]
+  -mtune=                     		cortex-a53
+  -muclibc                    		[disabled]
+  -muser-provided-CPU=        		
+  -mverbose-cost-dump         		[disabled]
+
+  Known AArch64 ABIs (for use with the -mabi= option):
+    ilp32 lp64
+
+  Supported AArch64 return address signing scope (for use with -msign-return-address= option):
+    all non-leaf none
+
+  The code model option names for -mcmodel:
+    large small tiny
+
+  Valid arguments to -mstack-protector-guard=:
+    global sysreg
+
+  The possible SVE vector lengths:
+    1024 128 2048 256 512 scalable
+
+  The possible TLS dialects:
+    desc trad
+
+  The register used to access the thread pointer:
+    el0 el1 el2 el3 tpidr_el0 tpidr_el1 tpidr_el2 tpidr_el3 tpidrro_el0
+

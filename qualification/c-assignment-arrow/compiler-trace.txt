@@ -1,0 +1,33 @@
+Reading specs from /workspace/scratch/f48f7b33f935/compiler-arrow/gcc/specs
+COLLECT_GCC=/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/xgcc
+Target: aarch64-linux-gnu
+Configured with: ../repro-source/configure --target=aarch64-linux-gnu --prefix=/workspace/scratch/9a823f093abb/ick/stage --with-as=/workspace/scratch/9a823f093abb/deps/usr/bin/aarch64-linux-gnu-as --with-ld=/workspace/scratch/9a823f093abb/deps/usr/bin/aarch64-linux-gnu-ld --enable-languages=c --disable-bootstrap --disable-multilib --disable-nls --disable-shared --disable-threads --without-headers --disable-libatomic --disable-libgomp --disable-libquadmath --disable-libssp --disable-libvtv --with-gmp-include=/workspace/scratch/9a823f093abb/deps/usr/include/x86_64-linux-gnu --with-gmp-lib=/workspace/scratch/9a823f093abb/deps/usr/lib/x86_64-linux-gnu --with-mpfr-include=/workspace/scratch/9a823f093abb/deps/usr/include --with-mpfr-lib=/workspace/scratch/9a823f093abb/deps/usr/lib/x86_64-linux-gnu --with-mpc-include=/workspace/scratch/9a823f093abb/deps/usr/include --with-mpc-lib=/workspace/scratch/9a823f093abb/deps/usr/lib/x86_64-linux-gnu
+Thread model: single
+Supported LTO compression algorithms: zlib
+gcc version 17.0.0 20260813 (experimental) (GCC)
+COLLECT_GCC_OPTIONS='-B' '/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/' '-v' '-std=c11' '-O2' '-Wall' '-Wextra' '-Werror' '-c' '-o' '/workspace/scratch/f48f7b33f935/arrow-tests/trace.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' '/workspace/scratch/f48f7b33f935/arrow-tests/'
+ /workspace/scratch/f48f7b33f935/compiler-arrow/gcc/cc1 -quiet -v -iprefix /workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/aarch64-linux-gnu/17.0.0/ -isystem /workspace/scratch/f48f7b33f935/compiler-arrow/gcc/include -isystem /workspace/scratch/f48f7b33f935/compiler-arrow/gcc/include-fixed /workspace/scratch/f48f7b33f935/fresh-arrow-source/gcc/testsuite/gcc.dg/ick-assignment-arrow.c -quiet -dumpdir /workspace/scratch/f48f7b33f935/arrow-tests/ -dumpbase trace.c -dumpbase-ext .c -mlittle-endian -mabi=lp64 -O2 -Wall -Wextra -Werror -std=c11 -version -o /tmp/ccrsieRd.s
+GNU C11 (GCC) version 17.0.0 20260813 (experimental) (aarch64-linux-gnu)
+	compiled by GNU C version 13.3.0, GMP version 6.3.0, MPFR version 4.2.1, MPC version 1.3.1, isl version isl-0.26-GMP
+
+GGC heuristics: --param ggc-min-expand=30 --param ggc-min-heapsize=4096
+ignoring nonexistent directory "/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/aarch64-linux-gnu/17.0.0/include"
+ignoring nonexistent directory "/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/aarch64-linux-gnu/17.0.0/include-fixed"
+ignoring nonexistent directory "/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/aarch64-linux-gnu/17.0.0/../../../../aarch64-linux-gnu/sys-include"
+ignoring nonexistent directory "/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/aarch64-linux-gnu/17.0.0/../../../../aarch64-linux-gnu/include"
+ignoring nonexistent directory "/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/../../lib/gcc/aarch64-linux-gnu/17.0.0/include"
+ignoring nonexistent directory "/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/../../lib/gcc/aarch64-linux-gnu/17.0.0/include-fixed"
+ignoring nonexistent directory "/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/../../lib/gcc/aarch64-linux-gnu/17.0.0/../../../../aarch64-linux-gnu/sys-include"
+ignoring nonexistent directory "/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/../lib/gcc/../../lib/gcc/aarch64-linux-gnu/17.0.0/../../../../aarch64-linux-gnu/include"
+#include "..." search starts here:
+#include <...> search starts here:
+ /workspace/scratch/f48f7b33f935/compiler-arrow/gcc/include
+ /workspace/scratch/f48f7b33f935/compiler-arrow/gcc/include-fixed
+End of search list.
+Compiler executable checksum: 92b734a234a2016327f2a88a0b8264be
+COLLECT_GCC_OPTIONS='-B' '/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/' '-v' '-std=c11' '-O2' '-Wall' '-Wextra' '-Werror' '-c' '-o' '/workspace/scratch/f48f7b33f935/arrow-tests/trace.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' '/workspace/scratch/f48f7b33f935/arrow-tests/'
+ /workspace/scratch/9a823f093abb/deps/usr/bin/aarch64-linux-gnu-as -v -EL -mabi=lp64 -o /workspace/scratch/f48f7b33f935/arrow-tests/trace.o /tmp/ccrsieRd.s
+GNU assembler version 2.42 (aarch64-linux-gnu) using BFD version (GNU Binutils for Ubuntu) 2.42
+COMPILER_PATH=/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/
+LIBRARY_PATH=/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/
+COLLECT_GCC_OPTIONS='-B' '/workspace/scratch/f48f7b33f935/compiler-arrow/gcc/' '-v' '-std=c11' '-O2' '-Wall' '-Wextra' '-Werror' '-c' '-o' '/workspace/scratch/f48f7b33f935/arrow-tests/trace.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' '/workspace/scratch/f48f7b33f935/arrow-tests/trace.'

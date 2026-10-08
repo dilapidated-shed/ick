@@ -22,6 +22,9 @@ c4d2a957f1caaec9e4a9fc0140a4f76b1cfe511c66b72ec2620e891e5614eb5a  ick/source/gcc
 d21863fe49bc69943bcc886a28434a4eaf5d7bf7435c8e07c377bb2f867dac30  ick/source/gcc/testsuite/gcc.dg/ick-android-null-conflict.c
 eb0572085a4d9d16898a0c916af016ada4e2d20544a643dc870c8645de94bd45  ick/source/gcc/testsuite/gcc.dg/ick-android-nullability.c
 b01992940196b10d6b93f2d3b4adfe1504f2144ebae13715c96060c53b3ca0f1  ick/source/gcc/testsuite/gcc.dg/ick-android-unknown-api.c
+35556a69731be76b0b61b17ab79e52635b3144fe13e23da46cdbb50ebce6f01a  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-const.c
+47d9d517bb15b8685b0dd97b031c91bc676f735cc306232a3a4b4f133c6b30dc  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-lvalue.c
+0192fde7cf253856eb503d912111c5e124c4c57f3ca76f090d7bd22076b49ff5  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-neighbor.c
 fda547c56326840401e9aeee6f5a8f600d61c9306a87f473fb920e7bacce8831  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow.c
 bae0c71f56075b442e2e36e9a8913ae608b67d0d4d7e5536d7b396d0ca567053  ick/source/gcc/testsuite/gcc.dg/ick-complex-object-byte-fold.c
 b86d5dcdf4c0d63dfcaf87b0224dd91ec4bb20b6ab08f6f441b22c2a23a8aa54  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float128.c
