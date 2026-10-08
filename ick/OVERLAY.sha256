@@ -7,8 +7,10 @@ eb5224f958342e3f90ea592e46bb6a1df25a40ec15e46a9c8c573191bbd51148  ick/source/gcc
 5b7b93f4cc8aff0a60e3e01ec7babfad7c11b504ea6bd7eba554d09f1788f0ef  ick/source/gcc/c/c-parser.cc
 4899484bb96f27353366f1ea667bacbf775a42b8a210f0fb43beeabf8b52b537  ick/source/gcc/c/c-typeck.cc
 e79306adbfa5904ae520e36d03c52e693bb04b61c0ed2b11256b6a11edb91e75  ick/source/gcc/c/ick-android-availability.h
-83247d67c48e8587f6b762bf932e88f2b0c3bd356142afed5254dee9005eb874  ick/source/gcc/fold-const.cc
+7cff7d25749dd6fe107c5c7d4505c04c16098714434bafbec366918350bbd382  ick/source/gcc/fold-const.cc
+12a9e91b53649c6c6773f19359aff9fdee6da0fda23264fe7c9e995ffd288e4e  ick/source/gcc/gimple-fold.cc
 85b6a87aebfa02b41f80bb86278effefc109432fb8a730f5d3c94557a3d8484e  ick/source/gcc/ipa-icf.cc
+714ac5fb72166894f562ebfbd9831ebc3d6c898de692f5ee55a08d5645170959  ick/source/gcc/match.pd
 6880e7e43f7fb53f7faa28bae0742910973758eafd27350c28f4caad547a9661  ick/source/gcc/testsuite/gcc.dg/ick-android-address-api.c
 d9f2969a4812ec01632f33bbd17e5dc63e816fdce76e9d91617fbd4199952b4d  ick/source/gcc/testsuite/gcc.dg/ick-android-array-conflict.c
 5445932307c8b778aea88f416873e91f1d8a6ae1991e8ff3725c24a783e9bac3  ick/source/gcc/testsuite/gcc.dg/ick-android-array-null-call.c
@@ -30,11 +32,14 @@ fda547c56326840401e9aeee6f5a8f600d61c9306a87f473fb920e7bacce8831  ick/source/gcc
 2f7e25855ba8428b323734bb3a585690829ef08acd7f6b8e334aaa9cf65fe3a0  ick/source/gcc/testsuite/gcc.dg/ick-multiplication-neighbor.c
 bae0c71f56075b442e2e36e9a8913ae608b67d0d4d7e5536d7b396d0ca567053  ick/source/gcc/testsuite/gcc.dg/ick-complex-object-byte-fold.c
 b86d5dcdf4c0d63dfcaf87b0224dd91ec4bb20b6ab08f6f441b22c2a23a8aa54  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float128.c
+e6d2740cc8cc684e25d266d03bcf3217def79b9ede290faee3f50c51edb4941b  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float128-run.c
 03c65d49694145bec18339a5276d7ea1631aa0f0d527c3836b8cbc6baea30091  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float16.c
 59af45cc272bf94fae95cacf9dcaaac2b2202fc00cfafe6f84d813cfc5707f21  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-layout.c
 74bd07610e4b9cd18602009d7b0a100468c4109f41f81f2ca2f3b466f8e97f77  ick/source/gcc/testsuite/gcc.dg/ick-complex-round.c
-2c54cdbedc75da8059f31ee413818992f528fc6680a6090db717ef29f8d5a670  ick/source/gcc/tree-complex.cc
+9d462eb85225d5b37ab980b410a32f55bb2d8a71daa2d5b8c1716fc676406b50  ick/source/gcc/testsuite/gcc.dg/ick-complex-runtime-byte-load.c
+b44a1b439f7dd91d7bedafbb63a83510cb3cd005ed4989a0210bd746fa2f5403  ick/source/gcc/tree-complex.cc
 23f7aa6a9a92d81594a1d497c0e0e023b1890e42c588a82c7deac8a72a5bddf2  ick/source/gcc/tree-ssa-sccvn.cc
+e547744836b9eb6b22a82600e89aa5b5d7dd9214eb24118fb6608690a5aec9db  ick/source/gcc/tree-ssa.cc
 08a10054b4dcf6e897e19717ac1cf8ed6ef45b5a7b41c1de3877b9eca6954e5d  ick/source/gcc/tree-streamer-in.cc
 cf7f5de72531f0d45bcae5e351159953c3e81901987597c2a255ae270b530ecb  ick/source/gcc/tree-streamer-out.cc
 0f30e982ffa435c3812ae00607dc81c55b2422510ba003afece8b4ad50ca820f  ick/source/gcc/tree.cc
