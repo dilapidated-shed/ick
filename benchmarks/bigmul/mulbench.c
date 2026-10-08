@@ -110,7 +110,7 @@ static void benchmark_one(size_t abits, size_t bbits, int kind, int samples) {
     for (int k=0; k<samples; ++k) {
         uint64_t t0 = clock_ns();
         for (size_t j=0; j<reps; ++j) {
-            if (MUL(a, na, nb, out)) exit(4);
+            if (MUL(a, na, b, nb, out)) exit(4);
             sink ^= out[(j+k) % (na+nb)];
         }
         samples_ns[k] = (double)(clock_ns() - t0) / (double)reps;
