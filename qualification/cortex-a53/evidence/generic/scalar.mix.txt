@@ -1,0 +1,12 @@
+fadd	2
+b.ne	1
+ldr	1
+cbz	1
+fmul	4
+cmp	1
+fsub	2
+ret	2
+fmov	12
+add	1
+stp	4
+mov	3

@@ -1,0 +1,3 @@
+-std=c11 -O3 -fPIC -ffixed-x18 -march=armv8-a -ffp-contract=off -fno-fast-math -ffreestanding -nostdinc -I/workspace/scratch/9a823f093abb/ick/qualification/cortex-a53 -mtune=generic
+-std=c11 -O3 -fPIC -ffixed-x18 -march=armv8-a -ffp-contract=off -fno-fast-math -ffreestanding -nostdinc -I/workspace/scratch/9a823f093abb/ick/qualification/cortex-a53 -mtune=cortex-a53
+scalar only: -fno-tree-vectorize
