@@ -218,6 +218,8 @@ jobs:
 
       - name: Compile C assignment-arrow regression with the owned ICK
         run: ./stage/bin/${{ matrix.gnu_target }}-gcc ${{ matrix.target_flags }} -std=c11 -O2 -Wall -Wextra -Werror -fPIC -c source/gcc/testsuite/gcc.dg/ick-assignment-arrow.c -o /tmp/ick-assignment-arrow.o
+      - name: Compile C multiplication regression with the owned ICK
+        run: ./stage/bin/${{ matrix.gnu_target }}-gcc ${{ matrix.target_flags }} -std=c11 -O2 -Wall -Wextra -Werror -fPIC -c source/gcc/testsuite/gcc.dg/ick-multiplication-glyph.c -o /tmp/ick-multiplication-glyph.o
 
       - name: Verify five numeric types and Circle96 with ICK
         shell: bash
