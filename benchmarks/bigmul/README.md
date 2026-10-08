@@ -70,6 +70,9 @@ python3 network_shape.py --multiply-hex ffffffffffffffff 8000000000000001
 
 The first command reports 12 radix-2 butterfly edges across three layers, strides 1/2/4, and the bit-reversal permutation's cycle histogram `{1: 4, 2: 2}`. The second reports limb count, bit weight, nonzero-limb density, and schoolbook limb-pair counts. Its cache-line crossing count is **a model**, not observed cache misses. None of these counts implement or validate the paper's framed address-network savings. To compare implementations meaningfully, ICK must eventually emit the actual sequence of operations, permutations, and memory traffic, not merely assume an FFT schedule. Structural vectors should accompany timings instead of being reduced to an arbitrary "beauty score."
 
+
+The PR's `bigmul-benchmark.yml` workflow runs the exact PR head on native GitHub-hosted x86-64 and ARM64. Both jobs keep `baseline.csv` and `machine.txt` as separately named artifacts for 30 days, with no performance-threshold failure. This is reproducible platform evidence, not a substitute for physical ARM32 or AIX.
+
 ## Concurrency and build constraints
 
 The benchmark lab uses no external benchmark framework. The CI acceptance path can compile and execute it with native C and Python 3. Do not add unpinned GitHub Action dependencies or claim Android/POWER/AIX timing from a hosted x86-64 runner. Source-checks and emulators can catch mistakes, but the target device's measured results remain a separate gate. No automatic benchmark regression threshold should fail a build until variance and target allocation are characterized.
