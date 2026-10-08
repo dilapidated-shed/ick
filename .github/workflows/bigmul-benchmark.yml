@@ -36,6 +36,14 @@ jobs:
         run: |
           cc -O3 -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra mulbench.c -o mulbench
           ./mulbench --bench 4096 5 > baseline.csv
+          {
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "compiler_flags=-O3 -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra"
+            uname -a
+            cc --version | head -n 1
+            python3 --version
+            lscpu || true
+          } > machine.txt
           head -n 16 baseline.csv
           {
             echo "### Bigmul smoke — ${{ matrix.runner }}"
@@ -45,3 +53,12 @@ jobs:
             echo ""
             echo "Hot in-process schoolbook baseline only; no performance gate or cross-runner ranking."
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain machine-specific timing receipts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bigmul-smoke-${{ matrix.runner }}
+          path: |
+            benchmarks/bigmul/baseline.csv
+            benchmarks/bigmul/machine.txt
+          if-no-files-found: error
+          retention-days: 30
