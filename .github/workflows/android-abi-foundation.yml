@@ -82,6 +82,7 @@ jobs:
       matrix:
         include:
           - abi: arm64-v8a
+            runtime_emulator: false
             gnu_target: aarch64-linux-gnu
             binutils_package: binutils-aarch64-linux-gnu
             binutils_prefix: aarch64-linux-gnu
@@ -92,6 +93,7 @@ jobs:
             required_load_alignment: 16384
             target_flags: -ffixed-x18
           - abi: armeabi-v7a
+            runtime_emulator: false
             gnu_target: arm-linux-gnueabi
             binutils_package: binutils-arm-linux-gnueabi
             binutils_prefix: arm-linux-gnueabi
@@ -102,6 +104,8 @@ jobs:
             required_load_alignment: 4096
             target_flags: -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp
           - abi: x86_64
+            runtime_emulator: true
+            emulator_arch: x86_64
             gnu_target: x86_64-linux-gnu
             binutils_package: binutils-x86-64-linux-gnu
             binutils_prefix: x86_64-linux-gnu
@@ -112,6 +116,8 @@ jobs:
             required_load_alignment: 16384
             target_flags: -march=x86-64-v2 -mno-avx -mno-movbe
           - abi: x86
+            runtime_emulator: true
+            emulator_arch: x86
             gnu_target: i686-linux-gnu
             binutils_package: binutils-i686-linux-gnu
             binutils_prefix: i686-linux-gnu
@@ -441,6 +447,15 @@ jobs:
             /tmp/reference-android-math.o /tmp/ndk-bridge.o \
             -lm -o /tmp/libreference-foundation.so
 
+          "$ndk_cc" -std=c11 -O2 -fPIE \
+            -c qualification/android-boundary/linux-boundary-main.c \
+            -o /tmp/android-boundary-main.o
+          "$ndk_cc" -pie \
+            -Wl,-z,defs -Wl,-z,text -Wl,--fatal-warnings \
+            /tmp/ick-android-math.o /tmp/ndk-bridge.o \
+            /tmp/android-boundary-main.o \
+            -lm -o /tmp/ick-android-runtime-probe
+
           "$llvm_bin/llvm-readelf" -h /tmp/libick-foundation.so \
             | tee /tmp/libick-foundation.elf
           grep -q 'Class:.*${{ matrix.elf_class }}' /tmp/libick-foundation.elf
@@ -482,6 +497,51 @@ jobs:
             test "$((align))" -ge ${{ matrix.required_load_alignment }}
           done
 
+      - name: Enable KVM for Android runtime qualification
+        if: matrix.runtime_emulator == true
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Execute ICK boundary on Android API 21
+        if: matrix.runtime_emulator == true
+        uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 21
+          target: default
+          arch: ${{ matrix.emulator_arch }}
+          disable-animations: true
+          script: |
+            mkdir -p /tmp/ick-android-runtime-receipt
+            git rev-parse HEAD > /tmp/ick-android-runtime-receipt/source-revision.txt
+            cp ick/SOURCE.lock /tmp/ick-android-runtime-receipt/SOURCE.lock
+            sha256sum stage/bin/${{ matrix.gnu_target }}-gcc stage/libexec/gcc/${{ matrix.gnu_target }}/*/cc1 /tmp/ick-android-runtime-probe > /tmp/ick-android-runtime-receipt/SHA256SUMS
+            adb shell getprop ro.build.fingerprint > /tmp/ick-android-runtime-receipt/android-build.txt
+            adb shell getprop ro.product.cpu.abi > /tmp/ick-android-runtime-receipt/android-abi.txt
+            tr -d '\r' < /tmp/ick-android-runtime-receipt/android-abi.txt | grep -qx '${{ matrix.abi }}'
+            adb push /tmp/ick-android-runtime-probe /data/local/tmp/ick-android-runtime-probe
+            adb shell chmod 755 /data/local/tmp/ick-android-runtime-probe
+            adb pull /data/local/tmp/ick-android-runtime-probe /tmp/ick-android-runtime-receipt/executed-probe
+            cmp /tmp/ick-android-runtime-probe /tmp/ick-android-runtime-receipt/executed-probe
+            adb shell '/system/bin/sh -c "exit 43"; echo "ick_runtime_exit=$?"' > /tmp/ick-android-runtime-receipt/negative-control.txt
+            tr -d '\r' < /tmp/ick-android-runtime-receipt/negative-control.txt | grep -qx 'ick_runtime_exit=43'
+            adb shell '/data/local/tmp/ick-android-runtime-probe; echo "ick_runtime_exit=$?"' > /tmp/ick-android-runtime-receipt/execution.txt
+            cat /tmp/ick-android-runtime-receipt/execution.txt
+            tr -d '\r' < /tmp/ick-android-runtime-receipt/execution.txt | grep -qx 'ick_runtime_exit=0'
+
+      - name: Retain exact Android emulator execution receipt
+        if: always() && matrix.runtime_emulator == true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-runtime-${{ matrix.abi }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/ick-android-runtime-receipt/
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Check reproducible materialization and unchanged AArch64 backend
         if: matrix.abi == 'arm64-v8a'
         run: |
@@ -514,19 +574,25 @@ jobs:
       - name: Record qualification boundary
         shell: bash
         run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          ### ${{ matrix.abi }} foundation receipt
-
-          PASS: pinned GCC reference and squashed ICK source materialized
-
-          PASS: ICK compiler built and its own installed `cc1` was used
-
-          PASS: Float16/E4M3/E5M2/E3M2/E5M3 and Circle96 compiled with their intended arithmetic/category boundaries
-
-          PASS: expected ELF class/machine, PIC object, Android API 21 link,
-          exported scalar boundary, mismatched-target refusal, and the ABI's
-          required load alignment
-
-          SKIP: Android runtime execution, complete Wegert library, APK, and
-          F-Droid packaging remain outside this foundation job
-          EOF
+          {
+            echo '### ${{ matrix.abi }} foundation receipt'
+            echo
+            echo 'PASS: pinned GCC reference and squashed ICK source materialized'
+            echo
+            echo 'PASS: ICK compiler built and its own installed `cc1` was used'
+            echo
+            echo 'PASS: Float16/E4M3/E5M2/E3M2/E5M3 and Circle96 compiled with their intended arithmetic/category boundaries'
+            echo
+            echo 'PASS: expected ELF class/machine, PIC object, Android API 21 link, exported scalar boundary, mismatched-target refusal, and the ABI required load alignment'
+            echo
+            case '${{ matrix.abi }}' in
+              x86|x86_64)
+                echo 'PASS: source-built ICK boundary executed successfully on an Android API 21 emulator'
+                ;;
+              *)
+                echo 'SKIP: Android runtime execution still requires ARM Android acceptance'
+                ;;
+            esac
+            echo
+            echo 'SKIP: complete Wegert library, release APK, and F-Droid packaging remain outside this foundation job'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -34,4 +34,3 @@ int main(void)
   if (value * 3 != 15 || value == 0 || value != 5) return 8;
   return 0;
 }
-

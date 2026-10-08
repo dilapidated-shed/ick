@@ -25,4 +25,3 @@ binary128 complex lowering, an Android ABI, or a physical device.
 
 The existing Android foundation matrix compiles the positive fixture with its
 freshly built ICK. Runtime results remain separately scoped.
-

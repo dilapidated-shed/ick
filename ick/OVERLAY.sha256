@@ -26,8 +26,8 @@ b01992940196b10d6b93f2d3b4adfe1504f2144ebae13715c96060c53b3ca0f1  ick/source/gcc
 47d9d517bb15b8685b0dd97b031c91bc676f735cc306232a3a4b4f133c6b30dc  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-lvalue.c
 0192fde7cf253856eb503d912111c5e124c4c57f3ca76f090d7bd22076b49ff5  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow-neighbor.c
 fda547c56326840401e9aeee6f5a8f600d61c9306a87f473fb920e7bacce8831  ick/source/gcc/testsuite/gcc.dg/ick-assignment-arrow.c
-2d97a65b28798d5b73a50949f0c923d8649df84e17486f9bd80277c9a527a9e4  ick/source/gcc/testsuite/gcc.dg/ick-multiplication-glyph.c
-e5f8511f56509e8283a28fabe7aaae7d86778dcb1064c8ce59afccf59d6a22d4  ick/source/gcc/testsuite/gcc.dg/ick-multiplication-neighbor.c
+6d75ca58ea5404ed8542d7e3dbb842642688d586ab5ff5fd2900ee43ea42ce72  ick/source/gcc/testsuite/gcc.dg/ick-multiplication-glyph.c
+2f7e25855ba8428b323734bb3a585690829ef08acd7f6b8e334aaa9cf65fe3a0  ick/source/gcc/testsuite/gcc.dg/ick-multiplication-neighbor.c
 bae0c71f56075b442e2e36e9a8913ae608b67d0d4d7e5536d7b396d0ca567053  ick/source/gcc/testsuite/gcc.dg/ick-complex-object-byte-fold.c
 b86d5dcdf4c0d63dfcaf87b0224dd91ec4bb20b6ab08f6f441b22c2a23a8aa54  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float128.c
 03c65d49694145bec18339a5276d7ea1631aa0f0d527c3836b8cbc6baea30091  ick/source/gcc/testsuite/gcc.dg/ick-complex-polar-float16.c

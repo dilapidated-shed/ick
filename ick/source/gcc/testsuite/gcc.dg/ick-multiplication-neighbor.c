@@ -4,4 +4,3 @@ int unsupported_neighbor(void)
 {
   return 2 ⋅ 3; /* { dg-error "stray" } */ /* { dg-error "expected" } */
 }
-
