@@ -1,0 +1,59 @@
+fixture	expected_exit	actual_exit
+ick-android-array-nullability.c	0	0
+ick-android-array-null-call.c	1	1
+ick-android-array-conflict.c	1	1
+ick-android-declarations.c	0	0
+ick-android-unknown-api.c	1	1
+ick-android-null-call.c	1	1
+ick-android-new-api.c	1	1
+ick-android-address-api.c	1	1
+ick-android-invalid-field.c	1	1
+
+ick-android-array-nullability.c
+(no diagnostic)
+
+ick-android-array-null-call.c
+ick/source/gcc/testsuite/gcc.dg/ick-android-array-null-call.c: In function 'application':
+ick/source/gcc/testsuite/gcc.dg/ick-android-array-null-call.c:5:23: error: null assigned to a _Nonnull pointer [-Werror=nonnull]
+    5 |   return descriptors ((int *)0); /* { dg-error "null assigned to a _Nonnull pointer" } */
+      |                       ^~~~~~~~
+cc1: all warnings being treated as errors
+
+ick-android-array-conflict.c
+ick/source/gcc/testsuite/gcc.dg/ick-android-array-conflict.c:2:1: error: conflicting pointer nullability annotations
+    2 | extern int descriptors (int values[_Nonnull _Nullable 2]); /* { dg-error "conflicting pointer nullability" } */
+      | ^~~~~~
+
+ick-android-declarations.c
+(no diagnostic)
+
+ick-android-unknown-api.c
+ick/source/gcc/testsuite/gcc.dg/ick-android-unknown-api.c: In function 'exercise':
+ick/source/gcc/testsuite/gcc.dg/ick-android-unknown-api.c:3:23: error: Android API use requires an explicit numeric minimum API
+    3 | void exercise(void) { api(); } /* { dg-error "explicit numeric minimum API" } */
+      |                       ^~~
+
+ick-android-null-call.c
+ick/source/gcc/testsuite/gcc.dg/ick-android-null-call.c: In function 'exercise':
+ick/source/gcc/testsuite/gcc.dg/ick-android-null-call.c:4:32: error: null assigned to a _Nonnull pointer [-Werror=nonnull]
+    4 | void exercise(void) { required(0); } /* { dg-error "null assigned" } */
+      |                                ^
+cc1: all warnings being treated as errors
+
+ick-android-new-api.c
+ick/source/gcc/testsuite/gcc.dg/ick-android-new-api.c: In function 'exercise':
+ick/source/gcc/testsuite/gcc.dg/ick-android-new-api.c:4:23: error: 'new_api' requires Android API 26 (minimum is 24)
+    4 | void exercise(void) { new_api(); } /* { dg-error "requires Android API 26" } */
+      |                       ^~~~~~~
+
+ick-android-address-api.c
+ick/source/gcc/testsuite/gcc.dg/ick-android-address-api.c: In function 'exercise':
+ick/source/gcc/testsuite/gcc.dg/ick-android-address-api.c:4:47: error: 'new_api' requires Android API 26 (minimum is 24)
+    4 | void exercise(void) { void (*address)(void) ← new_api; (void)address; } /* { dg-error "requires Android API 26" } */
+      |                                               ^~~~~~~
+
+ick-android-invalid-field.c
+ick/source/gcc/testsuite/gcc.dg/ick-android-invalid-field.c:2:1: error: invalid Android availability field 'typo'
+    2 | void api(void) __attribute__((availability(android, typo=26))); /* { dg-error "invalid Android availability field" } */
+      | ^~~~
+

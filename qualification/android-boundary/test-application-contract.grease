@@ -1,0 +1,45 @@
+#!/usr/bin/env grease
+set -eu -o pipefail
+if (len(ARGV) < 3) {
+  echo 'usage: test-application-contract.grease ICK_CC NDK GREASE_EXEC [GREASE_ARGS...]'
+  exit 2
+}
+var compiler = ARGV[0]
+var ndk = ARGV[1]
+var runtime = ARGV[2:]
+var root = $(dirname "$(readlink -f "$0")")
+var output = "$root/../../build/android-application-contract"
+mkdir -p "$output"
+var qualify = "$root/compile-application.grease"
+var ndk_host = "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+"$ndk_host" --target=x86_64-linux-gnu --sysroot=/ -rtlib=libgcc -unwindlib=libgcc -std=c17 -O2 -Wall -Wextra -Werror "$root/failed-compiler.c" -o "$output/failed-compiler"
+rm -f "$output/no-fallback.o"
+if @runtime "$qualify" "$output/failed-compiler" "$ndk" 26 "$root/a1-application-abi.c" "$output/no-fallback.o" -Wall > "$output/no-fallback.log" 2>&1; then
+  echo 'FAIL failed compilation was converted to success'
+  exit 1
+fi
+rg -q 'deliberately failed ICK compilation' "$output/no-fallback.log"
+test ! -e "$output/no-fallback.o"
+@runtime "$qualify" "$compiler" "$ndk" 26 "$root/a1-application-abi.c" "$output/a1.o" -Wall
+for mode in (['-mthumb', '-mfloat-abi=hard']) {
+  if @runtime "$qualify" "$compiler" "$ndk" 26 "$root/a1-application-abi.c" "$output/wrong-mode.o" "$mode" > "$output/wrong-mode.log" 2>&1; then
+    echo "FAIL accepted $mode"
+    exit 1
+  fi
+  rg -q 'MIRO_A1_requires_A32_AAPCS32_softfp' "$output/wrong-mode.log"
+}
+if @runtime "$qualify" "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi26-clang" "$ndk" 26 "$root/a1-application-abi.c" "$output/clang.o" -Wall > "$output/clang.log" 2>&1; then
+  echo 'FAIL NDK Clang admitted as ICK'
+  exit 1
+fi
+for feature in (['bionic-nullability', 'bionic-availability', 'bionic-headers']) {
+  @runtime "$qualify" "$compiler" "$ndk" 26 "$root/$feature.c" "$output/$feature.o" -Wall
+  printf '%s\tSUPPORTED\n' "$feature"
+}
+if @runtime "$qualify" "$compiler" "$ndk" 25 "$root/bionic-availability.c" "$output/bionic-availability-api25.o" -Wall > "$output/bionic-availability-api25.log" 2>&1; then
+  echo 'FAIL strict API-26 declaration was callable from API 25'
+  exit 1
+fi
+rg -qi 'unavailable' "$output/bionic-availability-api25.log"
+test ! -e "$output/bionic-availability-api25.o"
+echo 'PASS A32/softfp positive control, wrong ABI rejections, Clang rejection, terminal compiler failure, Bionic syntax, and strict API floor'

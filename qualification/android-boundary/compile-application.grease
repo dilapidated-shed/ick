@@ -1,0 +1,45 @@
+#!/usr/bin/env grease
+# ICK owns compilation. A nonzero compiler exit is terminal; no fallback exists.
+set -eu -o pipefail
+if (len(ARGV) < 6) {
+  echo 'usage: compile-application.grease ICK_CC NDK API SOURCE OUTPUT include/define/compiler-options...'
+  exit 2
+}
+var compiler = ARGV[0]
+var ndk = ARGV[1]
+var api = ARGV[2]
+var source = ARGV[3]
+var output = ARGV[4]
+var extra = ARGV[5:]
+test -x "$compiler"
+test -f "$source"
+var compiler_version = $("$compiler" --version)
+echo "$compiler_version" | rg -q '\(GCC\)'
+var machine = $("$compiler" -dumpmachine)
+test "$machine" = 'arm-linux-gnueabi'
+var sysroot = "$ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+var compiler_sha = $(sha256sum "$compiler" | awk '{print $1}')
+mkdir -p "$(dirname "$output")"
+printf 'c_compiler\tICK/GCC\ncompiler_sha256\t%s\ntarget\tarm-linux-gnueabi / Android API %s\nsysroot\t%s\nsource\t%s\n' "$compiler_sha" "$api" "$sysroot" "$source" > "$output.compiler.tsv"
+if "$compiler" --sysroot="$sysroot" -isystem "$sysroot/usr/include" -isystem "$sysroot/usr/include/arm-linux-androideabi" "-D__ANDROID_API__=$api" -D__ANDROID__ -std=c17 -O2 -fPIC -marm -march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 @extra -c "$source" -o "$output" > "$output.compiler.log" 2>&1; then
+  cat "$output.compiler.log"
+else
+  printf 'compile\tBLOCKED\n' >> "$output.compiler.tsv"
+  cat "$output.compiler.log" >&2
+  exit 1
+fi
+"$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h -A -s "$output" > "$output.abi.txt"
+rg -q 'Class:.*ELF32' "$output.abi.txt"
+rg -q 'Machine:.*ARM' "$output.abi.txt"
+rg -Uq 'TagName: ARM_ISA_use\s+Description: Permitted' "$output.abi.txt"
+rg -Uq 'TagName: ABI_align_needed\s+Description: 8-byte' "$output.abi.txt"
+rg -q '\$a' "$output.abi.txt"
+if rg -q '\$t' "$output.abi.txt"; then
+  echo 'FAIL Thumb code in A32 target'
+  exit 1
+fi
+if rg -Uq 'TagName: ABI_VFP_args\s+Description: VFP registers' "$output.abi.txt"; then
+  echo 'FAIL hardfp calling convention'
+  exit 1
+fi
+printf 'compile\tPASS\nabi\tPASS\n' >> "$output.compiler.tsv"
