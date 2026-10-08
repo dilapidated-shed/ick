@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from network_shape import network_shape, operand_pair_shape
 
 HERE = Path(__file__).resolve().parent
 
@@ -116,6 +117,15 @@ class MultiplicationAcceptance(unittest.TestCase):
             self.assertGreater(int(row["reps"]), 0)
             self.assertGreater(float(row["median_ns"]), 0)
             self.assertGreater(float(row["p90_ns"]), 0)
+
+    def test_network_shape_signature(self):
+        shape = network_shape(8)
+        self.assertEqual(shape["total_butterflies"], 12)
+        self.assertEqual(shape["bit_reverse_permutation_cycle_histogram"], {"1": 4, "2": 2})
+        self.assertEqual([layer["stride_words"] for layer in shape["layers"]], [1, 2, 4])
+        operands = operand_pair_shape(2**64-1, 2**63+1)
+        self.assertEqual(operands["schoolbook_limb_pair_count"], 4)
+        self.assertEqual(operands["nonzero_limb_pair_count"], 4)
 
     def test_bad_protocol_input_rejected(self):
         run = subprocess.run([str(self.schoolbook), "--pipe"], input="xyz 42\n",
