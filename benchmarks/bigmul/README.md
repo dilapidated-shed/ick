@@ -59,6 +59,17 @@ Input **texture** also matters: limb nonzero-density, Hamming weight, carry-chai
 
 The companion reading shelf lives in [ComputerScience books](https://github.com/walnut-burgundy/computer-science/tree/how-long%2Bhow-wide/books); [Seifert arithmetic topology](https://github.com/isomorphismes/seifert/tree/main/books); and [Fulton sources](https://github.com/walnut-burgundy/fulton/tree/main/sources).
 
+## Qualitative signatures (initial experiment)
+
+`network_shape.py` records a deliberately narrow, **structural** signature. For instance:
+
+```sh
+python3 network_shape.py --butterflies 8
+python3 network_shape.py --multiply-hex ffffffffffffffff 8000000000000001
+```
+
+The first command reports 12 radix-2 butterfly edges across three layers, strides 1/2/4, and the bit-reversal permutation's cycle histogram `{1: 4, 2: 2}`. The second reports limb count, bit weight, nonzero-limb density, and schoolbook limb-pair counts. Its cache-line crossing count is **a model**, not observed cache misses. None of these counts implement or validate the paper's framed address-network savings. To compare implementations meaningfully, ICK must eventually emit the actual sequence of operations, permutations, and memory traffic, not merely assume an FFT schedule. Structural vectors should accompany timings instead of being reduced to an arbitrary "beauty score."
+
 ## Concurrency and build constraints
 
 The benchmark lab uses no external benchmark framework. The CI acceptance path can compile and execute it with native C and Python 3. Do not add unpinned GitHub Action dependencies or claim Android/POWER/AIX timing from a hosted x86-64 runner. Source-checks and emulators can catch mistakes, but the target device's measured results remain a separate gate. No automatic benchmark regression threshold should fail a build until variance and target allocation are characterized.
