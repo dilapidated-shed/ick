@@ -743,6 +743,19 @@ c_lex_with_flags (tree *value, location_t *loc, unsigned char *cpp_flags,
 	    break;
 	  }
 
+	/* U+00D7 MULTIPLICATION SIGN shares C's multiplication token.
+	   Keep this after preprocessing for the same literal/stringification
+	   boundary as assignment.  Pointer spelling remains a source policy.  */
+	if (!c_dialect_cxx () && !c_dialect_objc ()
+	    && tok->val.str.len == 2
+	    && tok->val.str.text[0] == 0xc3
+	    && tok->val.str.text[1] == 0x97)
+	  {
+	    type = CPP_MULT;
+	    *value = NULL_TREE;
+	    break;
+	  }
+
 	cppchar_t c = tok->val.str.text[0];
 
 	if (c == '"' || c == '\'')

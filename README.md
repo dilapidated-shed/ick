@@ -20,6 +20,7 @@ See:
 - [`LICENSING.md`](LICENSING.md) for the GCC/runtime/model licensing boundaries.
 - [`docs/targets.md`](docs/targets.md) for the orthogonal target model.
 - [`docs/c-assignment-arrow.md`](docs/c-assignment-arrow.md) for Icky C `←` assignment.
+- [`docs/c-multiplication-glyph.md`](docs/c-multiplication-glyph.md) for Icky C `×` multiplication.
 - [`docs/android-release-gate.md`](docs/android-release-gate.md) for the Android/F-Droid compiler qualification matrix.
 - [`docs/imprecise-types.md`](docs/imprecise-types.md) for the five low-precision numeric types.
 - [`docs/circle96.md`](docs/circle96.md) for finite Circle96 machine geometry.
