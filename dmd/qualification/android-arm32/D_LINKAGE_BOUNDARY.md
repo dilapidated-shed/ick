@@ -6,6 +6,11 @@ Three separately compiled D modules are linked to an independent A32 assembly
 oracle and executed with QEMU. This qualifies the scalar object/call boundary;
 Android druntime and physical-device execution remain unqualified.
 
+This document records the initial scalar-call qualification at source
+`13c23a41029a6ef973f85306d2cc4627d95c6606`. Subsequent scalar-storage repairs,
+additional memory execution checks, and the exact real-runtime import blockers
+are recorded in [SCALAR_MEMORY_BOUNDARY.md](SCALAR_MEMORY_BOUNDARY.md).
+
 ## Compiler change
 
 `compiler/src/dmd/glue/arm32.d` uses `mangleExact` for both D function definitions
@@ -61,7 +66,7 @@ baseline workflow uploads these under an artifact name containing the exact PR
 head. The boundary table has nineteen rows: four supported constructs, fourteen
 backend rejections and one driver rejection.
 
-## Local validation receipt
+## Initial local validation receipt
 
 Qualification base: `aba7362c6fa6e4079c91ad443934b3efd74b6609` (`dmd-upstream`).
 The sole compiler-source change is `compiler/src/dmd/glue/arm32.d`, Git blob

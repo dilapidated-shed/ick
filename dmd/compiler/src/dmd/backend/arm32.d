@@ -348,13 +348,17 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals,
     }
 
     ubyte[] data;
+    uint dataAlignment = 4;
     uint[string] globalOffsets;
     foreach (global_; globals)
     {
         if (!global_.defined)
             continue;
-        enforce(global_.size == global_.data.length && global_.alignment != 0,
+        enforce(global_.size == global_.data.length && global_.alignment != 0 &&
+                !(global_.alignment & (global_.alignment - 1)),
                 "A32 data symbol must provide aligned bytes");
+        if (global_.alignment > dataAlignment)
+            dataAlignment = global_.alignment;
         while (data.length % global_.alignment)
             data ~= 0;
         globalOffsets[global_.name] = cast(uint)data.length;
@@ -521,7 +525,8 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals,
 
     foreach (i; 1 .. contents.length)
     {
-        while (result.length & 3)
+        const alignment = i == 3 ? dataAlignment : 4U;
+        while (result.length % alignment)
             result ~= 0;
         offsets[i] = cast(uint)result.length;
         result ~= contents[i];
@@ -548,7 +553,7 @@ ubyte[] arm32Object(Arm32Function[] functions, Arm32Global[] globals,
         const isRel = types[i] == 9;
         word(result, (isRel || i == 11) ? 4 : i == 4 ? 5 : 0); // rel/group->symtab; symtab->strtab
         word(result, isRel ? cast(uint)(i - 1) : i == 4 ? firstGlobal : i == 11 ? dsoSignature : 0);
-        word(result, i == 0 ? 0 : (i <= 4 || i >= 9) ? 4 : 1);
+        word(result, i == 0 ? 0 : i == 3 ? dataAlignment : (i <= 4 || i >= 9) ? 4 : 1);
         word(result, isRel ? 8 : i == 4 ? 16 : i == 11 ? 4 : 0);
     }
 

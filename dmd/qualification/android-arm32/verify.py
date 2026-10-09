@@ -1705,6 +1705,10 @@ def check_ordinary_d_boundary(compiler: Path, imports: Path, here: Path, out: Pa
         ("DMainVoid", "ordinary-D main requires runtime startup"),
         ("CrtConstructor", "A32 crt_constructor/crt_destructor lifecycle entries are not implemented"),
         ("CrtDestructor", "A32 crt_constructor/crt_destructor lifecycle entries are not implemented"),
+        ("AggregatePointerElement", "A32 lowering supports the scalar subset"),
+        ("NarrowPointerElement", "operation currently requires a one-word scalar"),
+        ("VectorPointerIndex", "only caller-owned scalar pointer elements are supported"),
+        ("TlsBoolGlobal", "A32 global data currently requires non-TLS"),
     ]:
         common = [str(compiler), "-target=armv7a-linux-androideabi21", "-c", f"-I{imports}",
                   f"-version={version}", str(here / "ordinary_d_unsupported.d")]
@@ -1777,6 +1781,104 @@ def check_ordinary_d_boundary(compiler: Path, imports: Path, here: Path, out: Pa
     print("PASS: ordinary-D unsupported constructs fail closed without stale output")
 
 
+def check_scalar_memory(compiler: Path, imports: Path, here: Path, out: Path,
+                        clang: str, linker: str, qemu: str, case: str = "positive") -> None:
+    obj = out / "scalar-memory.o"
+    versions = {"wrong-high-return": "MemoryWrongHighReturn",
+                "truncated-store": "MemoryTruncatedStore"}
+    command = [str(compiler), "-target=armv7a-linux-androideabi21", "-c", f"-I{imports}"]
+    if case != "positive":
+        command.append("-version=" + versions[case])
+    run(command + [str(here / "scalar_memory.d"), f"-of={obj}"])
+    check_ordinary_d_elf(obj, "scalar_memory", {
+        "memory_address_long", "memory_address_ulong", "memory_address_double",
+        "memory_address_bool", "memory_index", "memory_external_bool",
+    })
+
+    # These are language/ELF storage requirements, independent of the emitted
+    # instruction sequence. Register and frame homes may still occupy words.
+    data, sections = elf32_sections(obj)
+    data_index, data_section = sections[".data"]
+    if data_section[8] < 16 or data_section[4] % data_section[8]:
+        raise RuntimeError("scalar-memory stage ELF: .data lost its required alignment")
+    _, sym = sections[".symtab"]
+    _, string_section = sections[".strtab"]
+    strings = data[string_section[4]:string_section[4] + string_section[5]]
+    symbols = {}
+    for at in range(sym[4], sym[4] + sym[5], 16):
+        name_at, value, size, info, _, section = struct.unpack_from("<IIIBBH", data, at)
+        end = strings.find(b"\0", name_at)
+        if end < 0:
+            raise RuntimeError("scalar-memory stage ELF: unterminated symbol")
+        symbols[strings[name_at:end].decode("ascii")] = (value, size, info, section)
+    for name, size, alignment, payload in [
+        ("memory_own_long", 8, 8, struct.pack("<Q", 0x1020304050607080)),
+        ("memory_own_double", 8, 8, struct.pack("<d", 3.5)),
+        ("memory_own_bool_true", 1, 1, b"\x01"),
+        ("memory_own_bool_false", 1, 1, b"\x00"),
+        ("memory_own_bool_aligned", 1, 16, b"\x01"),
+    ]:
+        symbol = symbols.get(name)
+        if not symbol or symbol[1:] != (size, 0x11, data_index) or symbol[0] % alignment:
+            raise RuntimeError(f"scalar-memory stage ELF: wrong storage for {name}: {symbol}")
+        offset = data_section[4] + symbol[0]
+        if data[offset:offset + size] != payload:
+            raise RuntimeError(f"scalar-memory stage ELF: wrong initializer for {name}")
+
+    harness = out / "scalar-memory-harness.o"
+    run([clang, "--target=armv7a-linux-androideabi21", "-march=armv7-a", "-marm",
+         "-mfpu=vfpv3-d16", "-mfloat-abi=softfp", "-c",
+         str(here / "scalar_memory_harness.s"), "-o", str(harness)])
+    executable = out / "scalar-memory-oracle"
+    # The harness's .data ends four bytes after a 16-byte boundary. Linking it
+    # first exposes a compiler object that forgets its global section alignment.
+    run([linker, "-m", "armelf_linux_eabi", "-e", "_start",
+         str(harness), str(obj), "-o", str(executable)])
+    command = [qemu, str(executable)]
+    print("+", " ".join(command))
+    execution = subprocess.run(command, check=False, timeout=60)
+    if execution.returncode != 0:
+        raise RuntimeError(
+            "scalar-memory stage EXECUTION: expected exit 0, "
+            f"got {execution.returncode}")
+    run([linker, "-m", "armelf_linux_eabi", "-shared", "-z", "text",
+         str(obj), "-o", str(out / "scalar-memory.so")])
+    inspection = subprocess.run(
+        ["readelf", "-h", "-SW", "-sW", "-rW", "-A", str(obj), str(executable)],
+        check=True, stdout=subprocess.PIPE, text=True, timeout=60)
+    (out / "scalar-memory-readelf.txt").write_text(inspection.stdout)
+    (out / "scalar-memory-provenance.txt").write_text(
+        "target=armv7a-linux-androideabi21\nflags=-c (no -betterC)\n"
+        f"compiler_sha256={hashlib.sha256(compiler.read_bytes()).hexdigest()}\n"
+        f"object_sha256={hashlib.sha256(obj.read_bytes()).hexdigest()}\n"
+        f"executable_sha256={hashlib.sha256(executable.read_bytes()).hexdigest()}\n"
+        "execution=QEMU_LINUX_SYSCALL_ORACLE\nregistry=TEST_ONLY_ABI_ORACLE\n"
+        "android_runtime_link=NOT_QUALIFIED\nphysical_device_execution=NOT_RUN\n")
+    print("PASS: scalar pointer memory, complete assignment results, byte guards, indexed access, global alignment")
+
+
+def check_scalar_memory_mutants(compiler: Path, imports: Path, here: Path, out: Path,
+                                clang: str, linker: str, qemu: str) -> None:
+    rows = []
+    for case, expected_status in [("wrong-high-return", 1), ("truncated-store", 4)]:
+        command = [sys.executable, str(here / "verify.py"), "--compiler", str(compiler),
+                   "--imports", str(imports), "--output", str(out / ("memory-" + case)),
+                   "--clang", clang, "--linker", linker, "--qemu", qemu,
+                   "--scalar-memory-case", case]
+        print("+", " ".join(command))
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, timeout=60)
+        (out / ("scalar-memory-" + case + ".log")).write_text(result.stdout)
+        marker = f"scalar-memory stage EXECUTION: expected exit 0, got {expected_status}"
+        if result.returncode == 0 or marker not in result.stdout:
+            print(result.stdout, end="")
+            raise RuntimeError(f"scalar-memory {case} did not fail the outer verifier at the required stage")
+        rows.append(f"{case}\t{result.returncode}\t{marker}\tPASS")
+    (out / "scalar-memory-mutants.tsv").write_text(
+        "mutation\touter_status\trequired_failure\tdetected\n" + "\n".join(rows) + "\n")
+    print("PASS: outer verifier rejects wrong high-word results and truncated memory stores")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", required=True)
@@ -1787,12 +1889,20 @@ def main() -> None:
     parser.add_argument("--qemu", default="qemu-arm-static")
     parser.add_argument("--ordinary-d-linkage-case", choices=["positive", "zero-result", "wrong-symbol"],
                         help=argparse.SUPPRESS)
+    parser.add_argument("--scalar-memory-case", choices=["positive", "wrong-high-return", "truncated-store"],
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     here = Path(__file__).resolve().parent
     out = Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
     obj = out / "android-arm32-a32.o"
+
+    if args.scalar_memory_case:
+        check_scalar_memory(
+            Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
+            args.clang, args.linker, args.qemu, args.scalar_memory_case)
+        return
 
     if args.ordinary_d_linkage_case:
         check_ordinary_d_linkage(
@@ -1817,6 +1927,12 @@ def main() -> None:
         Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
         args.clang, args.linker, args.qemu)
     check_ordinary_d_boundary(
+        Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
+        args.clang, args.linker, args.qemu)
+    check_scalar_memory(
+        Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
+        args.clang, args.linker, args.qemu)
+    check_scalar_memory_mutants(
         Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
         args.clang, args.linker, args.qemu)
 

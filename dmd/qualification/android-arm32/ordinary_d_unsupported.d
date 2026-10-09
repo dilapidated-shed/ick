@@ -52,3 +52,19 @@ version (DisabledUnittest)
     unittest {}
     int identity(int value) { return value; }
 }
+
+// Pointer storage support remains limited to the qualified scalar widths.
+version (AggregatePointerElement)
+    void unsupported(int[2]* destination, int[2]* source) { *destination = *source; }
+version (NarrowPointerElement)
+    int unsupported(short* source) { return *source; }
+version (VectorPointerIndex)
+{
+    alias float4 = __vector(float[4]);
+    void unsupported(float4* destination, float4* source) { destination[1] = source[1]; }
+}
+version (TlsBoolGlobal)
+{
+    bool flag;
+    bool unsupported() { return flag; }
+}

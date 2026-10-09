@@ -53,17 +53,14 @@ private void word(ref ubyte[] bytes, uint value)
         bytes ~= cast(ubyte)(value >> (i * 8));
 }
 
-private Arm32Global scalarGlobal(string name, ulong value, uint words, bool defined)
+private Arm32Global scalarGlobal(string name, ulong value, uint size, uint alignment, bool defined)
 {
-    assert(words == 1 || words == 2);
+    assert(size == 1 || size == 4 || size == 8);
     ubyte[] data;
     if (defined)
-    {
-        word(data, cast(uint)value);
-        if (words == 2)
-            word(data, cast(uint)(value >> 32));
-    }
-    return Arm32Global(name, data, defined ? words * 4 : 0, words == 2 ? 8U : 4U, defined);
+        foreach (i; 0 .. size)
+            data ~= cast(ubyte)(value >> (i * 8));
+    return Arm32Global(name, data, defined ? size : 0, alignment, defined);
 }
 
 private string moduleInfoSymbol(Module module_)
@@ -128,6 +125,15 @@ private uint scalarWords(Type t)
     if (pairType(t))
         return 2;
     return 0;
+}
+
+// ABI registers and local homes use words; pointed-to objects and ELF data
+// retain their language storage width. In particular, bool occupies one byte.
+private uint scalarBytes(Type t)
+{
+    if (t && t.toBasetype().ty == TY.Tbool)
+        return 1;
+    return scalarWords(t) * 4;
 }
 
 private uint valueWords(Type t)
@@ -351,6 +357,25 @@ private struct LeafEmitter
             code.store(slot, reg);
     }
 
+    // The address arrives in r0. A pair load must preserve it until both
+    // words have been read; the result uses r0:r1 under the base PCS.
+    void loadMemory(Type type, Loc loc)
+    {
+        requireValue(type, loc);
+        if (vectorFloat4(type))
+            code.neonLoadF32x4(0, 0);
+        else if (scalarBytes(type) == 1)
+            code.instruction(0xE5D00000); // LDRB r0,[r0]
+        else if (scalarWords(type) == 2)
+        {
+            code.instruction(0xE1A02000); // MOV r2,r0
+            code.instruction(0xE5920000); // LDR r0,[r2]
+            code.instruction(0xE5921004); // LDR r1,[r2,#4]
+        }
+        else
+            code.instruction(0xE5900000); // LDR r0,[r0]
+    }
+
     string globalName(VarDeclaration variable)
     {
         requireScalar(variable.type, variable.loc);
@@ -398,22 +423,26 @@ private struct LeafEmitter
         if (auto index = expression_.isIndexExp())
         {
             if (index.e1.type.toBasetype().ty != TY.Tpointer ||
-                !wordType(index.type) || index.type.toBasetype().ty == TY.Tbool)
-                reject(index.loc, "only caller-owned four-byte pointer elements are supported");
+                !scalarWords(index.type))
+                reject(index.loc, "only caller-owned scalar pointer elements are supported");
+            requireWord(index.e2.type, index.loc);
             expression(index.e1);
             const saved = temporary();
             code.store(saved);
             expression(index.e2);
             code.instruction(0xE1A01000); // MOV r1,r0
-            code.instruction(0xE1A01101); // MOV r1,r1,LSL #2
+            const size = scalarBytes(index.type);
+            if (size == 4)
+                code.instruction(0xE1A01101); // MOV r1,r1,LSL #2
+            else if (size == 8)
+                code.instruction(0xE1A01181); // MOV r1,r1,LSL #3
             code.load(saved);
             code.instruction(0xE0800001); // ADD r0,r0,r1
             return;
         }
         if (expression_.op == EXP.star)
         {
-            if (expression_.type.toBasetype().ty == TY.Tbool)
-                reject(expression_.loc, "byte-sized memory accesses are not implemented");
+            requireValue(expression_.type, expression_.loc);
             expression(expression_.isUnaExp().e1);
             return;
         }
@@ -422,16 +451,6 @@ private struct LeafEmitter
 
     void assign(Expression destination)
     {
-        if (vectorFloat4(destination.type) && !destination.isVarExp())
-        {
-            const saved = temporary(destination.type);
-            storeValue(destination.type, saved);
-            address(destination);
-            loadValue(destination.type, saved);
-            code.neonStoreF32x4(0, 0);
-            return;
-        }
-
         if (auto variable = destination.isVarExp())
         {
             auto declaration = variable.var.isVarDeclaration();
@@ -442,32 +461,34 @@ private struct LeafEmitter
                 storeValue(declaration.type, home(declaration));
                 return;
             }
-
-            requireScalar(declaration.type, destination.loc);
-            const saved = temporary(declaration.type);
-            storeValue(declaration.type, saved);
-            globalAddress(declaration);
-            if (scalarWords(declaration.type) == 1)
-            {
-                code.load(saved, 1);
-                code.instruction(0xE5801000); // STR r1,[r0]
-                code.instruction(0xE1A00001); // MOV r0,r1
-            }
-            else
-            {
-                code.instruction(0xE1A02000); // MOV r2,r0: preserve global address
-                code.loadPair(saved, 0);
-                code.instruction(0xE5820000); // STR r0,[r2]
-                code.instruction(0xE5821004); // STR r1,[r2,#4]
-            }
-            return;
         }
-        const saved = temporary();
-        code.store(saved);
+
+        // Destination evaluation can call a function and overwrite every
+        // caller-saved register. Save the complete RHS, then restore the
+        // complete assignment result after computing the address once.
+        requireValue(destination.type, destination.loc);
+        const saved = temporary(destination.type);
+        storeValue(destination.type, saved);
         address(destination);
-        code.load(saved, 1);
-        code.instruction(0xE5801000); // STR r1,[r0]
-        code.instruction(0xE1A00001); // MOV r0,r1
+        if (vectorFloat4(destination.type))
+        {
+            loadValue(destination.type, saved);
+            code.neonStoreF32x4(0, 0);
+        }
+        else if (scalarWords(destination.type) == 2)
+        {
+            code.instruction(0xE1A02000); // MOV r2,r0: preserve destination address
+            code.loadPair(saved, 0);
+            code.instruction(0xE5820000); // STR r0,[r2]
+            code.instruction(0xE5821004); // STR r1,[r2,#4]
+        }
+        else
+        {
+            code.load(saved, 1);
+            code.instruction(scalarBytes(destination.type) == 1 ?
+                             0xE5C01000 : 0xE5801000); // STRB/STR r1,[r0]
+            code.instruction(0xE1A00001); // MOV r0,r1
+        }
     }
 
     void declare(VarDeclaration variable)
@@ -844,14 +865,7 @@ private struct LeafEmitter
                 if (vectorFloat4(declaration.type))
                     reject(e.loc, "A32 float4 globals are not implemented");
                 globalAddress(declaration);
-                if (scalarWords(declaration.type) == 1)
-                    code.instruction(0xE5900000); // LDR r0,[r0]
-                else
-                {
-                    code.instruction(0xE1A02000); // MOV r2,r0
-                    code.instruction(0xE5920000); // LDR r0,[r2]
-                    code.instruction(0xE5921004); // LDR r1,[r2,#4]
-                }
+                loadMemory(declaration.type, e.loc);
             }
             return;
         }
@@ -922,10 +936,7 @@ private struct LeafEmitter
         if (e.op == EXP.index || e.op == EXP.star)
         {
             address(e);
-            if (vectorFloat4(e.type))
-                code.neonLoadF32x4(0, 0);
-            else
-                code.instruction(0xE5900000); // LDR r0,[r0]
+            loadMemory(e.type, e.loc);
             return;
         }
         if (e.op == EXP.negate || e.op == EXP.uadd || e.op == EXP.not)
@@ -1389,8 +1400,8 @@ private struct LeafEmitter
 
 private Arm32Global lowerGlobal(VarDeclaration variable)
 {
-    const words = scalarWords(variable.type);
-    if (!words)
+    const size = scalarBytes(variable.type);
+    if (!size)
         reject(variable.loc, "A32 global data currently supports scalar one- and two-word types only");
     if (!variable.isDataseg() || variable.isThreadlocal())
         reject(variable.loc, "A32 global data currently requires non-TLS __gshared/shared storage");
@@ -1399,17 +1410,19 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
     if (variable.isConst() || variable.isImmutable())
         reject(variable.loc, "read-only A32 data sections are not implemented yet");
 
+    const alignment = variable.alignment.isDefault() || variable.alignment.isUnknown() ?
+                      size : variable.alignment.get();
     const name = declarationName(variable, variable.loc);
     const defined = !(variable.storage_class & STC.extern_);
     if (!defined)
     {
         if (variable._init)
             reject(variable.loc, "extern A32 global declaration cannot have an initializer");
-        return scalarGlobal(name, 0, words, false);
+        return scalarGlobal(name, 0, size, alignment, false);
     }
 
     if (!variable._init)
-        return scalarGlobal(name, 0, words, true);
+        return scalarGlobal(name, 0, size, alignment, true);
 
     auto initializer = variable._init.isExpInitializer();
     if (!initializer)
@@ -1417,7 +1430,7 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
 
     auto value = initializer.exp;
     if (auto integer = value.isIntegerExp())
-        return scalarGlobal(name, cast(ulong)integer.value, words, true);
+        return scalarGlobal(name, cast(ulong)integer.value, size, alignment, true);
     if (auto realConstant = value.isRealExp())
     {
         if (floating(variable.type))
@@ -1429,7 +1442,7 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
             }
             Payload32 payload;
             payload.value = cast(float)realConstant.value;
-            return scalarGlobal(name, payload.bits, 1, true);
+            return scalarGlobal(name, payload.bits, 4, alignment, true);
         }
         if (variable.type.toBasetype().ty == TY.Tfloat64)
         {
@@ -1440,12 +1453,12 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
             }
             Payload64 payload;
             payload.value = cast(double)realConstant.value;
-            return scalarGlobal(name, payload.bits, 2, true);
+            return scalarGlobal(name, payload.bits, 8, alignment, true);
         }
         reject(variable.loc, "floating global constant is outside the float/double A32 subset");
     }
     if (value.op == EXP.null_)
-        return scalarGlobal(name, 0, words, true);
+        return scalarGlobal(name, 0, size, alignment, true);
 
     reject(variable.loc, "A32 global initializer is outside the scalar constant subset");
     assert(0);
