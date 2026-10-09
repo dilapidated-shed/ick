@@ -1,0 +1,59 @@
+name: Polar complex extraction
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: complex-extraction-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  native-extraction:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact ICK source and GCC reference
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: true
+          persist-credentials: false
+      - name: Check out the qualified native bootstrap recipe
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: isomorphisms/ai-ci
+          ref: f1c24ab67e0e93f7606aae88d7a6d123a3898288
+          path: .producer
+          persist-credentials: false
+          sparse-checkout: ick-host
+      - name: Install bootstrap tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential flex bison texinfo libgmp-dev libmpfr-dev libmpc-dev
+      - name: Build exact current source
+        run: >-
+          make -f .producer/ick-host/Makefile all
+          ICK_SOURCE="$GITHUB_WORKSPACE"
+          ICK_REVISION='${{ github.event.pull_request.head.sha || github.sha }}'
+          ICK_BUILD="$RUNNER_TEMP/ick-build"
+          ICK_STAGE="$RUNNER_TEMP/ick-stage"
+      - name: Execute extraction and unchanged storage regressions
+        run: >-
+          make -f qualification/complex-extraction/Makefile all
+          ICK="$RUNNER_TEMP/ick-stage/bin/gcc"
+          BUILD="$RUNNER_TEMP/complex-extraction"
+      - name: Record exact source and compiler identity
+        run: |
+          git rev-parse HEAD > "$RUNNER_TEMP/complex-extraction/source.txt"
+          sha256sum "$RUNNER_TEMP/ick-stage/libexec/gcc/x86_64-pc-linux-gnu/17.0.0/cc1" > "$RUNNER_TEMP/complex-extraction/compiler.sha256"
+      - name: Retain regression outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: polar-extraction-native
+          path: ${{ runner.temp }}/complex-extraction
+          if-no-files-found: error

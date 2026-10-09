@@ -381,12 +381,14 @@ init_dont_simulate_again (void)
 
 	      case REALPART_EXPR:
 	      case IMAGPART_EXPR:
-		/* The total store transformation performed during
-		  gimplification creates such uninitialized loads
-		  and we need to lower the statement to be able
-		  to fix things up.  */
-		if (TREE_CODE (op0) == SSA_NAME
-		    && ssa_undefined_value_p (op0))
+		/* Floating complex values use polar storage, so even a
+		   function containing only Cartesian component reads needs
+		   lowering.  The total store transformation performed during
+		   gimplification also creates uninitialized loads that need
+		   lowering to fix them up, including integer complex loads.  */
+		if (floating_complex_type_p (TREE_TYPE (op0))
+		    || (TREE_CODE (op0) == SSA_NAME
+			&& ssa_undefined_value_p (op0)))
 		  saw_a_complex_op = true;
 		break;
 
