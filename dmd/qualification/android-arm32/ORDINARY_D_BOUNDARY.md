@@ -1,8 +1,11 @@
 # Android ARM32 ordinary-D object boundary
 
-Base: refreshed `dmd-upstream` at `e1862bec61224f52b126aa1c69fe03d487103ab2`.
+Scalar-linkage qualification base: `dmd-upstream` at
+`aba7362c6fa6e4079c91ad443934b3efd74b6609`.
 Owned source: DMD v2.113.0 snapshot recorded in `dmd/SOURCE.lock`.
 Target: `armv7a-linux-androideabi21`, compile-only, **without `-betterC`**.
+The added scalar function/call boundary and its execution evidence are detailed
+in [D_LINKAGE_BOUNDARY.md](D_LINKAGE_BOUNDARY.md).
 
 ## Qualification receipt
 
@@ -17,9 +20,12 @@ report `A32 backend:` and remove a deliberately pre-existing output object.
 |---|---|---|---|---|---|
 | Empty module | PASS | Reached | PASS | Defined standalone ModuleInfo; `minfo` pointer; strong undefined `_d_dso_registry`; hidden undefined `__start_minfo`, `__stop_minfo` | Object supported; matching Android ARM32 druntime body needed |
 | Exported `extern(C)` scalar function | PASS | Reached | PASS | Same module metadata and registration requirements | Object supported; matching Android ARM32 druntime body needed |
-| Default D-linkage scalar function | PASS | Reached, rejected | None; stale output removed | None emitted | D linkage/name mangling and calling convention remain unqualified |
+| Default D-linkage scalar function and direct call | PASS | Reached | PASS | Exact D function symbols/call relocations; ModuleInfo and registration requirements | Qualified top-level scalar slice; matching Android ARM32 druntime body still needed |
 | Runtime `assert` in a C-linkage function | PASS | Reached, rejected | None; stale output removed | None emitted; lowering would require the assertion entrypoint and a D source-file slice | D slice/source data and assertion-call lowering missing |
 | Static module constructor | PASS | Reached, rejected | None; stale output removed | None emitted; ModuleInfo lifecycle callback required | Exact callback/import ModuleInfo fields and relocations missing |
+| `ref`/`out`/`lazy` arguments, ref-return, variadics, aggregate result, nested call, D `main`, CRT lifecycle functions | PASS | Reached, rejected | None; stale output removed | None emitted | Unsupported signature, context, startup or lifecycle lowering; fourteen backend controls in the full boundary ladder |
+| Disabled `unittest` declaration | PASS | Reached | PASS | Standalone ModuleInfo and registration requirements | Disabled body skipped; no unittest execution qualified |
+| Enabled `unittest` (`-unittest`) | Not reached | Not reached; driver rejects | None emitted | None emitted | Existing driver instrumentation gate; no frontend/backend success claimed |
 
 The successful objects are ELF32 little-endian ET_REL/EM_ARM/EABI5, A32, with
 AAPCS32 base PCS/softfp, 32-bit pointers, and 8-byte public-call stack alignment.
@@ -54,7 +60,7 @@ and every family of restrictions in the ARM32 path; none was blanket-disabled.
 | `main.d`: no coverage, profiling, GC profiling, unit tests | Runtime instrumentation and its extra functions/data are not lowered; retain. Ordinary unit-test lifecycle data is likewise not represented. |
 | `main.d`: no debug/debug-reference output | Custom ELF writer lacks debug emission; retain, independent of runtime availability. |
 | `glue/package.d`: libraries, split objects, library modules, combined multi-module object | Custom object orchestration/packaging missing; retain. Separate ordinary-D objects can be linked by the external test linker. |
-| `glue/arm32.d`: top-level C linkage only (functions, direct calls, global names), ASCII C symbols | D mangling/calling convention, methods, nested functions/closures and hidden context are unqualified; retain. ModuleInfo alone uses the real DMD module mangler. |
+| `glue/arm32.d`: function linkage, direct calls and symbol names | Admit module-level C or D scalar functions without a hidden context. Definitions and direct-call relocations share DMD's exact function mangler for D linkage; the existing C symbol rules remain. Methods, nested functions/closures, D `main`, CRT lifecycle functions and other linkages remain rejected. Global data retains its C-linkage boundary. |
 | Function/call checks: scalar signatures, no variadics/ref-return/ref/out/lazy, at most 64 arguments | General AAPCS32 classification and D parameter semantics missing; retain. `target.d:toArgTypes` still declines aggregate classification. |
 | Scalar/float4 type and operator checks, conversions, address/index/memory checks | Limited instruction lowering (including no byte accesses, stack-local address, function values/indirect calls, unsupported vector operations or arbitrary symbol offsets); retain. Not a druntime-only obstacle. |
 | Locals: no static/by-reference locals, captured or uninitialised homes, expression initializers only | Storage/aliasing/closure/initializer lowering missing; retain. Frame, nesting, duplicate and literal-placement bounds are compiler safety checks, not BetterC policy. |
@@ -70,7 +76,7 @@ For the successful standalone objects, the linker can supply the hidden
 `__start_minfo` / `__stop_minfo` brackets. The missing runtime provider is
 **`_d_dso_registry` from matching Android ARM32 druntime** (and its runtime
 dependencies). No complete runtime body is compiled or qualified here. Compiling
-broader druntime modules is additionally blocked by the retained D-linkage,
+broader druntime modules is additionally blocked by the retained non-scalar D,
 aggregate/TLS/exception lowering and lifecycle/import ModuleInfo boundaries.
 Providing an empty registry stub would not qualify a runtime link.
 

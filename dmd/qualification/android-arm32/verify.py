@@ -6,6 +6,7 @@ import hashlib
 import shutil
 import struct
 import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -1334,7 +1335,8 @@ def elf32_sections(path: Path) -> tuple[bytes, dict[str, tuple[int, tuple[int, .
     return data, by_name
 
 
-def check_ordinary_d_elf(path: Path, module_name: str = "ordinary_d") -> None:
+def check_ordinary_d_elf(path: Path, module_name: str = "ordinary_d",
+                         external_symbols: set[str] | None = None) -> None:
     data, sections = elf32_sections(path)
     required = [
         ".text", ".rel.text", ".data", ".symtab", ".strtab",
@@ -1410,7 +1412,9 @@ def check_ordinary_d_elf(path: Path, module_name: str = "ordinary_d") -> None:
 
     undefined = [name for name, _, _, _, _, shndx in symbols if name and shndx == 0]
     print("ordinary-D undefined symbols:", ", ".join(undefined) if undefined else "(none)")
-    if sorted(undefined) != ["__start_minfo", "__stop_minfo", "_d_dso_registry"]:
+    expected_undefined = {"__start_minfo", "__stop_minfo", "_d_dso_registry"}
+    expected_undefined.update(external_symbols or ())
+    if sorted(undefined) != sorted(expected_undefined):
         raise RuntimeError(f"ordinary-D runtime dependencies mismatch: {undefined}")
     for name in ["__start_minfo", "__stop_minfo"]:
         if by_symbol[name][1][3:5] != (0x10, 2):
@@ -1467,6 +1471,177 @@ def check_ordinary_d_elf(path: Path, module_name: str = "ordinary_d") -> None:
     print("ordinary-D runtime reference: minfo R_ARM_ABS32 ->", module_info_name)
 
 
+def check_ordinary_d_linkage_symbols(path: Path, module_name: str) -> set[str]:
+    # Fixed ABI expectations, independently checked with the pinned upstream
+    # DMD 2.113.0 mangler. Do not derive these from the compiler under test.
+    definitions = {
+        "ordinary_d_linkage": {
+            "_D18ordinary_d_linkage19ordinary_d_identityFiZi",
+            "_D18ordinary_d_linkage10overloadedFiZi",
+            "_D18ordinary_d_linkage10overloadedFlZl",
+            "_D18ordinary_d_linkage7pointerFPiZQd",
+            "_D18ordinary_d_linkage10fifthFloatFfffffZf",
+            "_D18ordinary_d_linkage13alignedDoubleFidiZd",
+            "_D18ordinary_d_linkage11stackedLongFiiilZl",
+            "_D18ordinary_d_linkage18stackAlignedDoubleFiiiiidiZd",
+            "ordinary_d_custom",
+            "_D18ordinary_d_linkage9qualifiedFNaNbNiNfiZi",
+        },
+        "ordinary_d_peer": {"_D15ordinary_d_peer19ordinary_d_identityFiZi"},
+        "ordinary_d_calls": {
+            "_D16ordinary_d_calls12crossModulesFZi",
+            "_D16ordinary_d_calls13callOverloadsFZi",
+            "_D16ordinary_d_calls5callCFiZi",
+            "ordinary_d_c_calls_d",
+            "_D16ordinary_d_calls4markFiZi",
+            "_D16ordinary_d_calls5orderFZi",
+            "_D16ordinary_d_calls9callFloatFZf",
+            "_D16ordinary_d_calls10callDoubleFZd",
+            "_D16ordinary_d_calls8callLongFZl",
+            "_D16ordinary_d_calls11callPointerFPiZQd",
+            "_D16ordinary_d_calls15callStackDoubleFZd",
+            "_D16ordinary_d_calls13callQualifiedFZi",
+        },
+    }
+    expected_calls = Counter({
+        "_D18ordinary_d_linkage19ordinary_d_identityFiZi": 3,
+        "_D15ordinary_d_peer19ordinary_d_identityFiZi": 1,
+        "_D18ordinary_d_linkage10overloadedFiZi": 1,
+        "_D18ordinary_d_linkage10overloadedFlZl": 1,
+        "ordinary_d_c_twice": 1,
+        "_D16ordinary_d_calls4markFiZi": 5,
+        "_D16ordinary_d_calls9asmScalarFiiiiiZi": 1,
+        "_D18ordinary_d_linkage10fifthFloatFfffffZf": 1,
+        "_D16ordinary_d_calls8asmFloatFfffffZf": 1,
+        "_D18ordinary_d_linkage13alignedDoubleFidiZd": 1,
+        "_D16ordinary_d_calls9asmDoubleFidiZd": 1,
+        "_D16ordinary_d_calls7asmLongFiiilZl": 1,
+        "_D18ordinary_d_linkage11stackedLongFiiilZl": 1,
+        "_D16ordinary_d_calls10asmPointerFPiZQd": 1,
+        "_D18ordinary_d_linkage7pointerFPiZQd": 1,
+        "_D18ordinary_d_linkage18stackAlignedDoubleFiiiiidiZd": 1,
+        "_D16ordinary_d_calls14asmStackDoubleFiiiiidiZd": 1,
+        "ordinary_d_custom": 1,
+        "_D18ordinary_d_linkage9qualifiedFNaNbNiNfiZi": 1,
+    }) if module_name == "ordinary_d_calls" else Counter()
+
+    data, sections = elf32_sections(path)
+    text_index, _ = sections[".text"]
+    _, sym = sections[".symtab"]
+    _, strings_section = sections[".strtab"]
+    strings = data[strings_section[4]:strings_section[4] + strings_section[5]]
+    symbols = []
+    actual_definitions = set()
+    for at in range(sym[4], sym[4] + sym[5], 16):
+        name_at, value, _, info, _, section = struct.unpack_from("<IIIBBH", data, at)
+        end = strings.find(b"\0", name_at)
+        if end < 0:
+            raise RuntimeError("ordinary-D linkage stage SYMBOLS: unterminated name")
+        name = strings[name_at:end].decode("ascii")
+        symbols.append(name)
+        if section == text_index and (info & 15) == 2:
+            if info != 0x12 or value % 4:
+                raise RuntimeError("ordinary-D linkage stage SYMBOLS: invalid global A32 function")
+            actual_definitions.add(name)
+    if actual_definitions != definitions[module_name]:
+        raise RuntimeError(
+            "ordinary-D linkage stage SYMBOLS: unexpected function definitions; "
+            f"missing={sorted(definitions[module_name] - actual_definitions)}; "
+            f"extra={sorted(actual_definitions - definitions[module_name])}")
+
+    _, relocations = sections[".rel.text"]
+    calls = Counter()
+    for at in range(relocations[4], relocations[4] + relocations[5], 8):
+        _, info = struct.unpack_from("<II", data, at)
+        if info & 255 == 28:
+            calls[symbols[info >> 8]] += 1
+    if calls != expected_calls:
+        raise RuntimeError(f"ordinary-D linkage stage SYMBOLS: unexpected calls: {calls}")
+    return set(expected_calls) - definitions[module_name]
+
+
+def check_ordinary_d_linkage(compiler: Path, imports: Path, here: Path, out: Path,
+                              clang: str, linker: str, qemu: str,
+                              case: str = "positive") -> None:
+    objects = []
+    for module_name in ("ordinary_d_linkage", "ordinary_d_peer", "ordinary_d_calls"):
+        source = here / (module_name + ".d")
+        if module_name == "ordinary_d_linkage" and case != "positive":
+            original = source.read_text()
+            identity = "int ordinary_d_identity(int value) { return value; }"
+            if original.count(identity) != 1:
+                raise RuntimeError("could not isolate ordinary-D identity mutation")
+            replacement = (
+                "int ordinary_d_identity(int value) { return 0; }"
+                if case == "zero-result" else
+                'pragma(mangle, "incorrect_identity") ' + identity
+            )
+            source = out / (module_name + ".d")
+            source.write_text(original.replace(identity, replacement, 1))
+        obj = out / (module_name + ".o")
+        run([str(compiler), "-target=armv7a-linux-androideabi21", "-c",
+             f"-I{imports}", f"-I{here}", str(source), f"-of={obj}"])
+        external = check_ordinary_d_linkage_symbols(obj, module_name)
+        check_ordinary_d_elf(obj, module_name, external)
+        objects.append(str(obj))
+
+    harness_obj = out / "ordinary-d-linkage-harness.o"
+    run([clang, "--target=armv7a-linux-androideabi21", "-march=armv7-a", "-marm",
+         "-mfpu=vfpv3-d16", "-mfloat-abi=softfp", "-c",
+         str(here / "ordinary_d_linkage_harness.s"), "-o", str(harness_obj)])
+    executable = out / "ordinary-d-linkage-oracle"
+    run([linker, "-m", "armelf_linux_eabi", "-e", "_start", str(harness_obj),
+         *objects, "-o", str(executable)])
+    command = [qemu, str(executable)]
+    print("+", " ".join(command))
+    execution = subprocess.run(command, check=False, timeout=60)
+    if execution.returncode != 0:
+        raise RuntimeError(
+            "ordinary-D linkage stage EXECUTION: expected exit 0, "
+            f"got {execution.returncode}")
+
+    inspection = subprocess.run(
+        ["readelf", "-h", "-sW", "-rW", "-A", *objects],
+        check=True, stdout=subprocess.PIPE, text=True, timeout=60)
+    (out / "ordinary-d-linkage-readelf.txt").write_text(inspection.stdout)
+    (out / "ordinary-d-linkage-provenance.txt").write_text(
+        "target=armv7a-linux-androideabi21\nflags=-c (no -betterC)\n"
+        f"compiler_sha256={hashlib.sha256(compiler.read_bytes()).hexdigest()}\n"
+        + "".join(f"{Path(obj).name}_sha256={hashlib.sha256(Path(obj).read_bytes()).hexdigest()}\n"
+                  for obj in objects)
+        + f"executable_sha256={hashlib.sha256(executable.read_bytes()).hexdigest()}\n"
+        "execution=QEMU_LINUX_SYSCALL_ORACLE\nregistry=TEST_ONLY_ABI_ORACLE\n"
+        "android_runtime_link=NOT_QUALIFIED\nphysical_device_execution=NOT_RUN\n")
+    print("PASS: ordinary-D scalar mangling, separate modules, independent A32 call/return ABI, evaluation order")
+
+
+def check_linkage_verifier_mutants(compiler: Path, imports: Path, here: Path, out: Path,
+                                    clang: str, linker: str, qemu: str) -> None:
+    # Run the real verifier as a child, requiring its outer process to fail at
+    # the intended stage. A compiler, linker or environment failure is not a
+    # successful detection of a wrong program or symbol.
+    rows = []
+    for case, marker in [
+        ("zero-result", "ordinary-D linkage stage EXECUTION: expected exit 0, got 1"),
+        ("wrong-symbol", "ordinary-D linkage stage SYMBOLS: unexpected function definitions"),
+    ]:
+        command = [sys.executable, str(here / "verify.py"), "--compiler", str(compiler),
+                   "--imports", str(imports), "--output", str(out / ("linkage-" + case)),
+                   "--clang", clang, "--linker", linker, "--qemu", qemu,
+                   "--ordinary-d-linkage-case", case]
+        print("+", " ".join(command))
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, timeout=60)
+        (out / ("ordinary-d-linkage-" + case + ".log")).write_text(result.stdout)
+        if result.returncode == 0 or marker not in result.stdout:
+            print(result.stdout, end="")
+            raise RuntimeError(f"ordinary-D {case} mutant did not fail its outer verifier at the expected stage")
+        rows.append(f"{case}\t{result.returncode}\t{marker}\tPASS")
+    (out / "ordinary-d-linkage-mutants.tsv").write_text(
+        "mutation\touter_status\trequired_failure\tdetected\n" + "\n".join(rows) + "\n")
+    print("PASS: outer verifier rejects zero-result and wrong-symbol ordinary-D mutants at the exact stages")
+
+
 def check_ordinary_d_boundary(compiler: Path, imports: Path, here: Path, out: Path,
                               clang: str, linker: str, qemu: str) -> None:
     ordinary_obj = out / "ordinary-d-arm32.o"
@@ -1491,8 +1666,8 @@ def check_ordinary_d_boundary(compiler: Path, imports: Path, here: Path, out: Pa
          "matching Android ARM32 druntime body providing _d_dso_registry; no Android runtime link qualified"),
         ("ordinary_d", None, "ModuleInfo; _d_dso_registry; __start_minfo; __stop_minfo",
          "matching Android ARM32 druntime body providing _d_dso_registry; no Android runtime link qualified"),
-        ("ordinary_d_linkage", "top-level extern(C) functions only", "D function ABI/name mangling",
-         "qualify D linkage/calling convention before admitting ordinary D-linkage functions"),
+        ("ordinary_d_linkage", None, "D scalar names/calls; ModuleInfo; _d_dso_registry",
+         "qualified scalar linkage only; matching Android druntime and broader D types remain unqualified"),
         ("ordinary_d_assert", "unsupported expression", "assert runtime call and source-file D slice",
          "represent D slices/source data and lower assert to the matching druntime entrypoint"),
         ("ordinary_d_static_ctor", "ordinary-D ModuleInfo with lifecycle/import data is not implemented",
@@ -1516,6 +1691,60 @@ def check_ordinary_d_boundary(compiler: Path, imports: Path, here: Path, out: Pa
         rows.append("\t".join([fixture, "PASS", "REACHED", "NONE" if diagnostic else "PASS",
                                "not emitted: " + requirement if diagnostic else requirement,
                                "FAIL_CLOSED" if diagnostic else "SUPPORTED", blocker]))
+
+    for version, diagnostic in [
+        ("RefDefinition", "ref/out/lazy parameters are not implemented"),
+        ("RefCall", "ref/out/lazy parameters are not implemented"),
+        ("OutCall", "ref/out/lazy parameters are not implemented"),
+        ("LazyCall", "ref/out/lazy parameters are not implemented"),
+        ("RefReturn", "variadic or ref-return functions are not implemented"),
+        ("VariadicCall", "variadic or ref-return functions are not implemented"),
+        ("AggregateResult", "scalar"),
+        ("NestedCall", "only local value declarations are implemented"),
+        ("DMainInt", "ordinary-D main requires runtime startup"),
+        ("DMainVoid", "ordinary-D main requires runtime startup"),
+        ("CrtConstructor", "A32 crt_constructor/crt_destructor lifecycle entries are not implemented"),
+        ("CrtDestructor", "A32 crt_constructor/crt_destructor lifecycle entries are not implemented"),
+    ]:
+        common = [str(compiler), "-target=armv7a-linux-androideabi21", "-c", f"-I{imports}",
+                  f"-version={version}", str(here / "ordinary_d_unsupported.d")]
+        run(common + ["-o-"])
+        rejected_obj = out / ("ordinary-d-rejected-" + version + ".o")
+        rejected_obj.write_bytes(b"stale ordinary-D output must not survive")
+        command = common + [f"-of={rejected_obj}"]
+        print("+", " ".join(command))
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, timeout=60)
+        print(result.stdout, end="")
+        if result.returncode == 0 or rejected_obj.exists() or \
+                "A32 backend:" not in result.stdout or diagnostic not in result.stdout:
+            raise RuntimeError(f"{version} did not fail closed at the expected ordinary-D boundary")
+        rows.append("\t".join([version, "PASS", "REACHED", "NONE", "none emitted",
+                               "FAIL_CLOSED", diagnostic]))
+
+    # A disabled unittest can remain an untyped AST node; it must be ignored.
+    # Enabling it still fails at the existing driver gate, before the frontend.
+    disabled_unit_obj = out / "ordinary-d-disabled-unittest.o"
+    unit_common = [str(compiler), "-target=armv7a-linux-androideabi21", "-c", f"-I{imports}",
+                   "-version=DisabledUnittest", str(here / "ordinary_d_unsupported.d")]
+    run(unit_common + ["-o-"])
+    run(unit_common + [f"-of={disabled_unit_obj}"])
+    check_ordinary_d_elf(disabled_unit_obj, "ordinary_d_unsupported")
+    rows.append("\t".join(["DisabledUnittest", "PASS", "REACHED", "PASS",
+                           "ModuleInfo; _d_dso_registry; __start_minfo; __stop_minfo",
+                           "SUPPORTED", "unittest body disabled; no unittest execution qualified"]))
+    enabled_unit_obj = out / "ordinary-d-enabled-unittest.o"
+    enabled_unit_obj.unlink(missing_ok=True)
+    unit_command = unit_common + ["-unittest", f"-of={enabled_unit_obj}"]
+    print("+", " ".join(unit_command))
+    result = subprocess.run(unit_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, timeout=60)
+    print(result.stdout, end="")
+    if result.returncode == 0 or enabled_unit_obj.exists() or \
+            "without linking, profiling, unit tests or debug information" not in result.stdout:
+        raise RuntimeError("enabled unittest did not fail at the existing ARM32 driver boundary")
+    rows.append("\t".join(["EnabledUnittest", "NOT_REACHED", "NOT_REACHED", "NONE",
+                           "none emitted", "DRIVER_REJECTED", "unittest runtime and registration unqualified"]))
 
     harness_obj = out / "ordinary-d-registry-harness.o"
     run([clang, "--target=armv7a-linux-androideabi21", "-march=armv7-a", "-marm",
@@ -1556,12 +1785,20 @@ def main() -> None:
     parser.add_argument("--clang", default="clang")
     parser.add_argument("--linker", default="ld.lld")
     parser.add_argument("--qemu", default="qemu-arm-static")
+    parser.add_argument("--ordinary-d-linkage-case", choices=["positive", "zero-result", "wrong-symbol"],
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     here = Path(__file__).resolve().parent
     out = Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
     obj = out / "android-arm32-a32.o"
+
+    if args.ordinary_d_linkage_case:
+        check_ordinary_d_linkage(
+            Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
+            args.clang, args.linker, args.qemu, args.ordinary_d_linkage_case)
+        return
 
     run([
         str(Path(args.compiler).resolve()),
@@ -1573,6 +1810,12 @@ def main() -> None:
     ])
     check_elf(obj)
 
+    check_ordinary_d_linkage(
+        Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
+        args.clang, args.linker, args.qemu)
+    check_linkage_verifier_mutants(
+        Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
+        args.clang, args.linker, args.qemu)
     check_ordinary_d_boundary(
         Path(args.compiler).resolve(), Path(args.imports).resolve(), here, out,
         args.clang, args.linker, args.qemu)

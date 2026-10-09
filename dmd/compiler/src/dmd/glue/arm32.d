@@ -2,8 +2,8 @@
  * Typed DMD AST -> ARMv7-A A32 code.
  *
  * This is the first A32 lowering slice. It uses DMD's parser and semantic
- * passes, follows AAPCS32 base PCS for one-word scalar arguments, and emits
- * A32 instructions only. Unsupported constructs fail closed.
+ * passes, follows AAPCS32 base PCS for scalar arguments with C or D linkage,
+ * and emits A32 instructions only. Unsupported constructs fail closed.
  *
  * License: Boost License 1.0
  */
@@ -23,7 +23,7 @@ import dmd.expression;
 import dmd.func;
 import dmd.init;
 import dmd.location;
-import dmd.mangle : mangleToBuffer;
+import dmd.mangle : mangleExact, mangleToBuffer;
 import dmd.mtype;
 import dmd.globals : global;
 import dmd.root.string : toDString;
@@ -152,6 +152,21 @@ private string declarationName(Declaration declaration, Loc loc)
     return name;
 }
 
+private string functionName(FuncDeclaration function_, Loc loc)
+{
+    if (function_.resolvedLinkage() == LINK.c)
+        return declarationName(function_, loc);
+
+    // mangleToBuffer(FuncDeclaration) may describe an overload set rather
+    // than the resolved function. Use the same exact mangler as tocsym,
+    // including pragma(mangle) and Unicode identifiers. ELF stores these
+    // names as bytes; DMD semantic analysis rejects embedded nulls.
+    const name = mangleExact(function_).toDString();
+    if (!name.length)
+        reject(loc, "empty A32 function symbol");
+    return name.idup;
+}
+
 private struct LeafEmitter
 {
     Arm32Code code;
@@ -262,6 +277,48 @@ private struct LeafEmitter
     {
         if (!valueWords(t))
             reject(loc, "A32 lowering supports the scalar subset plus 16-byte float4 vectors");
+    }
+
+    TypeFunction scalarFunction(FuncDeclaration function_, Loc loc)
+    {
+        if (function_.isStaticCtorDeclaration() || function_.isStaticDtorDeclaration())
+            reject(loc, "A32 module constructor/destructor lifecycle entries are not implemented");
+        if (function_.isUnitTestDeclaration())
+            reject(loc, "A32 unittest registration is not implemented");
+
+        const linkage = function_.resolvedLinkage();
+        const parent = function_.toParent();
+        if ((linkage != LINK.c && linkage != LINK.d) ||
+            !parent || !parent.isModule() || function_.isNested() ||
+            function_.isMember() || function_.needThis() || function_.hasDualContext ||
+            function_.vthis || function_.requiresClosure)
+            reject(loc, "A32 scalar functions require top-level extern(C) or extern(D) linkage without a hidden context");
+
+        // _Dmain uses druntime's entry convention rather than a general D
+        // scalar function's convention. Do not admit it just by mangling it.
+        if (function_.isMain())
+            reject(loc, "ordinary-D main requires runtime startup not implemented by the A32 scalar slice");
+        if (function_.isCrtCtor || function_.isCrtDtor)
+            reject(loc, "A32 crt_constructor/crt_destructor lifecycle entries are not implemented");
+
+        auto signature = function_.type.toTypeFunction();
+        if (signature.parameterList.varargs != VarArg.none || signature.isRef)
+            reject(loc, "variadic or ref-return functions are not implemented");
+        if (signature.next.toBasetype().ty != TY.Tvoid)
+            requireScalar(signature.next, loc);
+        if (signature.parameterList.length > 64)
+            reject(loc, "more than 64 scalar parameters are outside the qualification range");
+
+        // Declaration-only imported callees need not have semantic3's
+        // VarDeclarations in function_.parameters. Check their actual formal
+        // parameter list before accepting any call or definition.
+        foreach (i, parameter; signature.parameterList)
+        {
+            if (parameter.storageClass & (STC.ref_ | STC.out_ | STC.lazy_))
+                reject(loc, "ref/out/lazy parameters are not implemented");
+            requireScalar(parameter.type, loc);
+        }
+        return signature;
     }
 
     void loadValue(Type type, uint slot, uint reg = 0)
@@ -428,21 +485,14 @@ private struct LeafEmitter
 
     void directCall(CallExp call)
     {
-        auto callee = call.f;
+        auto callee = call.f ? call.f.toAliasFunc() : null;
         if (!callee)
             reject(call.loc, "indirect/function-pointer calls are not implemented");
-        if (callee.resolvedLinkage() != LINK.c || callee.isNested() || callee.isMember())
-            reject(call.loc, "A32 direct calls currently require top-level extern(C) functions");
-
-        auto signature = callee.type.toTypeFunction();
-        if (signature.parameterList.varargs != VarArg.none || signature.isRef)
-            reject(call.loc, "variadic or ref-return calls are not implemented");
-        if (signature.next.toBasetype().ty != TY.Tvoid)
-            requireScalar(signature.next, call.loc);
+        auto signature = scalarFunction(callee, call.loc);
 
         const count = call.arguments ? cast(uint)call.arguments.length : 0U;
-        if (count > 64)
-            reject(call.loc, "more than 64 scalar call arguments are outside the qualification range");
+        if (count != signature.parameterList.length)
+            reject(call.loc, "A32 scalar call argument count does not match its formal parameters");
 
         if (callee.parameters)
         {
@@ -460,6 +510,9 @@ private struct LeafEmitter
 
         if (call.arguments)
         {
+            // D requires left-to-right argument evaluation. Stage every
+            // value before assigning ABI registers/stack words so a later
+            // argument's call cannot clobber an earlier argument's value.
             foreach (i, argument; *call.arguments)
             {
                 requireScalar(argument.type, argument.loc);
@@ -530,7 +583,7 @@ private struct LeafEmitter
         }
 
         const at = code.call();
-        relocations ~= Arm32Relocation(cast(uint)at, declarationName(callee, call.loc), ARM32_R_CALL);
+        relocations ~= Arm32Relocation(cast(uint)at, functionName(callee, call.loc), ARM32_R_CALL);
         code.adjustStack(outgoing, false);
     }
 
@@ -1230,21 +1283,14 @@ private struct LeafEmitter
     Arm32Function emit(FuncDeclaration function_)
     {
         location = function_.loc;
-        if (function_.resolvedLinkage() != LINK.c || function_.isNested() || function_.isMember())
-            reject(location, "initial A32 lowering accepts top-level extern(C) functions only");
-
-        auto signature = function_.type.toTypeFunction();
-        if (signature.parameterList.varargs != VarArg.none || signature.isRef)
-            reject(location, "variadic or ref-return functions are not implemented");
-
+        auto signature = scalarFunction(function_, location);
         auto result = signature.next;
-        if (result.toBasetype().ty != TY.Tvoid)
-            requireScalar(result, location);
 
-        if (function_.parameters && function_.parameters.length > 64)
-            reject(location, "more than 64 scalar parameters are outside the qualification range");
+        const parameterCount = function_.parameters ? function_.parameters.length : 0;
+        if (parameterCount != signature.parameterList.length)
+            reject(location, "A32 scalar definition parameter count does not match its formal parameters");
 
-        string name = declarationName(function_, location);
+        string name = functionName(function_, location);
 
         code.instruction(0xE92D4010); // PUSH {r4,lr}; 8 bytes keeps public SP alignment
         const prologue = code.bytes.length;
@@ -1446,6 +1492,8 @@ void generateArm32Objects(Module[] modules)
                     }
                     if (auto function_ = symbol.isFuncDeclaration())
                     {
+                        if (function_.isUnitTestDeclaration() && !global.params.useUnitTests)
+                            continue;
                         if (!function_.fbody)
                             continue;
                         LeafEmitter emitter;
