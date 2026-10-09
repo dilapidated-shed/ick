@@ -1,0 +1,64 @@
+name: Bigmul native correctness and benchmark smoke
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/bigmul/**'
+      - '.github/workflows/bigmul-benchmark.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out exact initiating commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Record runner and toolchain
+        run: |
+          uname -a
+          cc --version | head -n 1
+          python3 --version
+          git rev-parse HEAD
+      - name: Exactness and harness smoke tests
+        run: python3 benchmarks/bigmul/test_mulbench.py
+      - name: Calibrated schoolbook smoke timing (not a regression gate)
+        working-directory: benchmarks/bigmul
+        run: |
+          cc -O3 -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra mulbench.c -o mulbench
+          ./mulbench --bench 4096 5 > baseline.csv
+          {
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "compiler_flags=-O3 -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra"
+            uname -a
+            cc --version | head -n 1
+            python3 --version
+            lscpu || true
+          } > machine.txt
+          head -n 16 baseline.csv
+          {
+            echo "### Bigmul smoke — ${{ matrix.runner }}"
+            echo "Commit: $(git rev-parse HEAD)"
+            echo ""
+            sed 's/^/    /' baseline.csv | head -n 16
+            echo ""
+            echo "Hot in-process schoolbook baseline only; no performance gate or cross-runner ranking."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain machine-specific timing receipts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bigmul-smoke-${{ matrix.runner }}
+          path: |
+            benchmarks/bigmul/baseline.csv
+            benchmarks/bigmul/machine.txt
+          if-no-files-found: error
+          retention-days: 30
