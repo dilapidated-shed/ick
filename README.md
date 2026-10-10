@@ -23,6 +23,7 @@ See:
 - [`docs/c-multiplication-glyph.md`](docs/c-multiplication-glyph.md) for Icky C `×` multiplication.
 - [`docs/c-division-glyph.md`](docs/c-division-glyph.md) for Icky C `÷` division.
 - [`docs/android-release-gate.md`](docs/android-release-gate.md) for the Android/F-Droid compiler qualification matrix.
+- [`docs/bootstrap-generators.md`](docs/bootstrap-generators.md) for Bison/Yacc, retained gengtype Flex generation and ICKY's unimplemented integration boundary.
 - [`docs/imprecise-types.md`](docs/imprecise-types.md) for the five low-precision numeric types.
 - [`docs/circle96.md`](docs/circle96.md) for finite Circle96 machine geometry.
 - [`docs/d-gpu-prior-art.md`](docs/d-gpu-prior-art.md) for D-to-GPU compiler prior art and open design questions.
