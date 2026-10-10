@@ -44,13 +44,23 @@ phobos=.runtime-phobos/generated/linux/release/64/libphobos2.a
 test -x "$compiler"
 test -s "$druntime"
 test -s "$phobos"
+# The owned IDK executable is a native ELF binary built using ldmd2. Its
+# dynamic compiler-HOST druntime dependency is not the target druntime.a.
+# Bundle this one loader SONAME, never the bootstrap compiler executable.
+compiler_host_soname=libdruntime-ldc-shared.so.106
+readelf -d "$compiler" | grep -F "[$compiler_host_soname]" >/dev/null
+compiler_host_library=$(ldd "$compiler" | awk -v soname="$compiler_host_soname" \
+  '$1 == soname && $2 == "=>" { print $3; exit }')
+test -n "$compiler_host_library"
+test -s "$compiler_host_library"
 test -f .runtime-dmd/druntime/import/object.d
 test -f .runtime-phobos/std/bigint.d
 
 mkdir -p "$root/bin" "$root/libexec" "$root/lib" \
-  "$root/import/druntime" "$root/import/phobos" \
+  "$root/import/druntime" "$root/import/phobos" "$root/lib/compiler-host" \
   "$root/fixtures" "$root/meta" "$root/share" "$root/licenses"
 install -m 0755 "$compiler" "$root/libexec/idk-dmd"
+install -m 0644 "$compiler_host_library" "$root/lib/compiler-host/$compiler_host_soname"
 install -m 0644 "$druntime" "$root/lib/libdruntime.a"
 install -m 0644 "$phobos" "$root/lib/libphobos2.a"
 cp -a .runtime-dmd/druntime/import/. "$root/import/druntime/"
@@ -70,6 +80,8 @@ cat > "$root/bin/idk" <<'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+# Only the compiler process needs this explicitly bundled bootstrap HOST ABI.
+export LD_LIBRARY_PATH="$root/lib/compiler-host"
 if test "$#" -eq 1 && { test "$1" = "--version" || test "$1" = "-version"; }; then
   exec "$root/libexec/idk-dmd" -conf= "$1"
 fi
@@ -94,6 +106,9 @@ chmod 0755 "$root/bin/idk"
   printf 'bootstrap_is_payload=false\n'
   printf 'conservative_dmd_is_payload=false\n'
   printf 'linker_deps=pthread,m,dl\n'
+  printf 'compiler_host_support_soname=%s\n' "$compiler_host_soname"
+  printf 'compiler_host_support_origin=ubuntu-24.04-ldc-bootstrap-runtime\n'
+  printf 'compiler_host_support_sha256=%s\n' "$(sha256sum "$root/lib/compiler-host/$compiler_host_soname" | cut -d' ' -f1)"
   printf 'ordinary_stdout=123456789012345678901234567891\n'
   printf 'divergent_stdout=1000000000000000000000000000000\n'
   printf 'unicode_mutant_exit=3\n'
@@ -154,6 +169,8 @@ python3 "$verify" "$root"
   printf 'compiler_sha256\t%s\n' "$(sha256sum "$root/libexec/idk-dmd" | cut -d' ' -f1)"
   printf 'druntime_sha256\t%s\n' "$(sha256sum "$root/lib/libdruntime.a" | cut -d' ' -f1)"
   printf 'phobos_sha256\t%s\n' "$(sha256sum "$root/lib/libphobos2.a" | cut -d' ' -f1)"
+  printf 'compiler_host_support_soname\t%s\n' "$compiler_host_soname"
+  printf 'compiler_host_support_sha256\t%s\n' "$(sha256sum "$root/lib/compiler-host/$compiler_host_soname" | cut -d' ' -f1)"
   printf 'manifest_sha256\t%s\n' "$(sha256sum "$root/meta/FILES.sha256" | cut -d' ' -f1)"
   printf 'archive_sha256\t%s\n' "$(sha256sum "$archive" | cut -d' ' -f1)"
   printf 'manifest_path\tmeta/FILES.sha256\n'
