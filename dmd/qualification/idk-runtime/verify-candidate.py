@@ -119,12 +119,6 @@ def verify(root):
             all(c in "0123456789abcdef" for c in ident["workflow_source_head"]),
             "mismatched workflow source identity")
 
-    require(digest(root / "meta/SOURCE.lock") ==
-            expected["historical_source_lock_sha256"],
-            "mismatched historical SOURCE.lock fingerprint")
-    require(digest(root / "meta/RUNTIME.lock") ==
-            expected["historical_runtime_lock_sha256"],
-            "mismatched historical RUNTIME.lock fingerprint")
     source_lock = key_values(root / "meta/SOURCE.lock")
     runtime_lock = key_values(root / "meta/RUNTIME.lock")
     require(source_lock.get("upstream_commit") == DMD,
@@ -136,6 +130,12 @@ def verify(root):
     require(runtime_lock.get("idk_base_source_head") ==
             "297112cc526cddbba098716d1617681852b8c4c9",
             "mismatched IDK lineage")
+    require(digest(root / "meta/SOURCE.lock") ==
+            expected["historical_source_lock_sha256"],
+            "mismatched historical SOURCE.lock fingerprint")
+    require(digest(root / "meta/RUNTIME.lock") ==
+            expected["historical_runtime_lock_sha256"],
+            "mismatched historical RUNTIME.lock fingerprint")
     require(digest(root / "fixtures/idk_ordinary_runtime_smoke.d") == ORDINARY_SHA,
             "mismatched original ordinary-D fixture fingerprint")
     require(digest(root / "fixtures/idk_full_runtime_smoke.d") == DIVERGENT_SHA,
