@@ -57,6 +57,31 @@ Addition/subtraction special values follow these explicit rules:
 - exact finite cancellation produces positive zero;
 - negative zero plus negative zero produces negative zero.
 
+Unary `-` flips the sign bit of every non-NaN value, including zero and
+infinity. It canonicalizes any NaN input to `0x0fc`. The named numeric
+predicates `equal` and `less` compare the nine-bit values without a
+binary32 or Float16 carrier. Both return false for an unordered NaN operand;
+`+0` and `-0` compare equal and neither is less than the other. Neither
+method asserts a total ordering of NaNs.
+
+The present D implementation is a nominal two-byte struct; its default
+`.init` is the all-zero payload (`+0`). This does **not** implement or
+supersede a future primitive-language floating type's NaN initializer.
+
+## Independent qualification
+
+`dmd/qualification/representations/oracle.c` separately computes signed
+addition/subtraction in exact integer units of `2^-17`. It chooses the
+nearest output code by binary-searching finite adjacent-code midpoints
+(including the conceptual infinity successor of maximum finite), with
+ties to even. The D acceptance test checks all `512 × 512` ordered
+operand pairs for `+`, `-`, `equal`, and `less`, plus negation of
+all 512 payloads. The C oracle never computes the expected answer with a
+binary32 arithmetic operation or by calling the D quantizer.
+
+Passing these host tests does not establish compiler-native primitive E5M3,
+ARM code generation, or physical Android acceptance.
+
 ## UE5M3 storage boundary
 
 `UE5M3` remains the one-byte unsigned Ootomo–Naruse storage representation.
