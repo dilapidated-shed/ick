@@ -107,6 +107,10 @@ def verify(root):
         "divergent_stdout": "1000000000000000000000000000000",
         "unicode_mutant_exit": "3",
         "historical_qualification_run": "37304142154",
+        "historical_source_lock_sha256": "4e2f53fbefa179634a64c5498136f4fb803bd05aae8380aae43e762957c1e8ef",
+        "historical_runtime_lock_sha256": "051be11820c0540eb51cd7bbb32e0c96b7680ba46a8921f077abf703d5a5490c",
+        "historical_lexer_sha256": "e6079d89811b80fb76396db6f18da179554d27caf27d7336f7b164b8a9f809a9",
+        "historical_parser_sha256": "14f4d6f14756fb46de5e0e9f9981adeb86e94936e93a7fdb887849bdf2b03075",
     }
     for key, value in expected.items():
         require(ident.get(key) == value,
@@ -115,6 +119,12 @@ def verify(root):
             all(c in "0123456789abcdef" for c in ident["workflow_source_head"]),
             "mismatched workflow source identity")
 
+    require(digest(root / "meta/SOURCE.lock") ==
+            expected["historical_source_lock_sha256"],
+            "mismatched historical SOURCE.lock fingerprint")
+    require(digest(root / "meta/RUNTIME.lock") ==
+            expected["historical_runtime_lock_sha256"],
+            "mismatched historical RUNTIME.lock fingerprint")
     source_lock = key_values(root / "meta/SOURCE.lock")
     runtime_lock = key_values(root / "meta/RUNTIME.lock")
     require(source_lock.get("upstream_commit") == DMD,
