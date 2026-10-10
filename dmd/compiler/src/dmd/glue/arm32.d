@@ -17,6 +17,9 @@ import dmd.backend.arm32;
 import dmd.declaration;
 import dmd.dmodule;
 import dmd.dsymbol;
+import dmd.dstruct;
+import dmd.dtemplate : isType;
+import dmd.id : Id;
 import dmd.dsymbolsem : include;
 import dmd.errors : error;
 import dmd.expression;
@@ -294,11 +297,12 @@ private struct LeafEmitter
 
         const linkage = function_.resolvedLinkage();
         const parent = function_.toParent();
+        const staticStructMember = parent && parent.isStructDeclaration() && !function_.needThis();
         if ((linkage != LINK.c && linkage != LINK.d) ||
-            !parent || !parent.isModule() || function_.isNested() ||
-            function_.isMember() || function_.needThis() || function_.hasDualContext ||
+            !parent || (!parent.isModule() && !staticStructMember) || function_.isNested() ||
+            function_.needThis() || function_.hasDualContext ||
             function_.vthis || function_.requiresClosure)
-            reject(loc, "A32 scalar functions require top-level extern(C) or extern(D) linkage without a hidden context");
+            reject(loc, "A32 scalar functions require top-level or static-struct extern(C)/extern(D) linkage without a hidden context");
 
         // _Dmain uses druntime's entry convention rather than a general D
         // scalar function's convention. Do not admit it just by mangling it.
@@ -1492,7 +1496,7 @@ void generateArm32Objects(Module[] modules)
             if (!global.params.betterC && (!global.params.useModuleInfo || !Module.moduleinfo))
                 reject(module_.loc, "ordinary-D A32 emission requires the druntime ModuleInfo interface");
 
-            void members(Dsymbols* symbols)
+            void members(Dsymbols* symbols, bool insideStruct = false)
             {
                 if (!symbols)
                     return;
@@ -1500,9 +1504,38 @@ void generateArm32Objects(Module[] modules)
                 {
                     if (auto attr = symbol.isAttribDeclaration())
                     {
-                        members(include(attr, null));
+                        members(include(attr, null), insideStruct);
                         continue;
                     }
+                    if (auto instance = symbol.isTemplateInstance())
+                    {
+                        // semantic3 hoists compiler-generated object.RTInfo!(Struct)
+                        // to module traversal. Admit only that exact declaration
+                        // with exactly one struct-type argument; every other
+                        // template instance remains fail-closed.
+                        auto declaration = instance.tempdecl ? instance.tempdecl.isTemplateDeclaration() : null;
+                        auto module_ = declaration ? declaration.getModule() : null;
+                        auto argument = instance.tiargs && instance.tiargs.length == 1 ?
+                            isType((*instance.tiargs)[0]) : null;
+                        if (instance.name == Id.RTInfo &&
+                            declaration && declaration.ident == Id.RTInfo &&
+                            module_ && module_.ident == Id.object &&
+                            argument && argument.toBasetype().ty == TY.Tstruct)
+                            continue;
+                        reject(symbol.loc, "A32 template instances require explicit lowering outside compiler-generated object.RTInfo!(Struct)");
+                    }
+                    if (symbol.isUnionDeclaration())
+                        reject(symbol.loc, "A32 union layout is not qualified by the struct-layout slice");
+                    if (auto struct_ = symbol.isStructDeclaration())
+                    {
+                        // The frontend owns field offsets and alignment. Fields are
+                        // layout declarations, not standalone ELF objects. Recurse so
+                        // static methods are emitted and instance methods fail closed.
+                        members(struct_.members, true);
+                        continue;
+                    }
+                    if (symbol.isClassDeclaration() || symbol.isInterfaceDeclaration())
+                        reject(symbol.loc, "A32 class/interface declarations require runtime metadata not implemented by the struct-layout slice");
                     if (auto function_ = symbol.isFuncDeclaration())
                     {
                         if (function_.isUnitTestDeclaration() && !global.params.useUnitTests)
@@ -1524,6 +1557,12 @@ void generateArm32Objects(Module[] modules)
                     {
                         if (variable.storage_class & STC.manifest)
                             continue;
+                        if (variable.isField())
+                        {
+                            if (!insideStruct)
+                                reject(variable.loc, "A32 field declaration appeared outside structured aggregate traversal");
+                            continue;
+                        }
                         auto global_ = lowerGlobal(variable);
                         if (global_.name in names)
                             reject(variable.loc, "duplicate A32 external symbol");
@@ -1531,7 +1570,7 @@ void generateArm32Objects(Module[] modules)
                         globals ~= global_;
                         continue;
                     }
-                    reject(symbol.loc, "declaration requires data/runtime emission not implemented by the initial A32 slice");
+                    reject(symbol.loc, ("declaration requires data/runtime emission not implemented by the initial A32 slice: " ~ symbol.kind().toDString ~ " `" ~ symbol.toPrettyChars().toDString ~ "`").idup);
                 }
             }
 

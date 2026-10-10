@@ -148,12 +148,13 @@ The `core/stdc/config.d` source/import SHA-256 is
 `core/stdc/stdarg.d` is
 `a85cdec604e91261e5d931574338cbd63d3a19632ffb685aebe3a0e26d91cff8`.
 
-Those frontend compatibility defects are repaired in the next qualified step,
-with an exact runtime overlay and a compiler-side AAPCS32 va_list fix. The real
-matching provider now reaches the A32 backend; its first fail-closed diagnostic is
-recorded in [RUNTIME_PROVIDER_BOUNDARY.md](RUNTIME_PROVIDER_BOUNDARY.md).
-Aggregate members and methods, slices, delegates, containers, TLS and lifecycle
-remain outside the scalar qualification.
+Those frontend compatibility defects are repaired with an exact runtime overlay
+and a compiler-side AAPCS32 va_list fix. The next qualified step treats struct
+fields as layout-only declarations and admits context-free static struct methods.
+The real provider now traverses `DSO` and stops at `opApply`'s unsupported delegate
+parameter, recorded in [RUNTIME_PROVIDER_BOUNDARY.md](RUNTIME_PROVIDER_BOUNDARY.md).
+Aggregate values, instance methods, slices, delegates, containers, TLS and
+lifecycle remain outside the scalar qualification.
 
 The execution above is a **QEMU Linux-syscall oracle around Android-target
 objects**. Its `_d_dso_registry` is test-only and validates the compiler's
