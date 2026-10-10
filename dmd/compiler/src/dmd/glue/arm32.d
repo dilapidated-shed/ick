@@ -2,8 +2,8 @@
  * Typed DMD AST -> ARMv7-A A32 code.
  *
  * This is the first A32 lowering slice. It uses DMD's parser and semantic
- * passes, follows AAPCS32 base PCS for one-word scalar arguments, and emits
- * A32 instructions only. Unsupported constructs fail closed.
+ * passes, follows AAPCS32 base PCS for scalar arguments with C or D linkage,
+ * and emits A32 instructions only. Unsupported constructs fail closed.
  *
  * License: Boost License 1.0
  */
@@ -17,13 +17,16 @@ import dmd.backend.arm32;
 import dmd.declaration;
 import dmd.dmodule;
 import dmd.dsymbol;
+import dmd.dstruct;
+import dmd.dtemplate : isType;
+import dmd.id : Id;
 import dmd.dsymbolsem : include;
 import dmd.errors : error;
 import dmd.expression;
 import dmd.func;
 import dmd.init;
 import dmd.location;
-import dmd.mangle : mangleToBuffer;
+import dmd.mangle : mangleExact, mangleToBuffer;
 import dmd.mtype;
 import dmd.globals : global;
 import dmd.root.string : toDString;
@@ -53,17 +56,14 @@ private void word(ref ubyte[] bytes, uint value)
         bytes ~= cast(ubyte)(value >> (i * 8));
 }
 
-private Arm32Global scalarGlobal(string name, ulong value, uint words, bool defined)
+private Arm32Global scalarGlobal(string name, ulong value, uint size, uint alignment, bool defined)
 {
-    assert(words == 1 || words == 2);
+    assert(size == 1 || size == 4 || size == 8);
     ubyte[] data;
     if (defined)
-    {
-        word(data, cast(uint)value);
-        if (words == 2)
-            word(data, cast(uint)(value >> 32));
-    }
-    return Arm32Global(name, data, defined ? words * 4 : 0, words == 2 ? 8U : 4U, defined);
+        foreach (i; 0 .. size)
+            data ~= cast(ubyte)(value >> (i * 8));
+    return Arm32Global(name, data, defined ? size : 0, alignment, defined);
 }
 
 private string moduleInfoSymbol(Module module_)
@@ -121,6 +121,11 @@ private bool pairType(Type t)
     return ty == TY.Tint64 || ty == TY.Tuns64 || ty == TY.Tfloat64;
 }
 
+private bool delegateType(Type t)
+{
+    return t && t.toBasetype().ty == TY.Tdelegate;
+}
+
 private uint scalarWords(Type t)
 {
     if (wordType(t))
@@ -130,10 +135,21 @@ private uint scalarWords(Type t)
     return 0;
 }
 
+// ABI registers and local homes use words; pointed-to objects and ELF data
+// retain their language storage width. In particular, bool occupies one byte.
+private uint scalarBytes(Type t)
+{
+    if (t && t.toBasetype().ty == TY.Tbool)
+        return 1;
+    return scalarWords(t) * 4;
+}
+
 private uint valueWords(Type t)
 {
     if (vectorFloat4(t))
         return 4;
+    if (delegateType(t))
+        return 2; // context pointer, then function pointer
     return scalarWords(t);
 }
 
@@ -150,6 +166,21 @@ private string declarationName(Declaration declaration, Loc loc)
     if (!name.length)
         reject(loc, "empty A32 symbol");
     return name;
+}
+
+private string functionName(FuncDeclaration function_, Loc loc)
+{
+    if (function_.resolvedLinkage() == LINK.c)
+        return declarationName(function_, loc);
+
+    // mangleToBuffer(FuncDeclaration) may describe an overload set rather
+    // than the resolved function. Use the same exact mangler as tocsym,
+    // including pragma(mangle) and Unicode identifiers. ELF stores these
+    // names as bytes; DMD semantic analysis rejects embedded nulls.
+    const name = mangleExact(function_).toDString();
+    if (!name.length)
+        reject(loc, "empty A32 function symbol");
+    return name.idup;
 }
 
 private struct LeafEmitter
@@ -218,7 +249,7 @@ private struct LeafEmitter
     {
         const words = valueWords(type);
         if (!words)
-            reject(location, "A32 temporary requires a supported scalar or float4 vector type");
+            reject(location, "A32 temporary requires a supported scalar, delegate transport, or float4 vector type");
         return temporaryWords(words);
     }
 
@@ -258,10 +289,63 @@ private struct LeafEmitter
             reject(loc, "A32 scalar lowering supports int/uint/bool/pointers, float, long/ulong and double");
     }
 
+    void requireTransportValue(Type t, Loc loc)
+    {
+        if (!scalarWords(t) && !delegateType(t))
+            reject(loc, "A32 parameter transport supports the scalar subset plus two-pointer delegates");
+    }
+
     void requireValue(Type t, Loc loc)
     {
         if (!valueWords(t))
-            reject(loc, "A32 lowering supports the scalar subset plus 16-byte float4 vectors");
+            reject(loc, "A32 lowering supports the scalar subset, delegate transport, and 16-byte float4 vectors");
+    }
+
+    TypeFunction scalarFunction(FuncDeclaration function_, Loc loc)
+    {
+        if (function_.isStaticCtorDeclaration() || function_.isStaticDtorDeclaration())
+            reject(loc, "A32 module constructor/destructor lifecycle entries are not implemented");
+        if (function_.isUnitTestDeclaration())
+            reject(loc, "A32 unittest registration is not implemented");
+
+        const linkage = function_.resolvedLinkage();
+        const parent = function_.toParent();
+        const staticStructMember = parent && parent.isStructDeclaration() && !function_.needThis();
+        if ((linkage != LINK.c && linkage != LINK.d) ||
+            !parent || (!parent.isModule() && !staticStructMember) || function_.isNested() ||
+            function_.needThis() || function_.hasDualContext ||
+            function_.vthis || function_.requiresClosure)
+            reject(loc, "A32 scalar functions require top-level or static-struct extern(C)/extern(D) linkage without a hidden context");
+
+        // _Dmain uses druntime's entry convention rather than a general D
+        // scalar function's convention. Do not admit it just by mangling it.
+        if (function_.isMain())
+            reject(loc, "ordinary-D main requires runtime startup not implemented by the A32 scalar slice");
+        if (function_.isCrtCtor || function_.isCrtDtor)
+            reject(loc, "A32 crt_constructor/crt_destructor lifecycle entries are not implemented");
+
+        auto signature = function_.type.toTypeFunction();
+        if (signature.parameterList.varargs != VarArg.none || signature.isRef)
+            reject(loc, "variadic or ref-return functions are not implemented");
+        if (signature.next.toBasetype().ty != TY.Tvoid)
+        {
+            if (delegateType(signature.next))
+                reject(loc, "A32 delegate returns are not implemented by the transport-only slice");
+            requireScalar(signature.next, loc);
+        }
+        if (signature.parameterList.length > 64)
+            reject(loc, "more than 64 transported parameters are outside the qualification range");
+
+        // Declaration-only imported callees need not have semantic3's
+        // VarDeclarations in function_.parameters. Check their actual formal
+        // parameter list before accepting any call or definition.
+        foreach (i, parameter; signature.parameterList)
+        {
+            if (parameter.storageClass & (STC.ref_ | STC.out_ | STC.lazy_))
+                reject(loc, "ref/out/lazy parameters are not implemented");
+            requireTransportValue(parameter.type, loc);
+        }
+        return signature;
     }
 
     void loadValue(Type type, uint slot, uint reg = 0)
@@ -273,7 +357,7 @@ private struct LeafEmitter
             code.stackAddress(slot * 4);
             code.neonLoadF32x4(0, 12);
         }
-        else if (scalarWords(type) == 2)
+        else if (valueWords(type) == 2)
             code.loadPair(slot, reg);
         else
             code.load(slot, reg);
@@ -288,10 +372,31 @@ private struct LeafEmitter
             code.stackAddress(slot * 4);
             code.neonStoreF32x4(0, 12);
         }
-        else if (scalarWords(type) == 2)
+        else if (valueWords(type) == 2)
             code.storePair(slot, reg);
         else
             code.store(slot, reg);
+    }
+
+    // The address arrives in r0. A pair load must preserve it until both
+    // words have been read; the result uses r0:r1 under the base PCS.
+    void loadMemory(Type type, Loc loc)
+    {
+        requireValue(type, loc);
+        if (delegateType(type))
+            reject(loc, "A32 delegate memory loads are outside the transport-only slice");
+        if (vectorFloat4(type))
+            code.neonLoadF32x4(0, 0);
+        else if (scalarBytes(type) == 1)
+            code.instruction(0xE5D00000); // LDRB r0,[r0]
+        else if (scalarWords(type) == 2)
+        {
+            code.instruction(0xE1A02000); // MOV r2,r0
+            code.instruction(0xE5920000); // LDR r0,[r2]
+            code.instruction(0xE5921004); // LDR r1,[r2,#4]
+        }
+        else
+            code.instruction(0xE5900000); // LDR r0,[r0]
     }
 
     string globalName(VarDeclaration variable)
@@ -341,22 +446,26 @@ private struct LeafEmitter
         if (auto index = expression_.isIndexExp())
         {
             if (index.e1.type.toBasetype().ty != TY.Tpointer ||
-                !wordType(index.type) || index.type.toBasetype().ty == TY.Tbool)
-                reject(index.loc, "only caller-owned four-byte pointer elements are supported");
+                !scalarWords(index.type))
+                reject(index.loc, "only caller-owned scalar pointer elements are supported");
+            requireWord(index.e2.type, index.loc);
             expression(index.e1);
             const saved = temporary();
             code.store(saved);
             expression(index.e2);
             code.instruction(0xE1A01000); // MOV r1,r0
-            code.instruction(0xE1A01101); // MOV r1,r1,LSL #2
+            const size = scalarBytes(index.type);
+            if (size == 4)
+                code.instruction(0xE1A01101); // MOV r1,r1,LSL #2
+            else if (size == 8)
+                code.instruction(0xE1A01181); // MOV r1,r1,LSL #3
             code.load(saved);
             code.instruction(0xE0800001); // ADD r0,r0,r1
             return;
         }
         if (expression_.op == EXP.star)
         {
-            if (expression_.type.toBasetype().ty == TY.Tbool)
-                reject(expression_.loc, "byte-sized memory accesses are not implemented");
+            requireValue(expression_.type, expression_.loc);
             expression(expression_.isUnaExp().e1);
             return;
         }
@@ -365,16 +474,6 @@ private struct LeafEmitter
 
     void assign(Expression destination)
     {
-        if (vectorFloat4(destination.type) && !destination.isVarExp())
-        {
-            const saved = temporary(destination.type);
-            storeValue(destination.type, saved);
-            address(destination);
-            loadValue(destination.type, saved);
-            code.neonStoreF32x4(0, 0);
-            return;
-        }
-
         if (auto variable = destination.isVarExp())
         {
             auto declaration = variable.var.isVarDeclaration();
@@ -385,32 +484,37 @@ private struct LeafEmitter
                 storeValue(declaration.type, home(declaration));
                 return;
             }
-
-            requireScalar(declaration.type, destination.loc);
-            const saved = temporary(declaration.type);
-            storeValue(declaration.type, saved);
-            globalAddress(declaration);
-            if (scalarWords(declaration.type) == 1)
-            {
-                code.load(saved, 1);
-                code.instruction(0xE5801000); // STR r1,[r0]
-                code.instruction(0xE1A00001); // MOV r0,r1
-            }
-            else
-            {
-                code.instruction(0xE1A02000); // MOV r2,r0: preserve global address
-                code.loadPair(saved, 0);
-                code.instruction(0xE5820000); // STR r0,[r2]
-                code.instruction(0xE5821004); // STR r1,[r2,#4]
-            }
-            return;
         }
-        const saved = temporary();
-        code.store(saved);
+
+        if (delegateType(destination.type))
+            reject(destination.loc, "A32 delegate assignment is qualified only for stack-local homes");
+
+        // Destination evaluation can call a function and overwrite every
+        // caller-saved register. Save the complete RHS, then restore the
+        // complete assignment result after computing the address once.
+        requireValue(destination.type, destination.loc);
+        const saved = temporary(destination.type);
+        storeValue(destination.type, saved);
         address(destination);
-        code.load(saved, 1);
-        code.instruction(0xE5801000); // STR r1,[r0]
-        code.instruction(0xE1A00001); // MOV r0,r1
+        if (vectorFloat4(destination.type))
+        {
+            loadValue(destination.type, saved);
+            code.neonStoreF32x4(0, 0);
+        }
+        else if (valueWords(destination.type) == 2)
+        {
+            code.instruction(0xE1A02000); // MOV r2,r0: preserve destination address
+            code.loadPair(saved, 0);
+            code.instruction(0xE5820000); // STR r0,[r2]
+            code.instruction(0xE5821004); // STR r1,[r2,#4]
+        }
+        else
+        {
+            code.load(saved, 1);
+            code.instruction(scalarBytes(destination.type) == 1 ?
+                             0xE5C01000 : 0xE5801000); // STRB/STR r1,[r0]
+            code.instruction(0xE1A00001); // MOV r0,r1
+        }
     }
 
     void declare(VarDeclaration variable)
@@ -428,21 +532,14 @@ private struct LeafEmitter
 
     void directCall(CallExp call)
     {
-        auto callee = call.f;
+        auto callee = call.f ? call.f.toAliasFunc() : null;
         if (!callee)
             reject(call.loc, "indirect/function-pointer calls are not implemented");
-        if (callee.resolvedLinkage() != LINK.c || callee.isNested() || callee.isMember())
-            reject(call.loc, "A32 direct calls currently require top-level extern(C) functions");
-
-        auto signature = callee.type.toTypeFunction();
-        if (signature.parameterList.varargs != VarArg.none || signature.isRef)
-            reject(call.loc, "variadic or ref-return calls are not implemented");
-        if (signature.next.toBasetype().ty != TY.Tvoid)
-            requireScalar(signature.next, call.loc);
+        auto signature = scalarFunction(callee, call.loc);
 
         const count = call.arguments ? cast(uint)call.arguments.length : 0U;
-        if (count > 64)
-            reject(call.loc, "more than 64 scalar call arguments are outside the qualification range");
+        if (count != signature.parameterList.length)
+            reject(call.loc, "A32 scalar call argument count does not match its formal parameters");
 
         if (callee.parameters)
         {
@@ -460,11 +557,14 @@ private struct LeafEmitter
 
         if (call.arguments)
         {
+            // D requires left-to-right argument evaluation. Stage every
+            // value before assigning ABI registers/stack words so a later
+            // argument's call cannot clobber an earlier argument's value.
             foreach (i, argument; *call.arguments)
             {
-                requireScalar(argument.type, argument.loc);
+                requireTransportValue(argument.type, argument.loc);
                 expression(argument);
-                argumentWords[i] = scalarWords(argument.type);
+                argumentWords[i] = valueWords(argument.type);
                 argumentHomes[i] = temporary(argument.type);
                 storeValue(argument.type, argumentHomes[i]);
             }
@@ -475,8 +575,11 @@ private struct LeafEmitter
         foreach (i; 0 .. count)
         {
             const words = argumentWords[i];
-            if (words == 2 && (ncrn & 1))
-                ++ncrn; // AAPCS32 C.3: double-word values start in an even core register.
+            auto formalType = signature.parameterList[i].type;
+            if (delegateType(formalType) && ncrn == 3)
+                reject(call.loc, "A32 delegate arguments split between r3 and the stack are not implemented");
+            if (pairType(formalType) && (ncrn & 1))
+                ++ncrn; // AAPCS32 C.3: 8-byte-aligned scalar values start in an even register.
 
             locations[i].words = words;
             if (ncrn < 4 && words <= 4 - ncrn)
@@ -487,8 +590,8 @@ private struct LeafEmitter
             else
             {
                 ncrn = 4;
-                if (words == 2 && (stackWords & 1))
-                    ++stackWords; // AAPCS32 C.7: double-word stack arguments are 8-byte aligned.
+                if (pairType(formalType) && (stackWords & 1))
+                    ++stackWords; // AAPCS32 C.7: 8-byte-aligned scalar stack arguments.
                 locations[i].stackWord = stackWords;
                 stackWords += words;
             }
@@ -530,7 +633,7 @@ private struct LeafEmitter
         }
 
         const at = code.call();
-        relocations ~= Arm32Relocation(cast(uint)at, declarationName(callee, call.loc), ARM32_R_CALL);
+        relocations ~= Arm32Relocation(cast(uint)at, functionName(callee, call.loc), ARM32_R_CALL);
         code.adjustStack(outgoing, false);
     }
 
@@ -766,7 +869,10 @@ private struct LeafEmitter
         }
         if (e.op == EXP.null_)
         {
-            code.constant(0);
+            if (delegateType(e.type))
+                code.constant64(0);
+            else
+                code.constant(0);
             return;
         }
         if (auto symbolOffset = e.isSymOffExp())
@@ -791,14 +897,7 @@ private struct LeafEmitter
                 if (vectorFloat4(declaration.type))
                     reject(e.loc, "A32 float4 globals are not implemented");
                 globalAddress(declaration);
-                if (scalarWords(declaration.type) == 1)
-                    code.instruction(0xE5900000); // LDR r0,[r0]
-                else
-                {
-                    code.instruction(0xE1A02000); // MOV r2,r0
-                    code.instruction(0xE5920000); // LDR r0,[r2]
-                    code.instruction(0xE5921004); // LDR r1,[r2,#4]
-                }
+                loadMemory(declaration.type, e.loc);
             }
             return;
         }
@@ -869,10 +968,7 @@ private struct LeafEmitter
         if (e.op == EXP.index || e.op == EXP.star)
         {
             address(e);
-            if (vectorFloat4(e.type))
-                code.neonLoadF32x4(0, 0);
-            else
-                code.instruction(0xE5900000); // LDR r0,[r0]
+            loadMemory(e.type, e.loc);
             return;
         }
         if (e.op == EXP.negate || e.op == EXP.uadd || e.op == EXP.not)
@@ -1230,21 +1326,14 @@ private struct LeafEmitter
     Arm32Function emit(FuncDeclaration function_)
     {
         location = function_.loc;
-        if (function_.resolvedLinkage() != LINK.c || function_.isNested() || function_.isMember())
-            reject(location, "initial A32 lowering accepts top-level extern(C) functions only");
-
-        auto signature = function_.type.toTypeFunction();
-        if (signature.parameterList.varargs != VarArg.none || signature.isRef)
-            reject(location, "variadic or ref-return functions are not implemented");
-
+        auto signature = scalarFunction(function_, location);
         auto result = signature.next;
-        if (result.toBasetype().ty != TY.Tvoid)
-            requireScalar(result, location);
 
-        if (function_.parameters && function_.parameters.length > 64)
-            reject(location, "more than 64 scalar parameters are outside the qualification range");
+        const parameterCount = function_.parameters ? function_.parameters.length : 0;
+        if (parameterCount != signature.parameterList.length)
+            reject(location, "A32 scalar definition parameter count does not match its formal parameters");
 
-        string name = declarationName(function_, location);
+        string name = functionName(function_, location);
 
         code.instruction(0xE92D4010); // PUSH {r4,lr}; 8 bytes keeps public SP alignment
         const prologue = code.bytes.length;
@@ -1257,12 +1346,14 @@ private struct LeafEmitter
             uint stackWords;
             foreach (parameter; *function_.parameters)
             {
-                requireScalar(parameter.type, parameter.loc);
+                requireTransportValue(parameter.type, parameter.loc);
                 if (parameter.storage_class & (STC.ref_ | STC.out_ | STC.lazy_))
                     reject(parameter.loc, "ref/out/lazy parameters are not implemented");
 
-                const words = scalarWords(parameter.type);
-                if (words == 2 && (ncrn & 1))
+                const words = valueWords(parameter.type);
+                if (delegateType(parameter.type) && ncrn == 3)
+                    reject(parameter.loc, "A32 delegate parameters split between r3 and the stack are not implemented");
+                if (pairType(parameter.type) && (ncrn & 1))
                     ++ncrn;
 
                 ArgumentLocation loc;
@@ -1275,7 +1366,7 @@ private struct LeafEmitter
                 else
                 {
                     ncrn = 4;
-                    if (words == 2 && (stackWords & 1))
+                    if (pairType(parameter.type) && (stackWords & 1))
                         ++stackWords;
                     loc.stackWord = stackWords;
                     stackWords += words;
@@ -1343,8 +1434,8 @@ private struct LeafEmitter
 
 private Arm32Global lowerGlobal(VarDeclaration variable)
 {
-    const words = scalarWords(variable.type);
-    if (!words)
+    const size = scalarBytes(variable.type);
+    if (!size)
         reject(variable.loc, "A32 global data currently supports scalar one- and two-word types only");
     if (!variable.isDataseg() || variable.isThreadlocal())
         reject(variable.loc, "A32 global data currently requires non-TLS __gshared/shared storage");
@@ -1353,17 +1444,19 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
     if (variable.isConst() || variable.isImmutable())
         reject(variable.loc, "read-only A32 data sections are not implemented yet");
 
+    const alignment = variable.alignment.isDefault() || variable.alignment.isUnknown() ?
+                      size : variable.alignment.get();
     const name = declarationName(variable, variable.loc);
     const defined = !(variable.storage_class & STC.extern_);
     if (!defined)
     {
         if (variable._init)
             reject(variable.loc, "extern A32 global declaration cannot have an initializer");
-        return scalarGlobal(name, 0, words, false);
+        return scalarGlobal(name, 0, size, alignment, false);
     }
 
     if (!variable._init)
-        return scalarGlobal(name, 0, words, true);
+        return scalarGlobal(name, 0, size, alignment, true);
 
     auto initializer = variable._init.isExpInitializer();
     if (!initializer)
@@ -1371,7 +1464,7 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
 
     auto value = initializer.exp;
     if (auto integer = value.isIntegerExp())
-        return scalarGlobal(name, cast(ulong)integer.value, words, true);
+        return scalarGlobal(name, cast(ulong)integer.value, size, alignment, true);
     if (auto realConstant = value.isRealExp())
     {
         if (floating(variable.type))
@@ -1383,7 +1476,7 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
             }
             Payload32 payload;
             payload.value = cast(float)realConstant.value;
-            return scalarGlobal(name, payload.bits, 1, true);
+            return scalarGlobal(name, payload.bits, 4, alignment, true);
         }
         if (variable.type.toBasetype().ty == TY.Tfloat64)
         {
@@ -1394,12 +1487,12 @@ private Arm32Global lowerGlobal(VarDeclaration variable)
             }
             Payload64 payload;
             payload.value = cast(double)realConstant.value;
-            return scalarGlobal(name, payload.bits, 2, true);
+            return scalarGlobal(name, payload.bits, 8, alignment, true);
         }
         reject(variable.loc, "floating global constant is outside the float/double A32 subset");
     }
     if (value.op == EXP.null_)
-        return scalarGlobal(name, 0, words, true);
+        return scalarGlobal(name, 0, size, alignment, true);
 
     reject(variable.loc, "A32 global initializer is outside the scalar constant subset");
     assert(0);
@@ -1433,7 +1526,7 @@ void generateArm32Objects(Module[] modules)
             if (!global.params.betterC && (!global.params.useModuleInfo || !Module.moduleinfo))
                 reject(module_.loc, "ordinary-D A32 emission requires the druntime ModuleInfo interface");
 
-            void members(Dsymbols* symbols)
+            void members(Dsymbols* symbols, bool insideStruct = false)
             {
                 if (!symbols)
                     return;
@@ -1441,11 +1534,42 @@ void generateArm32Objects(Module[] modules)
                 {
                     if (auto attr = symbol.isAttribDeclaration())
                     {
-                        members(include(attr, null));
+                        members(include(attr, null), insideStruct);
                         continue;
                     }
+                    if (auto instance = symbol.isTemplateInstance())
+                    {
+                        // semantic3 hoists compiler-generated object.RTInfo!(Struct)
+                        // to module traversal. Admit only that exact declaration
+                        // with exactly one struct-type argument; every other
+                        // template instance remains fail-closed.
+                        auto declaration = instance.tempdecl ? instance.tempdecl.isTemplateDeclaration() : null;
+                        auto module_ = declaration ? declaration.getModule() : null;
+                        auto argument = instance.tiargs && instance.tiargs.length == 1 ?
+                            isType((*instance.tiargs)[0]) : null;
+                        if (instance.name == Id.RTInfo &&
+                            declaration && declaration.ident == Id.RTInfo &&
+                            module_ && module_.ident == Id.object &&
+                            argument && argument.toBasetype().ty == TY.Tstruct)
+                            continue;
+                        reject(symbol.loc, "A32 template instances require explicit lowering outside compiler-generated object.RTInfo!(Struct)");
+                    }
+                    if (symbol.isUnionDeclaration())
+                        reject(symbol.loc, "A32 union layout is not qualified by the struct-layout slice");
+                    if (auto struct_ = symbol.isStructDeclaration())
+                    {
+                        // The frontend owns field offsets and alignment. Fields are
+                        // layout declarations, not standalone ELF objects. Recurse so
+                        // static methods are emitted and instance methods fail closed.
+                        members(struct_.members, true);
+                        continue;
+                    }
+                    if (symbol.isClassDeclaration() || symbol.isInterfaceDeclaration())
+                        reject(symbol.loc, "A32 class/interface declarations require runtime metadata not implemented by the struct-layout slice");
                     if (auto function_ = symbol.isFuncDeclaration())
                     {
+                        if (function_.isUnitTestDeclaration() && !global.params.useUnitTests)
+                            continue;
                         if (!function_.fbody)
                             continue;
                         LeafEmitter emitter;
@@ -1463,6 +1587,12 @@ void generateArm32Objects(Module[] modules)
                     {
                         if (variable.storage_class & STC.manifest)
                             continue;
+                        if (variable.isField())
+                        {
+                            if (!insideStruct)
+                                reject(variable.loc, "A32 field declaration appeared outside structured aggregate traversal");
+                            continue;
+                        }
                         auto global_ = lowerGlobal(variable);
                         if (global_.name in names)
                             reject(variable.loc, "duplicate A32 external symbol");
@@ -1470,7 +1600,7 @@ void generateArm32Objects(Module[] modules)
                         globals ~= global_;
                         continue;
                     }
-                    reject(symbol.loc, "declaration requires data/runtime emission not implemented by the initial A32 slice");
+                    reject(symbol.loc, ("declaration requires data/runtime emission not implemented by the initial A32 slice: " ~ symbol.kind().toDString ~ " `" ~ symbol.toPrettyChars().toDString ~ "`").idup);
                 }
             }
 

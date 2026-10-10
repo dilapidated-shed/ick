@@ -700,11 +700,19 @@ extern (C++) struct Target
         }
         else if (os & Target.OS.Posix)
         {
-            if (isX86_64 || isAArch64)
+            import dmd.identifier : Identifier;
+            import dmd.mtype : TypeIdentifier;
+            import dmd.typesem : typeSemantic;
+
+            if (isARM32)
             {
-                import dmd.identifier : Identifier;
-                import dmd.mtype : TypeIdentifier;
-                import dmd.typesem : typeSemantic;
+                // AAPCS32 va_list is std.__va_list: one pointer in an
+                // aggregate with distinct type identity and C++ mangling.
+                tvalist = new TypeIdentifier(Loc.initial, Identifier.idPool("__va_list"));
+                tvalist = typeSemantic(tvalist, loc, sc);
+            }
+            else if (isX86_64 || isAArch64)
+            {
                 tvalist = new TypeIdentifier(Loc.initial, Identifier.idPool("__va_list_tag")).pointerTo();
                 tvalist = typeSemantic(tvalist, loc, sc);
             }

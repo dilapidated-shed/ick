@@ -1,0 +1,17 @@
+diff --git a/druntime/src/core/stdc/config.d b/druntime/src/core/stdc/config.d
+--- a/druntime/src/core/stdc/config.d
++++ b/druntime/src/core/stdc/config.d
+@@ -231,7 +231,12 @@ else version (CRuntime_Microsoft)
+ }
+ else version (DigitalMars)
+ {
+-    version (X86)
++    version (ARM)
++    {
++        version (Android)
++            alias c_long_double = real;
++    }
++    else version (X86)
+     {
+         alias c_long_double = real;
+     }

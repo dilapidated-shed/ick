@@ -20,3 +20,14 @@ netbsd_overlay_policy='local correction absent from pinned and current upstream 
 netbsd_runtime_body='D sources plus target ImportC errno.c; threadasm and Valgrind C shims omitted; never evidence of complete druntime, Phobos link, or native ABI execution'
 netbsd_stop_policy='stop at first post-Image compiler/runtime failure; no host-C shims, version drift, backend changes, or broader platform work'
 netbsd_native_execution=NOT_RUN
+
+# Android ARM32 matching-runtime frontend overlay
+android_arm32_runtime_commit=74917954b53f7f35b13e61b4438c7253834929ed
+android_arm32_config_overlay=dmd/qualification/android-arm32/runtime-config-arm32.patch
+android_arm32_config_overlay_target=druntime/src/core/stdc/config.d
+android_arm32_config_original_sha256=3b31b94a7a77aa02109693ac98882ba1d2cf0b7e2a68ca35ff61a8f9d52e3302
+android_arm32_config_overlay_sha256=4d463c525edb3c15d0b16544511d5d5e6621e88e77576954ec342ddb465c36e9
+android_arm32_config_result_sha256=a82db909f1dbc5e06ac7eea7a7e5f8be52643720e5f87279853f536299c4b0ea
+android_arm32_config_overlay_policy='only DigitalMars ARM Android c_long_double=real; preserve every other branch'
+android_arm32_runtime_provider=druntime/src/rt/sections_elf_shared.d
+android_arm32_runtime_provider_policy='require frontend ABI success, A32 backend admission, fail-closed stale-output removal; no runtime-link or device claim'
