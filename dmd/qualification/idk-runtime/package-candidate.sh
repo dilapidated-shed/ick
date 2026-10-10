@@ -104,7 +104,10 @@ python3 "$verify" "$root"
   cd "$out"
   sha256sum "$(basename "$archive")" > candidate-archive.sha256
 )
-sha256sum -c "$out/candidate-archive.sha256" --ignore-missing
+(
+  cd "$out"
+  sha256sum -c candidate-archive.sha256
+)
 
 # Distinct producer receipt. The fresh-host receipt is created in a separate job.
 {
@@ -127,3 +130,5 @@ sha256sum -c "$out/candidate-archive.sha256" --ignore-missing
   printf 'negative_control\trejected-original-IDK-fixture\n'
 } > .runtime-evidence/idk-candidate-producer.tsv
 cat .runtime-evidence/idk-candidate-producer.tsv >> "$GITHUB_STEP_SUMMARY"
+# The uploaded candidate contains only the single archive and its digest.
+rm -rf -- "$root"
