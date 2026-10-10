@@ -12,6 +12,7 @@ DIVERGENT_SHA = "b7394a1b808e5c7d8cde8824915158ff8cb7ab12cb4a05df46f8453a9ce1b9b
 
 REQUIRED = (
     "bin/idk", "libexec/idk-dmd", "lib/libdruntime.a", "lib/libphobos2.a",
+    "lib/compiler-host/libdruntime-ldc-shared.so.106",
     "import/druntime/object.d", "import/phobos/std/bigint.d",
     "import/phobos/std/stdio.d", "meta/SOURCE.lock", "meta/RUNTIME.lock",
     "meta/identity.tsv", "meta/FILES.sha256",
@@ -102,6 +103,8 @@ def verify(root):
         "phobos_upstream_commit": PHOBOS,
         "host": "linux-x86_64",
         "bootstrap_is_payload": "false",
+        "compiler_host_support_soname": "libdruntime-ldc-shared.so.106",
+        "compiler_host_support_origin": "ubuntu-24.04-ldc-bootstrap-runtime",
         "conservative_dmd_is_payload": "false",
         "ordinary_stdout": "123456789012345678901234567891",
         "divergent_stdout": "1000000000000000000000000000000",
@@ -142,6 +145,10 @@ def verify(root):
             "mismatched original divergent-IDK fixture fingerprint")
 
     elf_header((root / "libexec/idk-dmd").read_bytes()[:64], "owned IDK compiler")
+    host_support = root / "lib/compiler-host/libdruntime-ldc-shared.so.106"
+    elf_header(host_support.read_bytes()[:64], "compiler host runtime")
+    require(digest(host_support) == ident.get("compiler_host_support_sha256"),
+            "mismatched compiler host support fingerprint")
     archive_abi(root / "lib/libdruntime.a")
     archive_abi(root / "lib/libphobos2.a")
 
