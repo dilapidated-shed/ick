@@ -55,6 +55,13 @@ archive paths. Declared host linker dependencies are pthread, m, dl and
 a C linker/toolchain on Linux x86_64. This is not a completely static
 operating-system toolchain; libc and host linking support are external.
 
+The owned compiler itself also has a dynamic host dependency:
+libdruntime-ldc-shared.so.106 from the Ubuntu 24.04 LDC bootstrap package.
+The candidate includes this library under lib/compiler-host/ and the wrapper
+sets LD_LIBRARY_PATH to that bundle-relative directory. Its exact bytes are
+fingerprinted. This is **compiler-host support**, not the matching IDK target
+libdruntime.a, and the bootstrap ldmd2 executable remains absent.
+
 The archive includes meta/identity.tsv, original source/runtime locks,
 unaltered fixture sources, meta/FILES.sha256 for each regular member other
 than the checksum list itself, and offline share/verify-candidate.py.
