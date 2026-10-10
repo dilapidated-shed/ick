@@ -153,9 +153,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential file flex bison texinfo \
+            build-essential file flex texinfo \
             libgmp-dev libmpfr-dev libmpc-dev libisl-dev libzstd-dev \
             "${{ matrix.binutils_package }}"
+
+      - name: Isolate Bison/Yacc while keeping GCC's Flex gengtype generator
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sh qualification/bootstrap-tools/test-bison-guard.sh
+          sh qualification/bootstrap-tools/bison-guard.sh setup source
 
       - name: Configure ${{ matrix.abi }} ICK
         shell: bash
@@ -165,7 +172,7 @@ jobs:
           target_ld="$(command -v "${{ matrix.binutils_prefix }}-ld")"
           mkdir build stage
           cd build
-          ../source/configure \
+          ICK_BOOTSTRAP_PHASE=configure ../source/configure \
             --target="${{ matrix.gnu_target }}" \
             --prefix="$GITHUB_WORKSPACE/stage" \
             --with-as="$target_as" \
@@ -187,8 +194,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          make -C build -j2 all-gcc
-          make -C build install-gcc
+          ICK_BOOTSTRAP_PHASE=build make -C build -j2 all-gcc
+          ICK_BOOTSTRAP_PHASE=install make -C build install-gcc
           ick="$GITHUB_WORKSPACE/stage/bin/${{ matrix.gnu_target }}-gcc"
           "$ick" --version
           cc1_path="$("$ick" -print-prog-name=cc1)"
@@ -197,6 +204,24 @@ jobs:
             "$GITHUB_WORKSPACE/stage"/*) ;;
             *) echo "cc1 escaped the ICK installation: $cc1_path" >&2; exit 1 ;;
           esac
+
+      - name: Verify the C-only Bison/Yacc guard for ${{ matrix.abi }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sh qualification/bootstrap-tools/bison-guard.sh \
+            verify build/gcc/gengtype-lex.cc
+          git rev-parse HEAD
+          flex --version
+
+      - name: Retain ${{ matrix.abi }} Bison/Yacc invocation receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ick-bootstrap-bison-${{ matrix.abi }}-${{ github.run_id }}
+          path: .ick-bootstrap-guard/bison-invocations.tsv
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Verify ordinary C and target identity
         shell: bash
