@@ -44,6 +44,8 @@ jobs:
           test -x dmd/compiler/src/build.d
           test -x dmd/qualification/android-arm32/runtime_provider_probe.py
           test -x dmd/qualification/android-arm32/aggregate_member_probe.py
+          # The pinned source checkout has object.d under druntime/src; the
+          # generated druntime/import tree does not exist before a runtime build.
           test -f .runtime-dmd-arm32/druntime/src/object.d
           test "$(git -C .runtime-dmd-arm32 rev-parse HEAD)" = 74917954b53f7f35b13e61b4438c7253834929ed
           grep -Fqx 'android_arm32_runtime_commit=74917954b53f7f35b13e61b4438c7253834929ed' dmd/RUNTIME.lock
