@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# Runs only after the unmodified pinned IDK qualification and controls succeed.
+set -euo pipefail
+
+source_head=45a65d8b8c8928843b1bdaa1e737ce8b5ae814e0
+dmd_lock=74917954b53f7f35b13e61b4438c7253834929ed
+phobos_lock=7b158eba80b97dfcdd8931bcaea1ad0ca35ceb95
+name=idk-linux-x86_64
+out="$GITHUB_WORKSPACE/.idk-candidate-output"
+root="$out/$name"
+archive="$out/$name-$source_head.tar.gz"
+verify="$GITHUB_WORKSPACE/.candidate-ci/dmd/qualification/idk-runtime/verify-candidate.py"
+
+test "$(uname -s)" = Linux
+test "$(uname -m)" = x86_64
+test "$(git rev-parse HEAD)" = "$source_head"
+test "$(git -C .runtime-dmd rev-parse HEAD)" = "$dmd_lock"
+test "$(git -C .runtime-phobos rev-parse HEAD)" = "$phobos_lock"
+test "$PACKAGE_WORKFLOW_HEAD" = "$(git -C .candidate-ci rev-parse HEAD)"
+sha256sum -c .runtime-evidence/inputs.sha256
+# Historical hashes come from successful run 37304142154 (its inputs.sha256).
+# These are *input* invariants, not an assertion that rebuilt ELF bytes match.
+compare_input() {
+  test "$(sha256sum "$1" | cut -d' ' -f1)" = "$2" || {
+    echo "HISTORICAL INPUT FINGERPRINT MISMATCH: $1" >&2
+    exit 1
+  }
+}
+compare_input dmd/SOURCE.lock 4e2f53fbefa179634a64c5498136f4fb803bd05aae8380aae43e762957c1e8ef
+compare_input dmd/RUNTIME.lock 051be11820c0540eb51cd7bbb32e0c96b7680ba46a8921f077abf703d5a5490c
+compare_input dmd/compiler/src/dmd/lexer.d e6079d89811b80fb76396db6f18da179554d27caf27d7336f7b164b8a9f809a9
+compare_input dmd/compiler/src/dmd/parse.d 14f4d6f14756fb46de5e0e9f9981adeb86e94936e93a7fdb887849bdf2b03075
+compare_input dmd/qualification/idk_ordinary_runtime_smoke.d 371b78028c535780b5ba58333b182d1164f27545aa6f863ac842893502a06a79
+compare_input dmd/qualification/idk_full_runtime_smoke.d b7394a1b808e5c7d8cde8824915158ff8cb7ab12cb4a05df46f8453a9ce1b9b6
+compare_input .runtime-evidence/idk_unicode_mutant.d daec1db649e180bcca07d5aa39c24bee62b0e122f4fe7c05c41c5e77488db431
+test "$(cat .runtime-evidence/unicode-mutant.exit)" = 3
+test "$(cat .runtime-evidence/conservative-idk.exit)" -gt 0
+grep -F 'Error: character 0x2192 is not a valid token' \
+  .runtime-evidence/conservative-idk.log >/dev/null
+
+compiler=dmd/generated/linux/release/64/dmd
+druntime=.runtime-dmd/generated/linux/release/64/libdruntime.a
+phobos=.runtime-phobos/generated/linux/release/64/libphobos2.a
+test -x "$compiler"
+test -s "$druntime"
+test -s "$phobos"
+# The owned IDK executable is a native ELF binary built using ldmd2. Its
+# dynamic compiler-HOST druntime dependency is not the target druntime.a.
+# Bundle this one loader SONAME, never the bootstrap compiler executable.
+compiler_host_soname=libdruntime-ldc-shared.so.106
+readelf -d "$compiler" | grep -F "[$compiler_host_soname]" >/dev/null
+compiler_host_library=$(ldd "$compiler" | awk -v soname="$compiler_host_soname" \
+  '$1 == soname && $2 == "=>" { print $3; exit }')
+test -n "$compiler_host_library"
+test -s "$compiler_host_library"
+test -f .runtime-dmd/druntime/import/object.d
+test -f .runtime-phobos/std/bigint.d
+
+mkdir -p "$root/bin" "$root/libexec" "$root/lib" \
+  "$root/import/druntime" "$root/import/phobos" "$root/lib/compiler-host" \
+  "$root/fixtures" "$root/meta" "$root/share" "$root/licenses"
+install -m 0755 "$compiler" "$root/libexec/idk-dmd"
+install -m 0644 "$compiler_host_library" "$root/lib/compiler-host/$compiler_host_soname"
+install -m 0644 "$druntime" "$root/lib/libdruntime.a"
+install -m 0644 "$phobos" "$root/lib/libphobos2.a"
+cp -a .runtime-dmd/druntime/import/. "$root/import/druntime/"
+cp -a .runtime-phobos/std .runtime-phobos/etc .runtime-phobos/phobos "$root/import/phobos/"
+install -m 0644 dmd/SOURCE.lock "$root/meta/SOURCE.lock"
+install -m 0644 dmd/RUNTIME.lock "$root/meta/RUNTIME.lock"
+install -m 0644 dmd/qualification/idk_ordinary_runtime_smoke.d "$root/fixtures/"
+install -m 0644 dmd/qualification/idk_full_runtime_smoke.d "$root/fixtures/"
+install -m 0644 "$verify" "$root/share/verify-candidate.py"
+install -m 0755 "$GITHUB_WORKSPACE/.candidate-ci/dmd/qualification/idk-runtime/consume-candidate.sh" "$root/share/consume-candidate.sh"
+install -m 0644 dmd/LICENSE.txt "$root/licenses/IDK-compiler-LICENSE.txt"
+install -m 0644 .runtime-phobos/LICENSE_1_0.txt "$root/licenses/Phobos-LICENSE_1_0.txt"
+
+# This wrapper deliberately invokes the owned executable by an absolute,
+# bundle-relative path. ldmd2 and conservative-dmd are never runtime fallbacks.
+cat > "$root/bin/idk" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+# Only the compiler process needs this explicitly bundled bootstrap HOST ABI.
+export LD_LIBRARY_PATH="$root/lib/compiler-host"
+if test "$#" -eq 1 && { test "$1" = "--version" || test "$1" = "-version"; }; then
+  exec "$root/libexec/idk-dmd" -conf= "$1"
+fi
+exec "$root/libexec/idk-dmd" -conf= -fPIC \
+  -I"$root/import/druntime" -I"$root/import/phobos" \
+  "$@" "$root/lib/libphobos2.a" "$root/lib/libdruntime.a" \
+  -defaultlib= -debuglib= -L-lpthread -L-lm -L-ldl
+WRAPPER
+chmod 0755 "$root/bin/idk"
+
+# Recorded identities are constants, not dynamically guessed runtime sources.
+{
+  printf 'format=%s\n' 'idk-linux-x86_64-candidate-v1'
+  printf 'compiler_line=idk\n'
+  printf 'host=linux-x86_64\n'
+  printf 'compiler_source_head=%s\n' "$source_head"
+  printf 'workflow_source_head=%s\n' "$PACKAGE_WORKFLOW_HEAD"
+  printf 'dmd_upstream_commit=%s\n' "$dmd_lock"
+  printf 'phobos_upstream_commit=%s\n' "$phobos_lock"
+  printf 'source_lock_sha256=%s\n' "$(sha256sum dmd/SOURCE.lock | cut -d' ' -f1)"
+  printf 'runtime_lock_sha256=%s\n' "$(sha256sum dmd/RUNTIME.lock | cut -d' ' -f1)"
+  printf 'bootstrap_is_payload=false\n'
+  printf 'conservative_dmd_is_payload=false\n'
+  printf 'linker_deps=pthread,m,dl\n'
+  printf 'compiler_host_support_soname=%s\n' "$compiler_host_soname"
+  printf 'compiler_host_support_origin=ubuntu-24.04-ldc-bootstrap-runtime\n'
+  printf 'compiler_host_support_sha256=%s\n' "$(sha256sum "$root/lib/compiler-host/$compiler_host_soname" | cut -d' ' -f1)"
+  printf 'ordinary_stdout=123456789012345678901234567891\n'
+  printf 'divergent_stdout=1000000000000000000000000000000\n'
+  printf 'unicode_mutant_exit=3\n'
+  printf 'historical_qualification_run=37304142154\n'
+  printf 'historical_source_lock_sha256=4e2f53fbefa179634a64c5498136f4fb803bd05aae8380aae43e762957c1e8ef\n'
+  printf 'historical_runtime_lock_sha256=051be11820c0540eb51cd7bbb32e0c96b7680ba46a8921f077abf703d5a5490c\n'
+  printf 'historical_lexer_sha256=e6079d89811b80fb76396db6f18da179554d27caf27d7336f7b164b8a9f809a9\n'
+  printf 'historical_parser_sha256=14f4d6f14756fb46de5e0e9f9981adeb86e94936e93a7fdb887849bdf2b03075\n'
+  printf 'historical_comparison=source-locks-and-fixture-hashes;not-binary-equality\n'
+} > "$root/meta/identity.tsv"
+
+# Reproducible ordering and metadata; build-generated object bytes are recorded
+# rather than assumed bit-identical to a different hosted build.
+(
+  cd "$root"
+  LC_ALL=C find . -type f ! -path './meta/FILES.sha256' -print0 \
+    | LC_ALL=C sort -z | xargs -0 sha256sum
+) > "$root/meta/FILES.sha256"
+
+python3 "$verify" "$root"
+(
+  cd "$out"
+  tar --sort=name --format=gnu --mtime='@0' --owner=0 --group=0 \
+    --numeric-owner -cf - "$name" | gzip -n > "$archive"
+)
+(
+  cd "$out"
+  sha256sum "$(basename "$archive")" > candidate-archive.sha256
+)
+(
+  cd "$out"
+  sha256sum -c candidate-archive.sha256
+)
+
+# Distinct producer receipt. The fresh-host receipt is created in a separate job.
+{
+  printf 'receipt_kind\tproducer\n'
+  printf 'status\tPASS\n'
+  printf 'compiler_source_head\t%s\n' "$source_head"
+  printf 'workflow_source_head\t%s\n' "$PACKAGE_WORKFLOW_HEAD"
+  printf 'druntime_source_head\t%s\n' "$dmd_lock"
+  printf 'phobos_source_head\t%s\n' "$phobos_lock"
+  printf 'original_qualification_run\t37304142154\n'
+  printf 'original_fixture_comparison\tPINNED_INPUTS_MATCH\n'
+  printf 'historical_owned_compiler_sha256\t6f7c533e5cd1a3552a7bdc82d9eaaf35e64c546553725366a845291cd8a2c0a5\n'
+  printf 'historical_druntime_sha256\tab4bc3df505b3b13fb7d630a8cd2b53328caa220a7b85451c813aa029b74976f\n'
+  printf 'historical_phobos_sha256\t7d97686b0730c61ff4978ae12e7a6d71e4936b68d5a672583219fdf8483cbb82\n'
+  # A different build hash is evidence to retain, not grounds to fabricate
+  # equivalence or automatically reject an otherwise qualified candidate.
+  compare_output() {
+    if test "$1" = "$2"; then printf 'SAME_BYTES'
+    else printf 'DIFFERENT_BYTES_NOT_AUTOMATIC_FAILURE'; fi
+  }
+  printf 'historical_compiler_comparison\t%s\n' "$(compare_output "$(sha256sum "$root/libexec/idk-dmd" | cut -d' ' -f1)" 6f7c533e5cd1a3552a7bdc82d9eaaf35e64c546553725366a845291cd8a2c0a5)"
+  printf 'historical_druntime_comparison\t%s\n' "$(compare_output "$(sha256sum "$root/lib/libdruntime.a" | cut -d' ' -f1)" ab4bc3df505b3b13fb7d630a8cd2b53328caa220a7b85451c813aa029b74976f)"
+  printf 'historical_phobos_comparison\t%s\n' "$(compare_output "$(sha256sum "$root/lib/libphobos2.a" | cut -d' ' -f1)" 7d97686b0730c61ff4978ae12e7a6d71e4936b68d5a672583219fdf8483cbb82)"
+  printf 'binary_reproduction_assumption\tNONE\n'
+  printf 'compiler_sha256\t%s\n' "$(sha256sum "$root/libexec/idk-dmd" | cut -d' ' -f1)"
+  printf 'druntime_sha256\t%s\n' "$(sha256sum "$root/lib/libdruntime.a" | cut -d' ' -f1)"
+  printf 'phobos_sha256\t%s\n' "$(sha256sum "$root/lib/libphobos2.a" | cut -d' ' -f1)"
+  printf 'compiler_host_support_soname\t%s\n' "$compiler_host_soname"
+  printf 'compiler_host_support_sha256\t%s\n' "$(sha256sum "$root/lib/compiler-host/$compiler_host_soname" | cut -d' ' -f1)"
+  printf 'manifest_sha256\t%s\n' "$(sha256sum "$root/meta/FILES.sha256" | cut -d' ' -f1)"
+  printf 'archive_sha256\t%s\n' "$(sha256sum "$archive" | cut -d' ' -f1)"
+  printf 'manifest_path\tmeta/FILES.sha256\n'
+  printf 'archive_name\t%s\n' "$(basename "$archive")"
+  printf 'negative_control\trejected-original-IDK-fixture\n'
+} > .runtime-evidence/idk-candidate-producer.tsv
+cat .runtime-evidence/idk-candidate-producer.tsv >> "$GITHUB_STEP_SUMMARY"
+# The uploaded candidate contains only the single archive and its digest.
+rm -rf -- "$root"

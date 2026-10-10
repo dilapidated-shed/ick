@@ -6,6 +6,7 @@ on:
       - ci/idk-full-runtime-syntax
       - moon/f02b-idk-runtime-receipts
       - idk
+      - earth/4b-idk-x86_64-bundle-45a65d8
     paths:
       - 'dmd/**'
       - '.github/workflows/dmd-runtime.yml'
@@ -33,19 +34,29 @@ jobs:
         id: compiler_source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: 45a65d8b8c8928843b1bdaa1e737ce8b5ae814e0
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out candidate packaging controls separately from pinned IDK
+        id: candidate_controls
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: .candidate-ci
           persist-credentials: false
 
       # These run blocks use the existing GitHub Actions Bash interface.
       - name: Verify IDK and locked runtime provenance before external checkouts
         id: provenance
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_HEAD: 45a65d8b8c8928843b1bdaa1e737ce8b5ae814e0
+          WORKFLOW_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C .candidate-ci rev-parse HEAD)" = "$WORKFLOW_HEAD"
           idk_base=297112cc526cddbba098716d1617681852b8c4c9
           git merge-base --is-ancestor "$idk_base" HEAD
           git diff --exit-code "$idk_base" HEAD -- dmd/compiler
@@ -285,6 +296,15 @@ jobs:
           test ! -f .runtime-evidence/conservative-idk.o
           grep -F 'Error: character 0x2192 is not a valid token' .runtime-evidence/conservative-idk.log
 
+      - name: Assemble exact pinned owned-IDK candidate
+        id: candidate_package
+        env:
+          PACKAGE_WORKFLOW_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .candidate-ci/dmd/qualification/idk-runtime/package-candidate.sh
+
       - name: Record separate IDK runtime receipts
         if: ${{ always() }}
         id: receipt
@@ -307,6 +327,7 @@ jobs:
           CONSERVATIVE_BUILD: ${{ steps.conservative_build.outcome }}
           CONSERVATIVE_ORDINARY: ${{ steps.conservative_ordinary.outcome }}
           CONSERVATIVE_REJECTION: ${{ steps.conservative_rejection.outcome }}
+          BUNDLE_PACKAGE: ${{ steps.candidate_package.outcome }}
         shell: bash
         run: |
           set -euo pipefail
@@ -353,6 +374,7 @@ jobs:
             report runtime_checkout_verification_status "$RUNTIME_CHECKOUT_VERIFY"
             report druntime_build_status "$DRUNTIME_BUILD"
             report phobos_build_status "$PHOBOS_BUILD"
+            report candidate_bundle_package_status "$BUNDLE_PACKAGE"
             report ordinary_d_compile_status "$ORDINARY_D_COMPILE"
             report ordinary_d_execution_status "$ORDINARY_D_EXECUTION"
             printf 'idk_source_head\t%s\n' "$compiler_head"
@@ -403,3 +425,54 @@ jobs:
           path: .runtime-evidence/
           include-hidden-files: true
           if-no-files-found: error
+
+      - name: Upload exactly one CI candidate bundle
+        if: ${{ steps.candidate_package.outcome == 'success' }}
+        id: upload_candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: idk-linux-x86_64-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .idk-candidate-output/
+          compression-level: 0
+          include-hidden-files: true
+          if-no-files-found: error
+
+  fresh-host:
+    name: Fresh Linux x86_64 candidate consumer (no source checkout)
+    needs: normal-d
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download producer candidate into the fresh job
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: idk-linux-x86_64-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+
+      - name: Verify the archive and compile, run and reject corruptions
+        id: candidate_consume
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          archive="$GITHUB_WORKSPACE/candidate/idk-linux-x86_64-45a65d8b8c8928843b1bdaa1e737ce8b5ae814e0.tar.gz"
+          test -s "$archive"
+          (
+            cd candidate
+            sha256sum -c candidate-archive.sha256
+          )
+          mkdir -p .consumer-sandbox .consumer-evidence
+          tar --no-same-owner -xzf "$archive" -C .consumer-sandbox
+          bundle="$GITHUB_WORKSPACE/.consumer-sandbox/idk-linux-x86_64"
+          test -f "$bundle/share/consume-candidate.sh"
+          bash "$bundle/share/consume-candidate.sh" "$bundle"             "$GITHUB_WORKSPACE/.consumer-evidence" "$archive"
+
+      - name: Preserve independent fresh-consumer evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: idk-fresh-consumer-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .consumer-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
