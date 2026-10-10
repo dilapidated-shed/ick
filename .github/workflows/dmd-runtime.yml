@@ -474,4 +474,5 @@ jobs:
         with:
           name: idk-fresh-consumer-${{ github.event.pull_request.head.sha || github.sha }}
           path: .consumer-evidence/
+          include-hidden-files: true
           if-no-files-found: warn
