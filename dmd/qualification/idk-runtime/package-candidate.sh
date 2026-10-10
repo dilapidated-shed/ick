@@ -45,6 +45,7 @@ install -m 0644 dmd/RUNTIME.lock "$root/meta/RUNTIME.lock"
 install -m 0644 dmd/qualification/idk_ordinary_runtime_smoke.d "$root/fixtures/"
 install -m 0644 dmd/qualification/idk_full_runtime_smoke.d "$root/fixtures/"
 install -m 0644 "$verify" "$root/share/verify-candidate.py"
+install -m 0755 "$GITHUB_WORKSPACE/.candidate-ci/dmd/qualification/idk-runtime/consume-candidate.sh" "$root/share/consume-candidate.sh"
 install -m 0644 dmd/LICENSE.txt "$root/licenses/IDK-compiler-LICENSE.txt"
 install -m 0644 .runtime-phobos/LICENSE_1_0.txt "$root/licenses/Phobos-LICENSE_1_0.txt"
 
