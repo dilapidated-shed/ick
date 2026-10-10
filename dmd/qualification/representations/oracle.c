@@ -1,4 +1,6 @@
 #include <ick/circle.h>
+#include <assert.h>
+#include <stdint.h>
 
 /* This file deliberately calls the existing C implementation; it does not
    copy the D algorithms into a second, self-confirming implementation. */
@@ -116,4 +118,114 @@ int oracle_circle(unsigned operation, int first, int second)
     case 4: return rotation96_code(inverse_rotation96(rotation96(first)));
     default: return -1000;
     }
+}
+
+/* Independent signed nine-bit E5M3 arithmetic oracle.
+ *
+ * Work in integer units of 2^-17.  Quantization binary-searches the ordered
+ * set of finite output codes, comparing twice the result against adjacent
+ * integer-code sums.  No float, Float16, or D quantizer is used.
+ */
+static int oracle_signed_e5m3_is_nan(unsigned code)
+{
+    return (code & 0xf8u) == 0xf8u && (code & 7u) != 0;
+}
+
+static int oracle_signed_e5m3_is_inf(unsigned code)
+{
+    return (code & 0xffu) == 0xf8u;
+}
+
+static int64_t oracle_signed_e5m3_positive_units(unsigned code)
+{
+    unsigned exponent = (code >> 3) & 31u;
+    unsigned fraction = code & 7u;
+    assert(exponent != 31u);
+    if (exponent == 0) return (int64_t)fraction;
+    return (int64_t)(8u + fraction) << (exponent - 1u);
+}
+
+static int64_t oracle_signed_e5m3_units(unsigned code)
+{
+    int64_t magnitude = oracle_signed_e5m3_positive_units(code);
+    return (code & 0x100u) ? -magnitude : magnitude;
+}
+
+static unsigned oracle_signed_e5m3_round(int64_t result)
+{
+    int negative = result < 0;
+    uint64_t magnitude = (uint64_t)(negative ? -result : result);
+    unsigned low = 0, high = 248;
+    while (low < high)
+    {
+        unsigned middle = low + (high - low) / 2;
+        uint64_t lower = (uint64_t)oracle_signed_e5m3_positive_units(middle);
+        /* Code 248 is infinity. Its conceptual even successor at 65536
+         * gives the finite/infinity midpoint 63488. */
+        uint64_t upper = middle == 247u
+            ? ((uint64_t)65536u << 17)
+            : (uint64_t)oracle_signed_e5m3_positive_units(middle + 1u);
+        uint64_t twice = 2u * magnitude;
+        uint64_t boundary = lower + upper;
+        if (twice < boundary || (twice == boundary && (middle & 1u) == 0))
+            high = middle;
+        else
+            low = middle + 1;
+    }
+    return (negative ? 0x100u : 0u) | low;
+}
+
+unsigned oracle_signed_e5m3_operation(unsigned operation,
+                                     unsigned left, unsigned right)
+{
+    if (operation > 1u) return 0x10000u;
+    left &= 0x1ffu;
+    right &= 0x1ffu;
+    if (operation == 1u) right ^= 0x100u;
+
+    if (oracle_signed_e5m3_is_nan(left) || oracle_signed_e5m3_is_nan(right))
+        return 0xfcu;
+
+    int left_inf = oracle_signed_e5m3_is_inf(left);
+    int right_inf = oracle_signed_e5m3_is_inf(right);
+    if (left_inf || right_inf)
+    {
+        if (left_inf && right_inf && ((left ^ right) & 0x100u))
+            return 0xfcu;
+        return left_inf ? left : right;
+    }
+
+    /* Under round-to-nearest/even, same-signed zero preserves its sign;
+     * other exact cancellation has positive zero. */
+    if ((left & 0xffu) == 0 && (right & 0xffu) == 0)
+        return (left & right & 0x100u) ? 0x100u : 0u;
+
+    int64_t sum = oracle_signed_e5m3_units(left)
+                + oracle_signed_e5m3_units(right);
+    if (sum == 0) return 0;
+    return oracle_signed_e5m3_round(sum);
+}
+
+unsigned oracle_signed_e5m3_compare(unsigned predicate,
+                                   unsigned left, unsigned right)
+{
+    if (predicate > 1u) return 0x10000u;
+    left &= 0x1ffu;
+    right &= 0x1ffu;
+    if (oracle_signed_e5m3_is_nan(left) || oracle_signed_e5m3_is_nan(right))
+        return 0u;
+
+    int left_inf = oracle_signed_e5m3_is_inf(left);
+    int right_inf = oracle_signed_e5m3_is_inf(right);
+    if (predicate == 0u)
+    {
+        if (left_inf || right_inf)
+            return left_inf && right_inf && left == right;
+        return oracle_signed_e5m3_units(left) == oracle_signed_e5m3_units(right);
+    }
+    if (left_inf && right_inf)
+        return (left & 0x100u) != 0 && (right & 0x100u) == 0;
+    if (left_inf) return (left & 0x100u) != 0;
+    if (right_inf) return (right & 0x100u) == 0;
+    return oracle_signed_e5m3_units(left) < oracle_signed_e5m3_units(right);
 }
