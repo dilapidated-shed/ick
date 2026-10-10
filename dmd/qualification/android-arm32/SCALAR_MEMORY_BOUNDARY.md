@@ -148,11 +148,12 @@ The `core/stdc/config.d` source/import SHA-256 is
 `core/stdc/stdarg.d` is
 `a85cdec604e91261e5d931574338cbd63d3a19632ffb685aebe3a0e26d91cff8`.
 
-After those compatibility defects are repaired with explicit provenance, repeat
-the real-provider probe to locate the next backend boundary. Source inspection
-already shows further requirements: struct members and constructors, D slices,
-out aggregates, ref-return containers, TLS, and runtime lifecycle. They have not
-been qualified by this scalar repair.
+Those frontend compatibility defects are repaired in the next qualified step,
+with an exact runtime overlay and a compiler-side AAPCS32 va_list fix. The real
+matching provider now reaches the A32 backend; its first fail-closed diagnostic is
+recorded in [RUNTIME_PROVIDER_BOUNDARY.md](RUNTIME_PROVIDER_BOUNDARY.md).
+Aggregate members and methods, slices, delegates, containers, TLS and lifecycle
+remain outside the scalar qualification.
 
 The execution above is a **QEMU Linux-syscall oracle around Android-target
 objects**. Its `_d_dso_registry` is test-only and validates the compiler's

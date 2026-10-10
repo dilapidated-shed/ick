@@ -1,0 +1,94 @@
+name: DMD Android ARM32 runtime provider
+
+on:
+  pull_request:
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-arm32-runtime-provider.yml'
+  push:
+    branches:
+      - dmd
+    paths:
+      - 'dmd/**'
+      - '.github/workflows/dmd-arm32-runtime-provider.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provider-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact compiler source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Check out matching runtime source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: dlang/dmd
+          ref: 74917954b53f7f35b13e61b4438c7253834929ed
+          path: .runtime-dmd-arm32
+          persist-credentials: false
+
+      - name: Verify pinned boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f dmd/SOURCE.lock
+          test -f dmd/RUNTIME.lock
+          test -x dmd/compiler/src/build.d
+          test -x dmd/qualification/android-arm32/runtime_provider_probe.py
+          test "$(git -C .runtime-dmd-arm32 rev-parse HEAD)" = 74917954b53f7f35b13e61b4438c7253834929ed
+          grep -Fqx 'android_arm32_runtime_commit=74917954b53f7f35b13e61b4438c7253834929ed' dmd/RUNTIME.lock
+
+      - name: Install bootstrap compiler
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldc python3
+          command -v ldmd2
+          ldmd2 --version
+
+      - name: Build owned DMD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd dmd/compiler/src
+          ldmd2 -run ./build.d dmd HOST_DMD="$(command -v ldmd2)"
+          dmd_bin=$(find ../../generated -type f -name dmd -perm -u+x -print -quit)
+          test -x "$dmd_bin"
+          "$dmd_bin" --version
+
+      - name: Probe exact matching runtime provider
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(find dmd/generated -type f -name dmd -perm -u+x -print -quit)
+          test -x "$dmd_bin"
+          python3 dmd/qualification/android-arm32/runtime_provider_probe.py \
+            --compiler "$dmd_bin" \
+            --runtime .runtime-dmd-arm32 \
+            --output /tmp/dmd-arm32-runtime-provider
+
+      - name: Preserve provider-boundary receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-arm32-runtime-provider-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/dmd-arm32-runtime-provider
+          if-no-files-found: error
+
+      - name: Record qualification boundary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          PASS: the matching DMD v2.113.0 runtime frontend declarations compile for Android ARM32.
+
+          PASS: the real `rt/sections_elf_shared.d` provider reaches the owned A32 backend and fails closed at the recorded aggregate boundary.
+
+          OUT OF SCOPE: Android druntime linking, D startup, Phobos execution on Android, and physical-device acceptance.
+          EOF
