@@ -102,7 +102,7 @@ struct Arm32Code
 
     void loadPair(uint slot, uint reg = 0)
     {
-        enforce(slot < 125 && (reg == 0 || reg == 2), "A32 pair load requires two core registers");
+        enforce(slot < 125 && reg <= 2, "A32 pair load requires two consecutive core registers");
         loadStackOffset(slot * 4, reg);
         loadStackOffset(slot * 4 + 4, reg + 1);
     }
@@ -115,7 +115,7 @@ struct Arm32Code
 
     void storePair(uint slot, uint reg = 0)
     {
-        enforce(slot < 125 && (reg == 0 || reg == 2), "A32 pair store requires two core registers");
+        enforce(slot < 125 && reg <= 2, "A32 pair store requires two consecutive core registers");
         storeStackOffset(slot * 4, reg);
         storeStackOffset(slot * 4 + 4, reg + 1);
     }

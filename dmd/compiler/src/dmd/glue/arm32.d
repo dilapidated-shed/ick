@@ -121,6 +121,11 @@ private bool pairType(Type t)
     return ty == TY.Tint64 || ty == TY.Tuns64 || ty == TY.Tfloat64;
 }
 
+private bool delegateType(Type t)
+{
+    return t && t.toBasetype().ty == TY.Tdelegate;
+}
+
 private uint scalarWords(Type t)
 {
     if (wordType(t))
@@ -143,6 +148,8 @@ private uint valueWords(Type t)
 {
     if (vectorFloat4(t))
         return 4;
+    if (delegateType(t))
+        return 2; // context pointer, then function pointer
     return scalarWords(t);
 }
 
@@ -242,7 +249,7 @@ private struct LeafEmitter
     {
         const words = valueWords(type);
         if (!words)
-            reject(location, "A32 temporary requires a supported scalar or float4 vector type");
+            reject(location, "A32 temporary requires a supported scalar, delegate transport, or float4 vector type");
         return temporaryWords(words);
     }
 
@@ -282,10 +289,16 @@ private struct LeafEmitter
             reject(loc, "A32 scalar lowering supports int/uint/bool/pointers, float, long/ulong and double");
     }
 
+    void requireTransportValue(Type t, Loc loc)
+    {
+        if (!scalarWords(t) && !delegateType(t))
+            reject(loc, "A32 parameter transport supports the scalar subset plus two-pointer delegates");
+    }
+
     void requireValue(Type t, Loc loc)
     {
         if (!valueWords(t))
-            reject(loc, "A32 lowering supports the scalar subset plus 16-byte float4 vectors");
+            reject(loc, "A32 lowering supports the scalar subset, delegate transport, and 16-byte float4 vectors");
     }
 
     TypeFunction scalarFunction(FuncDeclaration function_, Loc loc)
@@ -315,9 +328,13 @@ private struct LeafEmitter
         if (signature.parameterList.varargs != VarArg.none || signature.isRef)
             reject(loc, "variadic or ref-return functions are not implemented");
         if (signature.next.toBasetype().ty != TY.Tvoid)
+        {
+            if (delegateType(signature.next))
+                reject(loc, "A32 delegate returns are not implemented by the transport-only slice");
             requireScalar(signature.next, loc);
+        }
         if (signature.parameterList.length > 64)
-            reject(loc, "more than 64 scalar parameters are outside the qualification range");
+            reject(loc, "more than 64 transported parameters are outside the qualification range");
 
         // Declaration-only imported callees need not have semantic3's
         // VarDeclarations in function_.parameters. Check their actual formal
@@ -326,7 +343,7 @@ private struct LeafEmitter
         {
             if (parameter.storageClass & (STC.ref_ | STC.out_ | STC.lazy_))
                 reject(loc, "ref/out/lazy parameters are not implemented");
-            requireScalar(parameter.type, loc);
+            requireTransportValue(parameter.type, loc);
         }
         return signature;
     }
@@ -340,7 +357,7 @@ private struct LeafEmitter
             code.stackAddress(slot * 4);
             code.neonLoadF32x4(0, 12);
         }
-        else if (scalarWords(type) == 2)
+        else if (valueWords(type) == 2)
             code.loadPair(slot, reg);
         else
             code.load(slot, reg);
@@ -355,7 +372,7 @@ private struct LeafEmitter
             code.stackAddress(slot * 4);
             code.neonStoreF32x4(0, 12);
         }
-        else if (scalarWords(type) == 2)
+        else if (valueWords(type) == 2)
             code.storePair(slot, reg);
         else
             code.store(slot, reg);
@@ -366,6 +383,8 @@ private struct LeafEmitter
     void loadMemory(Type type, Loc loc)
     {
         requireValue(type, loc);
+        if (delegateType(type))
+            reject(loc, "A32 delegate memory loads are outside the transport-only slice");
         if (vectorFloat4(type))
             code.neonLoadF32x4(0, 0);
         else if (scalarBytes(type) == 1)
@@ -467,6 +486,9 @@ private struct LeafEmitter
             }
         }
 
+        if (delegateType(destination.type))
+            reject(destination.loc, "A32 delegate assignment is qualified only for stack-local homes");
+
         // Destination evaluation can call a function and overwrite every
         // caller-saved register. Save the complete RHS, then restore the
         // complete assignment result after computing the address once.
@@ -479,7 +501,7 @@ private struct LeafEmitter
             loadValue(destination.type, saved);
             code.neonStoreF32x4(0, 0);
         }
-        else if (scalarWords(destination.type) == 2)
+        else if (valueWords(destination.type) == 2)
         {
             code.instruction(0xE1A02000); // MOV r2,r0: preserve destination address
             code.loadPair(saved, 0);
@@ -540,9 +562,9 @@ private struct LeafEmitter
             // argument's call cannot clobber an earlier argument's value.
             foreach (i, argument; *call.arguments)
             {
-                requireScalar(argument.type, argument.loc);
+                requireTransportValue(argument.type, argument.loc);
                 expression(argument);
-                argumentWords[i] = scalarWords(argument.type);
+                argumentWords[i] = valueWords(argument.type);
                 argumentHomes[i] = temporary(argument.type);
                 storeValue(argument.type, argumentHomes[i]);
             }
@@ -553,8 +575,11 @@ private struct LeafEmitter
         foreach (i; 0 .. count)
         {
             const words = argumentWords[i];
-            if (words == 2 && (ncrn & 1))
-                ++ncrn; // AAPCS32 C.3: double-word values start in an even core register.
+            auto formalType = signature.parameterList[i].type;
+            if (delegateType(formalType) && ncrn == 3)
+                reject(call.loc, "A32 delegate arguments split between r3 and the stack are not implemented");
+            if (pairType(formalType) && (ncrn & 1))
+                ++ncrn; // AAPCS32 C.3: 8-byte-aligned scalar values start in an even register.
 
             locations[i].words = words;
             if (ncrn < 4 && words <= 4 - ncrn)
@@ -565,8 +590,8 @@ private struct LeafEmitter
             else
             {
                 ncrn = 4;
-                if (words == 2 && (stackWords & 1))
-                    ++stackWords; // AAPCS32 C.7: double-word stack arguments are 8-byte aligned.
+                if (pairType(formalType) && (stackWords & 1))
+                    ++stackWords; // AAPCS32 C.7: 8-byte-aligned scalar stack arguments.
                 locations[i].stackWord = stackWords;
                 stackWords += words;
             }
@@ -844,7 +869,10 @@ private struct LeafEmitter
         }
         if (e.op == EXP.null_)
         {
-            code.constant(0);
+            if (delegateType(e.type))
+                code.constant64(0);
+            else
+                code.constant(0);
             return;
         }
         if (auto symbolOffset = e.isSymOffExp())
@@ -1318,12 +1346,14 @@ private struct LeafEmitter
             uint stackWords;
             foreach (parameter; *function_.parameters)
             {
-                requireScalar(parameter.type, parameter.loc);
+                requireTransportValue(parameter.type, parameter.loc);
                 if (parameter.storage_class & (STC.ref_ | STC.out_ | STC.lazy_))
                     reject(parameter.loc, "ref/out/lazy parameters are not implemented");
 
-                const words = scalarWords(parameter.type);
-                if (words == 2 && (ncrn & 1))
+                const words = valueWords(parameter.type);
+                if (delegateType(parameter.type) && ncrn == 3)
+                    reject(parameter.loc, "A32 delegate parameters split between r3 and the stack are not implemented");
+                if (pairType(parameter.type) && (ncrn & 1))
                     ++ncrn;
 
                 ArgumentLocation loc;
@@ -1336,7 +1366,7 @@ private struct LeafEmitter
                 else
                 {
                     ncrn = 4;
-                    if (words == 2 && (stackWords & 1))
+                    if (pairType(parameter.type) && (stackWords & 1))
                         ++stackWords;
                     loc.stackWord = stackWords;
                     stackWords += words;

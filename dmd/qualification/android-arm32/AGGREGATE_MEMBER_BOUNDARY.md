@@ -34,3 +34,9 @@ rt/sections_elf_shared.d(77): Error: A32 backend: A32 scalar lowering supports i
 - full prior ARM32 regression suite: PASS
 - Android druntime link: NOT_QUALIFIED
 - physical-device execution: NOT_RUN
+
+
+The subsequent [delegate transport qualification](DELEGATE_TRANSPORT_BOUNDARY.md)
+admits two-pointer delegate parameters without changing this aggregate boundary.
+The matching runtime provider then enters `DSO.opApply` and stops while lowering
+the `foreach` header's aggregate `Array!(DSO*)` range.

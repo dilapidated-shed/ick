@@ -151,10 +151,12 @@ The `core/stdc/config.d` source/import SHA-256 is
 Those frontend compatibility defects are repaired with an exact runtime overlay
 and a compiler-side AAPCS32 va_list fix. The next qualified step treats struct
 fields as layout-only declarations and admits context-free static struct methods.
-The real provider now traverses `DSO` and stops at `opApply`'s unsupported delegate
-parameter, recorded in [RUNTIME_PROVIDER_BOUNDARY.md](RUNTIME_PROVIDER_BOUNDARY.md).
-Aggregate values, instance methods, slices, delegates, containers, TLS and
-lifecycle remain outside the scalar qualification.
+The real provider now traverses `DSO`; a later qualification transports delegate
+parameters as two-pointer values and enters `opApply`, stopping while lowering the
+`foreach` header's aggregate `Array!(DSO*)` range. The exact boundary is recorded
+in [RUNTIME_PROVIDER_BOUNDARY.md](RUNTIME_PROVIDER_BOUNDARY.md). Aggregate range
+values and `foreach`, delegate invocation and returns, instance methods, slices,
+containers, TLS and lifecycle remain outside the scalar qualification.
 
 The execution above is a **QEMU Linux-syscall oracle around Android-target
 objects**. Its `_d_dso_registry` is test-only and validates the compiler's
