@@ -18,6 +18,21 @@ test "$(git -C .runtime-dmd rev-parse HEAD)" = "$dmd_lock"
 test "$(git -C .runtime-phobos rev-parse HEAD)" = "$phobos_lock"
 test "$PACKAGE_WORKFLOW_HEAD" = "$(git -C .candidate-ci rev-parse HEAD)"
 sha256sum -c .runtime-evidence/inputs.sha256
+# Historical hashes come from successful run 37304142154 (its inputs.sha256).
+# These are *input* invariants, not an assertion that rebuilt ELF bytes match.
+compare_input() {
+  test "$(sha256sum "$1" | cut -d' ' -f1)" = "$2" || {
+    echo "HISTORICAL INPUT FINGERPRINT MISMATCH: $1" >&2
+    exit 1
+  }
+}
+compare_input dmd/SOURCE.lock 4e2f53fbefa179634a64c5498136f4fb803bd05aae8380aae43e762957c1e8ef
+compare_input dmd/RUNTIME.lock 051be11820c0540eb51cd7bbb32e0c96b7680ba46a8921f077abf703d5a5490c
+compare_input dmd/compiler/src/dmd/lexer.d e6079d89811b80fb76396db6f18da179554d27caf27d7336f7b164b8a9f809a9
+compare_input dmd/compiler/src/dmd/parse.d 14f4d6f14756fb46de5e0e9f9981adeb86e94936e93a7fdb887849bdf2b03075
+compare_input dmd/qualification/idk_ordinary_runtime_smoke.d 371b78028c535780b5ba58333b182d1164f27545aa6f863ac842893502a06a79
+compare_input dmd/qualification/idk_full_runtime_smoke.d b7394a1b808e5c7d8cde8824915158ff8cb7ab12cb4a05df46f8453a9ce1b9b6
+compare_input .runtime-evidence/idk_unicode_mutant.d daec1db649e180bcca07d5aa39c24bee62b0e122f4fe7c05c41c5e77488db431
 test "$(cat .runtime-evidence/unicode-mutant.exit)" = 3
 test "$(cat .runtime-evidence/conservative-idk.exit)" -gt 0
 grep -F 'Error: character 0x2192 is not a valid token' \
@@ -83,6 +98,10 @@ chmod 0755 "$root/bin/idk"
   printf 'divergent_stdout=1000000000000000000000000000000\n'
   printf 'unicode_mutant_exit=3\n'
   printf 'historical_qualification_run=37304142154\n'
+  printf 'historical_source_lock_sha256=4e2f53fbefa179634a64c5498136f4fb803bd05aae8380aae43e762957c1e8ef\n'
+  printf 'historical_runtime_lock_sha256=051be11820c0540eb51cd7bbb32e0c96b7680ba46a8921f077abf703d5a5490c\n'
+  printf 'historical_lexer_sha256=e6079d89811b80fb76396db6f18da179554d27caf27d7336f7b164b8a9f809a9\n'
+  printf 'historical_parser_sha256=14f4d6f14756fb46de5e0e9f9981adeb86e94936e93a7fdb887849bdf2b03075\n'
   printf 'historical_comparison=source-locks-and-fixture-hashes;not-binary-equality\n'
 } > "$root/meta/identity.tsv"
 
@@ -119,6 +138,18 @@ python3 "$verify" "$root"
   printf 'phobos_source_head\t%s\n' "$phobos_lock"
   printf 'original_qualification_run\t37304142154\n'
   printf 'original_fixture_comparison\tPINNED_INPUTS_MATCH\n'
+  printf 'historical_owned_compiler_sha256\t6f7c533e5cd1a3552a7bdc82d9eaaf35e64c546553725366a845291cd8a2c0a5\n'
+  printf 'historical_druntime_sha256\tab4bc3df505b3b13fb7d630a8cd2b53328caa220a7b85451c813aa029b74976f\n'
+  printf 'historical_phobos_sha256\t7d97686b0730c61ff4978ae12e7a6d71e4936b68d5a672583219fdf8483cbb82\n'
+  # A different build hash is evidence to retain, not grounds to fabricate
+  # equivalence or automatically reject an otherwise qualified candidate.
+  compare_output() {
+    if test "$1" = "$2"; then printf 'SAME_BYTES'
+    else printf 'DIFFERENT_BYTES_NOT_AUTOMATIC_FAILURE'; fi
+  }
+  printf 'historical_compiler_comparison\t%s\n' "$(compare_output "$(sha256sum "$root/libexec/idk-dmd" | cut -d' ' -f1)" 6f7c533e5cd1a3552a7bdc82d9eaaf35e64c546553725366a845291cd8a2c0a5)"
+  printf 'historical_druntime_comparison\t%s\n' "$(compare_output "$(sha256sum "$root/lib/libdruntime.a" | cut -d' ' -f1)" ab4bc3df505b3b13fb7d630a8cd2b53328caa220a7b85451c813aa029b74976f)"
+  printf 'historical_phobos_comparison\t%s\n' "$(compare_output "$(sha256sum "$root/lib/libphobos2.a" | cut -d' ' -f1)" 7d97686b0730c61ff4978ae12e7a6d71e4936b68d5a672583219fdf8483cbb82)"
   printf 'binary_reproduction_assumption\tNONE\n'
   printf 'compiler_sha256\t%s\n' "$(sha256sum "$root/libexec/idk-dmd" | cut -d' ' -f1)"
   printf 'druntime_sha256\t%s\n' "$(sha256sum "$root/lib/libdruntime.a" | cut -d' ' -f1)"
