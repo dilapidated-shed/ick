@@ -17,6 +17,7 @@ REQUIRED = (
     "meta/identity.tsv", "meta/FILES.sha256",
     "fixtures/idk_ordinary_runtime_smoke.d",
     "fixtures/idk_full_runtime_smoke.d", "share/verify-candidate.py",
+    "share/consume-candidate.sh",
 )
 
 
