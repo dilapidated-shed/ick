@@ -434,6 +434,7 @@ jobs:
           name: idk-linux-x86_64-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: .idk-candidate-output/
           compression-level: 0
+          include-hidden-files: true
           if-no-files-found: error
 
   fresh-host:
