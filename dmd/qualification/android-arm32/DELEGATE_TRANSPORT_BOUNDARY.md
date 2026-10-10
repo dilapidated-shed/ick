@@ -23,7 +23,8 @@ it does not invoke them or return them.
 - Delegate invocation, return values, globals and arbitrary memory access remain
   rejected or outside this transport-only slice.
 
-The matching runtime provider advances to:
+The matching runtime provider enters `DSO.opApply` and stops while lowering the
+`foreach (dso; _loadedDSOs)` header's aggregate `Array!(DSO*)` range:
 
 ```
 rt/sections_elf_shared.d(79): Error: A32 backend: A32 lowering supports the scalar subset, delegate transport, and 16-byte float4 vectors
