@@ -44,6 +44,7 @@ jobs:
           test -x dmd/compiler/src/build.d
           test -x dmd/qualification/android-arm32/runtime_provider_probe.py
           test -x dmd/qualification/android-arm32/aggregate_member_probe.py
+          test -x dmd/qualification/android-arm32/delegate_transport_probe.py
           # The pinned source checkout has object.d under druntime/src; the
           # generated druntime/import tree does not exist before a runtime build.
           test -f .runtime-dmd-arm32/druntime/src/object.d
@@ -79,6 +80,17 @@ jobs:
             --imports .runtime-dmd-arm32/druntime/src \
             --output /tmp/dmd-arm32-runtime-provider/aggregate
 
+      - name: Qualify delegate parameter transport
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dmd_bin=$(find dmd/generated -type f -name dmd -perm -u+x -print -quit)
+          test -x "$dmd_bin"
+          python3 dmd/qualification/android-arm32/delegate_transport_probe.py \
+            --compiler "$dmd_bin" \
+            --imports .runtime-dmd-arm32/druntime/src \
+            --output /tmp/dmd-arm32-runtime-provider/delegate
+
       - name: Probe exact matching runtime provider
         shell: bash
         run: |
@@ -105,7 +117,9 @@ jobs:
 
           PASS: type-only struct layouts and context-free static struct methods are qualified; instance methods still fail closed.
 
-          PASS: the real `rt/sections_elf_shared.d` provider traverses `DSO` and fails closed at its unsupported delegate parameter.
+          PASS: delegate parameters preserve the D fat-pointer layout in core registers and on the stack; the unimplemented r3/stack split fails closed.
 
-          OUT OF SCOPE: aggregate values, instance methods, delegates, Android druntime linking, D startup, Phobos execution on Android, and physical-device acceptance.
+          PASS: the real `rt/sections_elf_shared.d` provider enters `DSO.opApply` and fails closed while lowering the `foreach` header's aggregate `Array!(DSO*)` range.
+
+          OUT OF SCOPE: aggregate range values and `foreach`, delegate invocation and returns, instance methods, slices, Android druntime linking, D startup, Phobos execution on Android, and physical-device acceptance.
           EOF
