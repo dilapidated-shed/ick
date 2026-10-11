@@ -150,3 +150,49 @@ jobs:
           SKIP: Android runtime execution, complete Wegert library, APK, and
           F-Droid packaging remain outside this focused pruning gate
           EOF
+
+  bootstrap-evidence:
+    name: Independent AICI validation of C-only bootstrap evidence
+    needs: c-only
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the exact ICK source under review
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Fetch the build job's original generator traces and lexer bytes
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ick-c-only-bootstrap-trace-${{ github.run_id }}
+          path: evidence
+
+      - name: Bind bootstrap receipt to exact source and actual lexer bytes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(cat evidence/ick-source-commit.txt)" = "$(git rev-parse HEAD)"
+          cmp -s evidence/SOURCE.lock ick/SOURCE.lock
+          cmp -s evidence/PRUNE ick/PRUNE
+          (cd evidence && sha256sum -c gengtype-lex.sha256)
+          test -s evidence/flex-version.txt
+          test -s evidence/flex-executable.sha256
+
+      - name: Independently check the retained bootstrap evidence
+        uses: isomorphisms/ai-ci@b3af13b3ab2bac9dd7c72bf9dd855ed5a17609b5
+        with:
+          suite: .github/ai-ci/bootstrap-receipt.suite.tsv
+
+      - name: Reject a planted Bison generation in the independent verifier
+        shell: bash
+        run: |
+          set -euxo pipefail
+          printf '%s\n' '999 execve("/usr/bin/bison", ["bison", "parse.y"], ...) = 0' \
+            >> evidence/build.execve
+          if "$RUNNER_TEMP/aici" suite .github/ai-ci/bootstrap-receipt.suite.tsv . \
+            > /tmp/ick-bootstrap-negative.log 2>&1; then
+            echo 'AICI accepted a forged Bison generation trace' >&2
+            exit 1
+          fi
+          grep -F 'ICK-BOOTSTRAP-NO-BISON-BUILD' /tmp/ick-bootstrap-negative.log
