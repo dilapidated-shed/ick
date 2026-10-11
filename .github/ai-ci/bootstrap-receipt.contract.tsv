@@ -18,4 +18,4 @@ not_contains	ICK-BOOTSTRAP-NO-BISON-CONFIG	evidence/configure.execve	execve("/us
 not_contains	ICK-BOOTSTRAP-NO-YACC-CONFIG	evidence/configure.execve	execve("/usr/bin/yacc"
 not_contains	ICK-BOOTSTRAP-NO-BISON-INSTALL	evidence/install.execve	execve("/usr/bin/bison"
 not_contains	ICK-BOOTSTRAP-NO-YACC-INSTALL	evidence/install.execve	execve("/usr/bin/yacc"
-not_contains	ICK-BOOTSTRAP-NO-BISON-GENERATION	evidence/bison-invocations.tsv	use	
+not_contains	ICK-BOOTSTRAP-NO-BISON-GENERATION	evidence/bison-invocations.tsv	use
