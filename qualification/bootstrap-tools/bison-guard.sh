@@ -85,6 +85,16 @@ SHADOW
         exit 1
       fi
     fi
+    # Keep inspectable bytes, not only a green job or a generated checksum.
+    # These are GCC generator receipts; none are an ICKY parser invocation.
+    cp "$generated" "$guard_dir/gengtype-lex.cc"
+    (cd "$guard_dir" && sha256sum gengtype-lex.cc > gengtype-lex.sha256)
+    git -C "$repository_root" rev-parse HEAD > "$guard_dir/ick-source-commit.txt"
+    cp "$repository_root/ick/SOURCE.lock" "$guard_dir/SOURCE.lock"
+    cp "$repository_root/ick/PRUNE" "$guard_dir/PRUNE"
+    flex --version > "$guard_dir/flex-version.txt"
+    command -v flex > "$guard_dir/flex-executable.txt"
+    sha256sum "$(command -v flex)" > "$guard_dir/flex-executable.sha256"
     printf 'PASS: COBOL pruned; generated gengtype lexer present; Bison/Yacc generation not observed\n'
     printf 'Bison/Yacc probe log:\n'
     cat "$log"
