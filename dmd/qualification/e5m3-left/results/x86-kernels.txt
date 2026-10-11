@@ -1,0 +1,551 @@
+layout=left kernel=0 bytes=44 static_instructions=18
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000009e54 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki0ZQCaFNbNiPQCbQekZm>:
+    9e54:	push   %rax
+    9e55:	mov    %rdx,%r8
+    9e58:	xor    %esi,%esi
+    9e5a:	xor    %edx,%edx
+    9e5c:	test   %edi,%edi
+    9e5e:	je     9e7b <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki0ZQCaFNbNiPQCbQekZm+0x27>
+    9e60:	mov    %edx,%ecx
+    9e62:	movswl (%r8,%rcx,2),%r9d
+    9e67:	mov    %r9w,(%rsp)
+    9e6c:	movzwl (%rsp),%eax
+    9e70:	cltq
+    9e72:	add    %rax,%rsi
+    9e75:	inc    %edx
+    9e77:	cmp    %edi,%edx
+    9e79:	jb     9e60 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki0ZQCaFNbNiPQCbQekZm+0xc>
+    9e7b:	mov    %rsi,%rax
+    9e7e:	pop    %rcx
+    9e7f:	ret
+
+layout=right kernel=0 bytes=44 static_instructions=18
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000a094 <_D9benchmark__T6kernelTSQw9RightE5M3Vki0ZQBaFNbNiPQBbQekZm>:
+    a094:	push   %rax
+    a095:	mov    %rdx,%r8
+    a098:	xor    %esi,%esi
+    a09a:	xor    %edx,%edx
+    a09c:	test   %edi,%edi
+    a09e:	je     a0bb <_D9benchmark__T6kernelTSQw9RightE5M3Vki0ZQBaFNbNiPQBbQekZm+0x27>
+    a0a0:	mov    %edx,%ecx
+    a0a2:	movswl (%r8,%rcx,2),%r9d
+    a0a7:	mov    %r9w,(%rsp)
+    a0ac:	movzwl (%rsp),%eax
+    a0b0:	cltq
+    a0b2:	add    %rax,%rsi
+    a0b5:	inc    %edx
+    a0b7:	cmp    %edi,%edx
+    a0b9:	jb     a0a0 <_D9benchmark__T6kernelTSQw9RightE5M3Vki0ZQBaFNbNiPQBbQekZm+0xc>
+    a0bb:	mov    %rsi,%rax
+    a0be:	pop    %rcx
+    a0bf:	ret
+
+layout=left kernel=1 bytes=44 static_instructions=18
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000a2dc <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki1ZQCaFNbNiPQCbQekZm>:
+    a2dc:	push   %rax
+    a2dd:	mov    %rdx,%r8
+    a2e0:	xor    %esi,%esi
+    a2e2:	xor    %edx,%edx
+    a2e4:	test   %edi,%edi
+    a2e6:	je     a303 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki1ZQCaFNbNiPQCbQekZm+0x27>
+    a2e8:	mov    %edx,%ecx
+    a2ea:	movswl (%r8,%rcx,2),%r9d
+    a2ef:	mov    %r9w,(%rsp)
+    a2f4:	movzwl (%rsp),%eax
+    a2f8:	cltq
+    a2fa:	add    %rax,%rsi
+    a2fd:	inc    %edx
+    a2ff:	cmp    %edi,%edx
+    a301:	jb     a2e8 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki1ZQCaFNbNiPQCbQekZm+0xc>
+    a303:	mov    %rsi,%rax
+    a306:	pop    %rcx
+    a307:	ret
+
+layout=right kernel=1 bytes=44 static_instructions=17
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000a520 <_D9benchmark__T6kernelTSQw9RightE5M3Vki1ZQBaFNbNiPQBbQekZm>:
+    a520:	mov    %rdx,%r8
+    a523:	xor    %esi,%esi
+    a525:	xor    %edx,%edx
+    a527:	test   %edi,%edi
+    a529:	je     a548 <_D9benchmark__T6kernelTSQw9RightE5M3Vki1ZQBaFNbNiPQBbQekZm+0x28>
+    a52b:	mov    %edx,%ecx
+    a52d:	movswl (%r8,%rcx,2),%r9d
+    a532:	mov    %r9d,%eax
+    a535:	shl    $0x7,%eax
+    a538:	and    $0xffff,%eax
+    a53d:	cltq
+    a53f:	add    %rax,%rsi
+    a542:	inc    %edx
+    a544:	cmp    %edi,%edx
+    a546:	jb     a52b <_D9benchmark__T6kernelTSQw9RightE5M3Vki1ZQBaFNbNiPQBbQekZm+0xb>
+    a548:	mov    %rsi,%rax
+    a54b:	ret
+
+layout=left kernel=2 bytes=144 static_instructions=44
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000a76c <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki2ZQCaFNbNiPQCbQekZm>:
+    a76c:	push   %rbp
+    a76d:	mov    %rsp,%rbp
+    a770:	sub    $0x30,%rsp
+    a774:	mov    %rbx,-0x28(%rbp)
+    a778:	mov    %r12,-0x20(%rbp)
+    a77c:	mov    %r13,-0x18(%rbp)
+    a780:	mov    %r14,-0x10(%rbp)
+    a784:	mov    %rdi,%r14
+    a787:	mov    %rdx,%r12
+    a78a:	xor    %r13d,%r13d
+    a78d:	xor    %ebx,%ebx
+    a78f:	test   %r14d,%r14d
+    a792:	je     a7e4 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki2ZQCaFNbNiPQCbQekZm+0x78>
+    a794:	mov    %ebx,%eax
+    a796:	movswl (%r12,%rax,2),%ecx
+    a79b:	mov    %cx,-0x8(%rbp)
+    a79f:	movzwl -0x8(%rbp),%edx
+    a7a3:	sar    $0x7,%edx
+    a7a6:	mov    %edx,%esi
+    a7a8:	and    $0x1ff,%esi
+    a7ae:	lea    0x1(%rbx),%eax
+    a7b1:	xor    %edx,%edx
+    a7b3:	div    %r14d
+    a7b6:	mov    %edx,%edx
+    a7b8:	movzwl (%r12,%rdx,2),%edi
+    a7bd:	sar    $0x7,%edi
+    a7c0:	and    $0x1ff,%edi
+    a7c6:	call   4c1c <_D4icky9imprecise15signed_e5m3_addFNbNiSQBmQBk4E5M3QmZQp>
+    a7cb:	and    $0x1ff,%eax
+    a7d0:	shl    $0x7,%eax
+    a7d3:	and    $0xffff,%eax
+    a7d8:	cltq
+    a7da:	add    %rax,%r13
+    a7dd:	inc    %ebx
+    a7df:	cmp    %r14d,%ebx
+    a7e2:	jb     a794 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki2ZQCaFNbNiPQCbQekZm+0x28>
+    a7e4:	mov    %r13,%rax
+    a7e7:	mov    -0x28(%rbp),%rbx
+    a7eb:	mov    -0x20(%rbp),%r12
+    a7ef:	mov    -0x18(%rbp),%r13
+    a7f3:	mov    -0x10(%rbp),%r14
+    a7f7:	mov    %rbp,%rsp
+    a7fa:	pop    %rbp
+    a7fb:	ret
+
+layout=right kernel=2 bytes=85 static_instructions=34
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000aa14 <_D9benchmark__T6kernelTSQw9RightE5M3Vki2ZQBaFNbNiPQBbQekZm>:
+    aa14:	push   %rbp
+    aa15:	mov    %rsp,%rbp
+    aa18:	push   %rbx
+    aa19:	push   %r12
+    aa1b:	push   %r13
+    aa1d:	push   %r14
+    aa1f:	mov    %rdi,%r14
+    aa22:	mov    %rdx,%r12
+    aa25:	xor    %r13d,%r13d
+    aa28:	xor    %ebx,%ebx
+    aa2a:	test   %r14d,%r14d
+    aa2d:	je     aa5d <_D9benchmark__T6kernelTSQw9RightE5M3Vki2ZQBaFNbNiPQBbQekZm+0x49>
+    aa2f:	mov    %ebx,%eax
+    aa31:	movswl (%r12,%rax,2),%ecx
+    aa36:	mov    %ecx,%esi
+    aa38:	lea    0x1(%rbx),%eax
+    aa3b:	xor    %edx,%edx
+    aa3d:	div    %r14d
+    aa40:	mov    %edx,%edx
+    aa42:	movswl (%r12,%rdx,2),%edi
+    aa47:	call   4c1c <_D4icky9imprecise15signed_e5m3_addFNbNiSQBmQBk4E5M3QmZQp>
+    aa4c:	and    $0x1ff,%eax
+    aa51:	cltq
+    aa53:	add    %rax,%r13
+    aa56:	inc    %ebx
+    aa58:	cmp    %r14d,%ebx
+    aa5b:	jb     aa2f <_D9benchmark__T6kernelTSQw9RightE5M3Vki2ZQBaFNbNiPQBbQekZm+0x1b>
+    aa5d:	mov    %r13,%rax
+    aa60:	pop    %r14
+    aa62:	pop    %r13
+    aa64:	pop    %r12
+    aa66:	pop    %rbx
+    aa67:	pop    %rbp
+    aa68:	ret
+
+layout=left kernel=3 bytes=171 static_instructions=51
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000ad0c <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki3ZQCaFNbNiPQCbQekZm>:
+    ad0c:	push   %rbp
+    ad0d:	mov    %rsp,%rbp
+    ad10:	sub    $0x40,%rsp
+    ad14:	mov    %rbx,-0x38(%rbp)
+    ad18:	mov    %r12,-0x30(%rbp)
+    ad1c:	mov    %r13,-0x28(%rbp)
+    ad20:	mov    %r14,-0x20(%rbp)
+    ad24:	mov    %r15,-0x18(%rbp)
+    ad28:	mov    %rsi,-0x8(%rbp)
+    ad2c:	mov    %rdi,%r15
+    ad2f:	mov    %rdx,%r14
+    ad32:	xor    %r13d,%r13d
+    ad35:	xor    %r12d,%r12d
+    ad38:	test   %r15d,%r15d
+    ad3b:	je     ad9b <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki3ZQCaFNbNiPQCbQekZm+0x8f>
+    ad3d:	mov    %r12d,%eax
+    ad40:	movswl (%r14,%rax,2),%ecx
+    ad45:	mov    %cx,-0x10(%rbp)
+    ad49:	xor    %ebx,%ebx
+    ad4b:	movzwl -0x10(%rbp),%edx
+    ad4f:	sar    $0x7,%edx
+    ad52:	mov    %edx,%esi
+    ad54:	and    $0x1ff,%esi
+    ad5a:	mov    $0x1,%edi
+    ad5f:	call   4c1c <_D4icky9imprecise15signed_e5m3_addFNbNiSQBmQBk4E5M3QmZQp>
+    ad64:	and    $0x1ff,%eax
+    ad69:	shl    $0x7,%eax
+    ad6c:	mov    %ax,-0xe(%rbp)
+    ad70:	mov    %ax,-0x10(%rbp)
+    ad74:	inc    %ebx
+    ad76:	cmp    $0x20,%ebx
+    ad79:	jb     ad4b <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki3ZQCaFNbNiPQCbQekZm+0x3f>
+    ad7b:	mov    -0xe(%rbp),%bx
+    ad7f:	mov    %r12d,%ecx
+    ad82:	mov    -0x8(%rbp),%rdx
+    ad86:	mov    %bx,(%rdx,%rcx,2)
+    ad8a:	movzwl -0xe(%rbp),%eax
+    ad8e:	cltq
+    ad90:	add    %rax,%r13
+    ad93:	inc    %r12d
+    ad96:	cmp    %r15d,%r12d
+    ad99:	jb     ad3d <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki3ZQCaFNbNiPQCbQekZm+0x31>
+    ad9b:	mov    %r13,%rax
+    ad9e:	mov    -0x38(%rbp),%rbx
+    ada2:	mov    -0x30(%rbp),%r12
+    ada6:	mov    -0x28(%rbp),%r13
+    adaa:	mov    -0x20(%rbp),%r14
+    adae:	mov    -0x18(%rbp),%r15
+    adb2:	mov    %rbp,%rsp
+    adb5:	pop    %rbp
+    adb6:	ret
+
+layout=right kernel=3 bytes=157 static_instructions=47
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000b024 <_D9benchmark__T6kernelTSQw9RightE5M3Vki3ZQBaFNbNiPQBbQekZm>:
+    b024:	push   %rbp
+    b025:	mov    %rsp,%rbp
+    b028:	sub    $0x40,%rsp
+    b02c:	mov    %rbx,-0x38(%rbp)
+    b030:	mov    %r12,-0x30(%rbp)
+    b034:	mov    %r13,-0x28(%rbp)
+    b038:	mov    %r14,-0x20(%rbp)
+    b03c:	mov    %r15,-0x18(%rbp)
+    b040:	mov    %rsi,-0x8(%rbp)
+    b044:	mov    %rdi,%r15
+    b047:	mov    %rdx,%r14
+    b04a:	xor    %r13d,%r13d
+    b04d:	xor    %r12d,%r12d
+    b050:	test   %r15d,%r15d
+    b053:	je     b0a5 <_D9benchmark__T6kernelTSQw9RightE5M3Vki3ZQBaFNbNiPQBbQekZm+0x81>
+    b055:	mov    %r12d,%eax
+    b058:	movswl (%r14,%rax,2),%ecx
+    b05d:	mov    %cx,-0x10(%rbp)
+    b061:	xor    %ebx,%ebx
+    b063:	mov    -0x10(%rbp),%si
+    b067:	mov    $0x1,%edi
+    b06c:	call   4c1c <_D4icky9imprecise15signed_e5m3_addFNbNiSQBmQBk4E5M3QmZQp>
+    b071:	and    $0x1ff,%eax
+    b076:	mov    %ax,-0xe(%rbp)
+    b07a:	mov    %ax,-0x10(%rbp)
+    b07e:	inc    %ebx
+    b080:	cmp    $0x20,%ebx
+    b083:	jb     b063 <_D9benchmark__T6kernelTSQw9RightE5M3Vki3ZQBaFNbNiPQBbQekZm+0x3f>
+    b085:	mov    -0xe(%rbp),%dx
+    b089:	mov    %r12d,%ebx
+    b08c:	mov    -0x8(%rbp),%rcx
+    b090:	mov    %dx,(%rcx,%rbx,2)
+    b094:	movzwl -0xe(%rbp),%eax
+    b098:	cltq
+    b09a:	add    %rax,%r13
+    b09d:	inc    %r12d
+    b0a0:	cmp    %r15d,%r12d
+    b0a3:	jb     b055 <_D9benchmark__T6kernelTSQw9RightE5M3Vki3ZQBaFNbNiPQBbQekZm+0x31>
+    b0a5:	mov    %r13,%rax
+    b0a8:	mov    -0x38(%rbp),%rbx
+    b0ac:	mov    -0x30(%rbp),%r12
+    b0b0:	mov    -0x28(%rbp),%r13
+    b0b4:	mov    -0x20(%rbp),%r14
+    b0b8:	mov    -0x18(%rbp),%r15
+    b0bc:	mov    %rbp,%rsp
+    b0bf:	pop    %rbp
+    b0c0:	ret
+
+layout=left kernel=4 bytes=192 static_instructions=55
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000b338 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki4ZQCaFNbNiPQCbQekZm>:
+    b338:	push   %rbp
+    b339:	mov    %rsp,%rbp
+    b33c:	sub    $0x50,%rsp
+    b340:	mov    %rbx,-0x50(%rbp)
+    b344:	mov    %r12,-0x48(%rbp)
+    b348:	mov    %r13,-0x40(%rbp)
+    b34c:	mov    %r14,-0x38(%rbp)
+    b350:	mov    %r15,-0x30(%rbp)
+    b354:	mov    %rsi,-0x8(%rbp)
+    b358:	mov    %rdi,%r14
+    b35b:	mov    %rdx,%r12
+    b35e:	xor    %r13d,%r13d
+    b361:	xor    %ebx,%ebx
+    b363:	test   %r14d,%r14d
+    b366:	je     b3dc <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki4ZQCaFNbNiPQCbQekZm+0xa4>
+    b368:	mov    %ebx,%eax
+    b36a:	movswl (%r12,%rax,2),%ecx
+    b36f:	mov    %cx,-0x10(%rbp)
+    b373:	mov    %rax,-0x28(%rbp)
+    b377:	lea    0x1(%rbx),%eax
+    b37a:	xor    %edx,%edx
+    b37c:	div    %r14d
+    b37f:	mov    %edx,%edx
+    b381:	movzwl (%r12,%rdx,2),%r15d
+    b386:	movzwl -0x10(%rbp),%edi
+    b38a:	call   42b4 <_D4icky9imprecise11decode_halfFNbNitZf>
+    b38f:	movapd %xmm0,-0x20(%rbp)
+    b394:	movzwl %r15w,%edi
+    b398:	call   42b4 <_D4icky9imprecise11decode_halfFNbNitZf>
+    b39d:	movss  %xmm0,%xmm1
+    b3a1:	movapd -0x20(%rbp),%xmm0
+    b3a6:	mulss  %xmm1,%xmm0
+    b3aa:	call   41b4 <_D4icky9imprecise11encode_halfFNbNifZt>
+    b3af:	mov    %ax,-0xe(%rbp)
+    b3b3:	mov    -0xe(%rbp),%di
+    b3b7:	call   55f0 <_D4icky12experimental9e5m3_left8LeftE5M36narrowFNbNiSQBz9imprecise__T9QuantizedVEQDbQBc12ScalarFormati0ZQBjZSQEdQEbQDqQDj>
+    b3bc:	mov    %ax,-0xc(%rbp)
+    b3c0:	mov    -0x28(%rbp),%rcx
+    b3c4:	mov    -0x8(%rbp),%rdx
+    b3c8:	mov    %ax,(%rdx,%rcx,2)
+    b3cc:	movzwl -0xc(%rbp),%eax
+    b3d0:	cltq
+    b3d2:	add    %rax,%r13
+    b3d5:	inc    %ebx
+    b3d7:	cmp    %r14d,%ebx
+    b3da:	jb     b368 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki4ZQCaFNbNiPQCbQekZm+0x30>
+    b3dc:	mov    %r13,%rax
+    b3df:	mov    -0x50(%rbp),%rbx
+    b3e3:	mov    -0x48(%rbp),%r12
+    b3e7:	mov    -0x40(%rbp),%r13
+    b3eb:	mov    -0x38(%rbp),%r14
+    b3ef:	mov    -0x30(%rbp),%r15
+    b3f3:	mov    %rbp,%rsp
+    b3f6:	pop    %rbp
+    b3f7:	ret
+
+layout=right kernel=4 bytes=224 static_instructions=61
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000b664 <_D9benchmark__T6kernelTSQw9RightE5M3Vki4ZQBaFNbNiPQBbQekZm>:
+    b664:	push   %rbp
+    b665:	mov    %rsp,%rbp
+    b668:	sub    $0x50,%rsp
+    b66c:	mov    %rbx,-0x50(%rbp)
+    b670:	mov    %r12,-0x48(%rbp)
+    b674:	mov    %r13,-0x40(%rbp)
+    b678:	mov    %r14,-0x38(%rbp)
+    b67c:	mov    %r15,-0x30(%rbp)
+    b680:	mov    %rsi,-0x8(%rbp)
+    b684:	mov    %rdi,%r14
+    b687:	mov    %rdx,%r12
+    b68a:	xor    %r13d,%r13d
+    b68d:	xor    %ebx,%ebx
+    b68f:	test   %r14d,%r14d
+    b692:	je     b728 <_D9benchmark__T6kernelTSQw9RightE5M3Vki4ZQBaFNbNiPQBbQekZm+0xc4>
+    b698:	mov    %ebx,%eax
+    b69a:	movswl (%r12,%rax,2),%ecx
+    b69f:	mov    %rax,-0x28(%rbp)
+    b6a3:	lea    0x1(%rbx),%eax
+    b6a6:	xor    %edx,%edx
+    b6a8:	div    %r14d
+    b6ab:	mov    %edx,%edx
+    b6ad:	movswl (%r12,%rdx,2),%r15d
+    b6b2:	shl    $0x7,%r15d
+    b6b6:	mov    %ecx,%edi
+    b6b8:	shl    $0x7,%edi
+    b6bb:	and    $0xffff,%edi
+    b6c1:	call   42b4 <_D4icky9imprecise11decode_halfFNbNitZf>
+    b6c6:	movapd %xmm0,-0x20(%rbp)
+    b6cb:	movzwl %r15w,%edi
+    b6cf:	call   42b4 <_D4icky9imprecise11decode_halfFNbNitZf>
+    b6d4:	movss  %xmm0,%xmm1
+    b6d8:	movapd -0x20(%rbp),%xmm0
+    b6dd:	mulss  %xmm1,%xmm0
+    b6e1:	call   41b4 <_D4icky9imprecise11encode_halfFNbNifZt>
+    b6e6:	mov    %ax,-0x10(%rbp)
+    b6ea:	mov    -0x10(%rbp),%di
+    b6ee:	call   55f0 <_D4icky12experimental9e5m3_left8LeftE5M36narrowFNbNiSQBz9imprecise__T9QuantizedVEQDbQBc12ScalarFormati0ZQBjZSQEdQEbQDqQDj>
+    b6f3:	and    $0xffff,%eax
+    b6f8:	sar    $0x7,%eax
+    b6fb:	and    $0x1ff,%eax
+    b700:	mov    %ax,-0xe(%rbp)
+    b704:	mov    -0xe(%rbp),%cx
+    b708:	mov    -0x28(%rbp),%rdx
+    b70c:	mov    -0x8(%rbp),%rsi
+    b710:	mov    %cx,(%rsi,%rdx,2)
+    b714:	movzwl -0xe(%rbp),%eax
+    b718:	cltq
+    b71a:	add    %rax,%r13
+    b71d:	inc    %ebx
+    b71f:	cmp    %r14d,%ebx
+    b722:	jb     b698 <_D9benchmark__T6kernelTSQw9RightE5M3Vki4ZQBaFNbNiPQBbQekZm+0x34>
+    b728:	mov    %r13,%rax
+    b72b:	mov    -0x50(%rbp),%rbx
+    b72f:	mov    -0x48(%rbp),%r12
+    b733:	mov    -0x40(%rbp),%r13
+    b737:	mov    -0x38(%rbp),%r14
+    b73b:	mov    -0x30(%rbp),%r15
+    b73f:	mov    %rbp,%rsp
+    b742:	pop    %rbp
+    b743:	ret
+
+layout=left kernel=5 bytes=123 static_instructions=38
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000b9b8 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki5ZQCaFNbNiPQCbQekZm>:
+    b9b8:	push   %rbp
+    b9b9:	mov    %rsp,%rbp
+    b9bc:	sub    $0x40,%rsp
+    b9c0:	mov    %rbx,-0x38(%rbp)
+    b9c4:	mov    %r12,-0x30(%rbp)
+    b9c8:	mov    %r13,-0x28(%rbp)
+    b9cc:	mov    %r14,-0x20(%rbp)
+    b9d0:	mov    %r15,-0x18(%rbp)
+    b9d4:	mov    %rdi,%r14
+    b9d7:	mov    %rsi,%r15
+    b9da:	mov    %rdx,%r13
+    b9dd:	xor    %r12d,%r12d
+    b9e0:	xor    %ebx,%ebx
+    b9e2:	test   %r14d,%r14d
+    b9e5:	je     ba17 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki5ZQCaFNbNiPQCbQekZm+0x5f>
+    b9e7:	mov    %ebx,%eax
+    b9e9:	movswl 0x0(%r13,%rax,2),%ecx
+    b9ef:	mov    %ecx,%edi
+    b9f1:	mov    %rax,-0x10(%rbp)
+    b9f5:	call   55f0 <_D4icky12experimental9e5m3_left8LeftE5M36narrowFNbNiSQBz9imprecise__T9QuantizedVEQDbQBc12ScalarFormati0ZQBjZSQEdQEbQDqQDj>
+    b9fa:	mov    %ax,-0x8(%rbp)
+    b9fe:	mov    -0x10(%rbp),%rdx
+    ba02:	mov    %ax,(%r15,%rdx,2)
+    ba07:	movzwl -0x8(%rbp),%eax
+    ba0b:	cltq
+    ba0d:	add    %rax,%r12
+    ba10:	inc    %ebx
+    ba12:	cmp    %r14d,%ebx
+    ba15:	jb     b9e7 <_D9benchmark__T6kernelTS4icky12experimental9e5m3_left8LeftE5M3Vki5ZQCaFNbNiPQCbQekZm+0x2f>
+    ba17:	mov    %r12,%rax
+    ba1a:	mov    -0x38(%rbp),%rbx
+    ba1e:	mov    -0x30(%rbp),%r12
+    ba22:	mov    -0x28(%rbp),%r13
+    ba26:	mov    -0x20(%rbp),%r14
+    ba2a:	mov    -0x18(%rbp),%r15
+    ba2e:	mov    %rbp,%rsp
+    ba31:	pop    %rbp
+    ba32:	ret
+
+layout=right kernel=5 bytes=143 static_instructions=43
+
+/workspace/scratch/82d63b2a1446/ick-idk/.f03-build/bench:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000000bca0 <_D9benchmark__T6kernelTSQw9RightE5M3Vki5ZQBaFNbNiPQBbQekZm>:
+    bca0:	push   %rbp
+    bca1:	mov    %rsp,%rbp
+    bca4:	sub    $0x40,%rsp
+    bca8:	mov    %rbx,-0x38(%rbp)
+    bcac:	mov    %r12,-0x30(%rbp)
+    bcb0:	mov    %r13,-0x28(%rbp)
+    bcb4:	mov    %r14,-0x20(%rbp)
+    bcb8:	mov    %r15,-0x18(%rbp)
+    bcbc:	mov    %rdi,%r14
+    bcbf:	mov    %rsi,%r15
+    bcc2:	mov    %rdx,%r13
+    bcc5:	xor    %r12d,%r12d
+    bcc8:	xor    %ebx,%ebx
+    bcca:	test   %r14d,%r14d
+    bccd:	je     bd13 <_D9benchmark__T6kernelTSQw9RightE5M3Vki5ZQBaFNbNiPQBbQekZm+0x73>
+    bccf:	mov    %ebx,%eax
+    bcd1:	movswl 0x0(%r13,%rax,2),%ecx
+    bcd7:	mov    %ecx,%edi
+    bcd9:	shl    $0x7,%edi
+    bcdc:	mov    %rax,-0x10(%rbp)
+    bce0:	call   55f0 <_D4icky12experimental9e5m3_left8LeftE5M36narrowFNbNiSQBz9imprecise__T9QuantizedVEQDbQBc12ScalarFormati0ZQBjZSQEdQEbQDqQDj>
+    bce5:	and    $0xffff,%eax
+    bcea:	sar    $0x7,%eax
+    bced:	and    $0x1ff,%eax
+    bcf2:	mov    %ax,-0x8(%rbp)
+    bcf6:	mov    -0x8(%rbp),%dx
+    bcfa:	mov    -0x10(%rbp),%rsi
+    bcfe:	mov    %dx,(%r15,%rsi,2)
+    bd03:	movzwl -0x8(%rbp),%eax
+    bd07:	cltq
+    bd09:	add    %rax,%r12
+    bd0c:	inc    %ebx
+    bd0e:	cmp    %r14d,%ebx
+    bd11:	jb     bccf <_D9benchmark__T6kernelTSQw9RightE5M3Vki5ZQBaFNbNiPQBbQekZm+0x2f>
+    bd13:	mov    %r12,%rax
+    bd16:	mov    -0x38(%rbp),%rbx
+    bd1a:	mov    -0x30(%rbp),%r12
+    bd1e:	mov    -0x28(%rbp),%r13
+    bd22:	mov    -0x20(%rbp),%r14
+    bd26:	mov    -0x18(%rbp),%r15
+    bd2a:	mov    %rbp,%rsp
+    bd2d:	pop    %rbp
+    bd2e:	ret
