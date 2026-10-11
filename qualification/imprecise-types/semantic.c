@@ -7,6 +7,42 @@ is_nan(float value)
     return value != value;
 }
 
+/* Deliberately independent of the production byte-to-Float32 decoder:
+   evaluate the signed exponent/significand formula directly.  Every finite
+   FP8 value fits exactly in binary32, including negative zero and subnormals. */
+static float
+reference_power_of_two(int exponent)
+{
+    float factor = 1.0f;
+    while (exponent > 0) {
+        factor *= 2.0f;
+        --exponent;
+    }
+    while (exponent < 0) {
+        factor *= 0.5f;
+        ++exponent;
+    }
+    return factor;
+}
+
+static float
+reference_fp8_finite(unsigned code, unsigned exponent_bits,
+                     unsigned mantissa_bits, int bias)
+{
+    unsigned mantissa_mask = (1u << mantissa_bits) - 1u;
+    unsigned exponent_mask = (1u << exponent_bits) - 1u;
+    unsigned exponent = (code >> mantissa_bits) & exponent_mask;
+    unsigned mantissa = code & mantissa_mask;
+    float value;
+    if (exponent == 0)
+        value = (float)mantissa
+            * reference_power_of_two(1 - bias - (int)mantissa_bits);
+    else
+        value = (float)((1u << mantissa_bits) + mantissa)
+            * reference_power_of_two((int)exponent - bias - (int)mantissa_bits);
+    return (code & 0x80u) ? -value : value;
+}
+
 int
 main(void)
 {
@@ -87,6 +123,22 @@ main(void)
     for (code = 0; code < 256; ++code) {
         float decoded_e4 = e4m3_to_float(e4m3_from_code((ick_byte)code));
         float decoded_e5 = e5m2_to_float(e5m2_from_code((ick_byte)code));
+
+        /* Decode against the mathematical 1/4/3 and 1/5/2 definitions,
+           not against the same codec's own re-encoder.  Compare binary32
+           bits to retain the sign of zero. */
+        if ((code & 0x7fu) != 0x7fu
+            && ick_float_bits(decoded_e4)
+               != ick_float_bits(reference_fp8_finite(code, 4u, 3u, 7)))
+            return 70;
+        if ((code & 0x7cu) != 0x7cu
+            && ick_float_bits(decoded_e5)
+               != ick_float_bits(reference_fp8_finite(code, 5u, 2u, 15)))
+            return 71;
+        if ((code & 0x7fu) == 0x7cu
+            && ick_float_bits(decoded_e5)
+               != ((code & 0x80u) ? 0xff800000u : 0x7f800000u))
+            return 72;
 
         if ((code & 0x7fu) == 0x7fu) {
             if (!is_nan(decoded_e4))
