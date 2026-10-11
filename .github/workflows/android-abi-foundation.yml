@@ -247,7 +247,17 @@ jobs:
               echo "$kind category error was accepted" >&2
               exit 1
             fi
-            grep -Eqi 'invalid operands|incompatible types' /tmp/reject-$kind.log
+            # A removed typedef has a different expected diagnostic from
+            # arithmetic on two incompatible typed structures.  Keep the
+            # negative checks specific so infrastructure errors cannot pass.
+            case "$kind" in
+              BARE_E5M3)
+                grep -Eqi 'unknown type name.*E5M3' /tmp/reject-$kind.log
+                ;;
+              *)
+                grep -Eqi 'invalid operands|incompatible types' /tmp/reject-$kind.log
+                ;;
+            esac
           done
 
       - name: Verify Android-specific compile rules
