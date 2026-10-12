@@ -2,3 +2,5 @@ stage	compiler_source	compiler_interface	qualification
 ICK-bootstrap	gcc-6294f1d9e7536e5ffcde09d1528c918d63abfef5	host-gcc-g++	bootstrap-only
 ICK-scalar-candidate	ick-runtime-143e29580c2644ea0f345fe609fa5673d036865d	ICK_CC-absolute	qualification/native-polar/Makefile
 MUL-1-independent-oracle	Idric-081b9cde0591154839fb5d80d76e5570e0436300	ORACLE_IDRIC-absolute-Chez	arithmetic/openai2026/Makefile
+MUL-4-scalar-and-line-candidate	ick-runtime-143e29580c2644ea0f345fe609fa5673d036865d	ICK_CC-absolute	check-resampling-mutants-resampling
+MUL-4-independent-interval-reference	Idric-081b9cde0591154839fb5d80d76e5570e0436300	ORACLE_IDRIC-absolute-Chez	p-plus-128-independent-series

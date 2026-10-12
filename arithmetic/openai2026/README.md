@@ -41,3 +41,39 @@ separately through its existing materializer with pinned GCC. Its fresh native
 compiler, libgcc, libatomic and all 21 native runtime tests passed; no new runtime
 repair is included. Bootstrap host gcc/g++, oracle Scheme and maintained ICK
 compilation are separate stages. See `dependencies.lock` and generated receipts.
+
+MUL-4 adds precision-certified roots and Gaussian exponentials and the ordered
+resampling maps A=S/2 and B0=D' J' C. Its admitted domain is p=101..256,
+2<=s<t<=64, coprime lengths, alpha>=2, alpha^2<p and
+(t-s)alpha^4>ps. A plan owns its explicitly bounded coefficient storage; caller
+arrays own initialized Gaussian records and must be disjoint. Capacity,
+aliasing, disk, grid and parameter failures preserve every destination.
+
+All trusted constants and functions use directed dyadic bounds, checked
+32-bit-limb products, finite series and explicit remainders. The private work
+precision is p+64 and storage is limited to 1024 bits. C uses upward nearest
+ties and an increasing coordinate scan. J' executes the prescribed alternating
+Neumann terms; D' includes its original scaling. Both ordered maps have error
+strictly below p^2 2^-p. CERTIFICATES.md gives the scalar, line, tensor and
+amplified identity obligations and the exact pinned author-PDF hash.
+
+The independent Idriç reference uses different series at p+128 bits, directly
+sums wider Gaussian kernels and encloses a longer inverse. The 8,090-record
+contract checks scalar intervals, all line basis directions, signed dense and
+half-grid inputs, ordered nearest indices, the retained Ps/Pt Fourier identity,
+and two tensor lines on a 2x18x19x3 box. All unused padding stays zero and every
+tagged prefix/suffix field retains its physical position. A normalized quadratic
+DFT supplies verification only; A and B0 do not call a transform.
+
+`check-resampling` and `mutants-resampling` take the same absolute compiler and
+corpus arguments as `check`. Evidence under `build/resampling` includes actual
+stdout/stderr, interval/reference hashes, ELF/dependency inspection, preparation
+allocations, CPU time for constant generation, outer wall time and Linux peak
+RSS. Counters are labeled RAM. The five prescribed defects and an additional
+byte-matching oracle bypass must fail with nonzero outer statuses. The bypass
+is rejected by its extra process import even when every value matches.
+
+These bounded correctness profiles use conventional checked limb products.
+They do not establish the cited running-time theorem or a whole multiplier.
+Dependent recovery must account for the explicit 2^(2alpha^2) amplification
+and every subsequent scale before claiming a strict half-unit error bound.
