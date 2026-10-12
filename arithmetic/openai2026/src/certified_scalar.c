@@ -119,13 +119,18 @@ static exact_status negative_exponential(certified_scalar_context *context,const
   if (remainder.lower.sign<0 || comparison>0) { status=EXACT_CAPACITY; goto done; }
   TRY(bound_integer(&term,1));
   unsigned count=context->working_precision+16;
+#ifdef MUTANT_RELAXED_TAIL
+  count=2;
+#endif
   for (unsigned index=0;index<count;++index) {
     TRY(bound_add(context,&sum,&sum,&term,index%2));
     TRY(bound_product(context,&term,&term,&remainder));
     TRY(bound_scale(context,&term,&term,1,index+1));
     ++context->work.series_terms;
   }
+#ifndef MUTANT_RELAXED_TAIL
   TRY(alternating_tail(&sum,&term,count));
+#endif
   if (sum.lower.sign<0) { status=EXACT_CAPACITY; goto done; }
   TRY(bound_divide_power(context,out,&sum,lower)); TRY(narrow(context,out,16));
   *range_shifts=lower;
@@ -158,6 +163,9 @@ exact_status certified_exponential(certified_scalar_context *context,uint32_t j,
   TRY(bound_integer(&multiple,1)); int comparison;
   TRY(exact_compare(&comparison,&result.lower,&multiple.upper));
   if (comparison>0 || result.lower.sign<0) { status=EXACT_INVALID; goto done; }
+#ifdef MUTANT_ZERO
+  TRY(exact_set(&result.lower,0,0));
+#endif
   TRY(exact_copy(out,&result.lower)); *certificate=proof;
 done:
   bound_clear(context,&argument); bound_clear(context,&multiple); bound_clear(context,&result); return status;
@@ -251,6 +259,9 @@ exact_status certified_root(certified_scalar_context *context,uint32_t j,uint32_
   TRY(exact_compare(&comparison,&metric.lower,&limit.lower));
   if (comparison>=0) { status=EXACT_CAPACITY; goto done; }
   if (result.lower.length>out->real.capacity || result.upper.length>out->imaginary.capacity) { status=EXACT_CAPACITY; goto done; }
+#ifdef MUTANT_ZERO
+  TRY(bound_integer(&result,0));
+#endif
   TRY(exact_copy(&out->real,&result.lower)); TRY(exact_copy(&out->imaginary,&result.upper)); *certificate=proof;
 done:
   bound_clear(context,&argument); bound_clear(context,&radial);

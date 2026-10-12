@@ -119,7 +119,7 @@ rowValid referenceRows expected actual = fromMaybe False $ case (expected,actual
   _ => Nothing
 
 allowed : List String
-allowed = ["calloc","free","memcmp","memcpy","memmove","memset","printf","sprintf","strcmp","putchar","putc",
+allowed = ["calloc","free","memcmp","memcpy","memmove","memset","printf","sprintf","strcmp","putchar","putc","clock","getrusage",
            "fprintf","fputs","fwrite","ferror","stderr","stdout","__libc_start_main",
            "__cxa_finalize","__gmon_start__","_ITM_deregisterTMCloneTable","_ITM_registerTMCloneTable"]
 

@@ -119,6 +119,15 @@ applyB0 base inverse diagonal source target input =
       intermediate = applyMatrix base inverse selected in
   [(productBounds base coefficient real,productBounds base coefficient imaginary) | (coefficient,(real,imaginary)) <- zip diagonal intermediate]
 
+directFourier : Integer -> Nat -> Bounds -> Integer -> Vector -> Vector
+directFourier base terms pi length input =
+  [(scaled (sumBounds [subtract (productBounds base rootReal real) (productBounds base rootImaginary imaginary)
+      | ((rootReal,rootImaginary),(real,imaginary)) <- zip (roots frequency) input]) 1 length,
+    scaled (sumBounds [add (productBounds base rootReal imaginary) (productBounds base rootImaginary real)
+      | ((rootReal,rootImaginary),(real,imaginary)) <- zip (roots frequency) input]) 1 length) | frequency <- [0..length-1]] where
+  roots : Integer -> Vector
+  roots frequency = [rootBounds base terms pi (residue (-index*frequency) length) length | index <- [0..length-1]]
+
 profile : Integer -> Integer -> Integer -> Integer -> IO ()
 profile precision source target alpha = do
   let referencePrecision = precision+128
@@ -147,9 +156,73 @@ profile precision source target alpha = do
         show referencePrecision ++ "\t" ++ showBounds real ++ "\t" ++ showBounds imaginary))
           (zip (the (List Integer) [0..cast (length output)-1]) output))
       [0..inputLength+1]) (the (List Integer) [0,1])
+  let transformed = directFourier base terms pi source (inputVector base precision source source)
+  traverse_ (\index => do
+    let (real,imaginary) = fromMaybe (Interval 0 0,Interval 0 0) (at (cast (residue (target*index) source)) transformed)
+    putStrLn ("identity\t" ++ show precision ++ "\t" ++ show source ++ "\t" ++ show target ++ "\t" ++ show alpha ++ "\t" ++
+      show index ++ "\t" ++ show referencePrecision ++ "\t" ++ showBounds real ++ "\t" ++ showBounds imaginary)) [0..source-1]
+
+boxAddress : Integer -> Integer -> Integer -> Integer -> Integer
+boxAddress prefix_index row column tail = ((prefix_index*18+row)*19+column)*3+tail
+
+boxPoint : Vector -> Integer -> Integer -> Integer -> Integer -> (Bounds,Bounds)
+boxPoint box prefix_index row column tail = fromMaybe (Interval 0 0,Interval 0 0) (at (cast (boxAddress prefix_index row column tail)) box)
+
+tensorAxis : Integer -> Matrix -> Integer -> Integer -> Bool -> Vector -> Vector
+tensorAxis base matrix source target second box =
+  [point prefix_index row column tail | prefix_index <- the (List Integer) [0,1],row <- [0..17],column <- [0..18],tail <- [0..2]] where
+  point : Integer -> Integer -> Integer -> Integer -> (Bounds,Bounds)
+  point prefix_index row column tail =
+    let destination = if second then column else row in
+    if destination>=target then (Interval 0 0,Interval 0 0) else
+      let coefficients = fromMaybe [] (at (cast destination) matrix)
+          inputs = [boxPoint box prefix_index (if second then row else index) (if second then index else column) tail | index <- [0..source-1]] in
+      (sumBounds [productBounds base coefficient real | (coefficient,(real,imaginary)) <- zip coefficients inputs],
+       sumBounds [productBounds base coefficient imaginary | (coefficient,(real,imaginary)) <- zip coefficients inputs])
+
+backwardMatrix : Integer -> Integer -> Integer -> Matrix -> List Bounds -> Matrix
+backwardMatrix base source target inverse multipliers =
+  [[sumBounds [productBounds base multiplier coefficient
+      | (index,coefficient) <- zip (the (List Integer) [0..source-1]) inverseRow,nearest source target index==column]
+    | column <- [0..target-1]] | (multiplier,inverseRow) <- zip multipliers inverse]
+
+tensorProfile : IO ()
+tensorProfile = do
+  let precision = the Integer 101
+  let q = precision+128
+  let base = shiftL 1 (cast q)
+  let terms = cast (q+32)
+  let pi = piBounds base terms
+  let logTwo = logTwoBounds base terms
+  let first = gaussianMatrix base terms pi 12 17 4 q
+  let second = gaussianMatrix base terms pi 11 16 4 q
+  let firstError = errorMatrix base terms pi 12 17 4 q
+  let secondError = errorMatrix base terms pi 11 16 4 q
+  if normUpper firstError>=base `div` 2 || normUpper secondError>=base `div` 2 then exitWith (ExitFailure 8) else pure ()
+  let firstInverse = halfInverse base 12 (ceilQuotient (q*12) 80+2) firstError
+  let secondInverse = halfInverse base 11 (ceilQuotient (q*11) 80+2) secondError
+  let firstBackward = backwardMatrix base 12 17 firstInverse (diagonal base terms pi logTwo 12 17 4)
+  let secondBackward = backwardMatrix base 11 16 secondInverse (diagonal base terms pi logTwo 11 16 4)
+  let input = [initial prefix_index row column tail
+               | prefix_index <- the (List Integer) [0,1],row <- [0..17],column <- [0..18],tail <- [0..2]]
+  let forward = tensorAxis base second 11 16 True (tensorAxis base first 12 17 False input)
+  let backward = tensorAxis base firstBackward 17 12 False (tensorAxis base secondBackward 16 11 True forward)
+  traverse_ (\(kind,box) => traverse_ (\(prefix_index,row,column,tail) =>
+    let (real,imaginary) = boxPoint box prefix_index row column tail in
+    putStrLn ("tensor\t" ++ kind ++ "\t101\t" ++ show prefix_index ++ "\t" ++ show row ++ "\t" ++ show column ++ "\t" ++ show tail ++ "\t" ++
+      show q ++ "\t" ++ showBounds real ++ "\t" ++ showBounds imaginary))
+    [(prefix_index,row,column,tail) | prefix_index <- the (List Integer) [0,1],row <- [0..17],column <- [0..18],tail <- [0..2]])
+    [("A",forward),("B0A",backward)] where
+  initial : Integer -> Integer -> Integer -> Integer -> (Bounds,Bounds)
+  initial prefix_index row column tail =
+    if row>=12 || column>=11 then (Interval 0 0,Interval 0 0) else
+      let real = ((prefix_index*31+row*11+column*7+tail*5) `mod` 7-3)*shiftL 1 225
+          imaginary = ((prefix_index*13+row*17+column*19+tail*23) `mod` 11-5)*shiftL 1 225 in
+      (Interval real real,Interval imaginary imaginary)
 
 main : IO ()
 main = do
   profile 101 12 17 4
   profile 128 15 23 5
   profile 256 31 38 6
+  tensorProfile

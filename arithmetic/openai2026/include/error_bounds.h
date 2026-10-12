@@ -47,4 +47,10 @@ exact_status resampling_A(resampling_plan *,const exact_gaussian *,size_t input_
 exact_status resampling_B0(resampling_plan *,const exact_gaussian *,size_t input_length,exact_gaussian *,size_t output_length);
 exact_status resampling_receipt(const resampling_plan *,resampling_parameters *,resampling_work *);
 unsigned resampling_nearest(const resampling_parameters *,unsigned source_index);
+/* Two ordered tensor lines on a zero-padded box [P,capacity0,capacity1,S].
+ * A visits axis 0 then 1; B0 visits axis 1 then 0. Padding stays zero and
+ * prefix/suffix spectators keep their physical slots. At most 16384 records. */
+exact_status resampling_tensor(resampling_plan *,resampling_plan *,int opposite,
+                                 unsigned prefixes,unsigned suffix,unsigned capacity0,unsigned capacity1,
+                                 exact_gaussian *box,size_t records);
 #endif

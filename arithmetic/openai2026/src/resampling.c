@@ -268,3 +268,57 @@ exact_status resampling_receipt(const resampling_plan *plan,resampling_parameter
   if (!plan || !parameters || !work) return EXACT_INVALID;
   *parameters=plan->parameters; *work=plan->work; work->scalar=plan->scalar.work; return EXACT_OK;
 }
+static size_t box_address(unsigned prefix,unsigned row,unsigned column,unsigned tail,
+                           unsigned capacity0,unsigned capacity1,unsigned suffix) {
+  return (((size_t)prefix*capacity0+row)*capacity1+column)*suffix+tail;
+}
+exact_status resampling_tensor(resampling_plan *first,resampling_plan *second,int opposite,
+                                 unsigned prefixes,unsigned suffix,unsigned capacity0,unsigned capacity1,
+                                 exact_gaussian *box,size_t records) {
+  if (!first || !second || !box || first->parameters.precision!=second->parameters.precision
+      || (opposite!=0 && opposite!=1) || !prefixes || !suffix || prefixes>4 || suffix>4
+      || capacity0<first->parameters.target_length || capacity1<second->parameters.target_length) return EXACT_INVALID;
+  if (capacity0>64 || capacity1>64 || records>16384) return EXACT_CAPACITY;
+  if (records!=(size_t)prefixes*capacity0*capacity1*suffix) return EXACT_INVALID;
+  unsigned active0=opposite ? first->parameters.target_length : first->parameters.source_length;
+  unsigned active1=opposite ? second->parameters.target_length : second->parameters.source_length;
+  for (size_t index=0;index<2*records;++index) {
+    exact_dyadic *value=channel(&box[index/2],index%2);
+    if (!exact_valid(value) || value->binary_scale>first->parameters.precision) return EXACT_INVALID;
+    for (size_t previous=0;previous<index;++previous)
+      if (exact_alias_invalid(value,channel(&box[previous/2],previous%2))) return EXACT_INVALID;
+  }
+  for (unsigned prefix=0;prefix<prefixes;++prefix) for (unsigned row=0;row<capacity0;++row)
+    for (unsigned column=0;column<capacity1;++column) for (unsigned tail=0;tail<suffix;++tail) {
+      exact_gaussian *value=&box[box_address(prefix,row,column,tail,capacity0,capacity1,suffix)];
+      if ((row>=active0 || column>=active1) && (value->real.length || value->imaginary.length)) return EXACT_INVALID;
+      exact_status status=disk(first,value); if (status!=EXACT_OK) return status;
+    }
+  exact_gaussian *work=NULL,*input=NULL,*output=NULL; exact_status status=EXACT_OK;
+  TRY(vector_init(&work,records)); TRY(vector_init(&input,64)); TRY(vector_init(&output,64));
+  for (size_t index=0;index<records;++index) for (unsigned component=0;component<2;++component)
+    TRY(exact_copy(channel(&work[index],component),const_channel(&box[index],component)));
+  for (unsigned step=0;step<2;++step) {
+    unsigned axis=opposite ? 1-step : step;
+    resampling_plan *plan=axis ? second : first;
+    unsigned old_length=opposite ? plan->parameters.target_length : plan->parameters.source_length;
+    unsigned new_length=opposite ? plan->parameters.source_length : plan->parameters.target_length;
+    unsigned lines=axis ? capacity0 : capacity1,capacity=axis ? capacity1 : capacity0;
+    for (unsigned prefix=0;prefix<prefixes;++prefix) for (unsigned line=0;line<lines;++line) for (unsigned tail=0;tail<suffix;++tail) {
+      for (unsigned position=0;position<old_length;++position) {
+        size_t address=box_address(prefix,axis ? line : position,axis ? position : line,tail,capacity0,capacity1,suffix);
+        TRY(exact_copy(&input[position].real,&work[address].real)); TRY(exact_copy(&input[position].imaginary,&work[address].imaginary));
+      }
+      TRY(opposite ? resampling_B0(plan,input,old_length,output,new_length) : resampling_A(plan,input,old_length,output,new_length));
+      for (unsigned position=0;position<capacity;++position) {
+        size_t address=box_address(prefix,axis ? line : position,axis ? position : line,tail,capacity0,capacity1,suffix);
+        if (position<new_length) {
+          TRY(exact_copy(&work[address].real,&output[position].real)); TRY(exact_copy(&work[address].imaginary,&output[position].imaginary));
+        } else { TRY(exact_set(&work[address].real,0,0)); TRY(exact_set(&work[address].imaginary,0,0)); }
+      }
+    }
+  }
+  TRY(commit(first,box,work,records));
+done:
+  vector_clear(work,records); vector_clear(input,64); vector_clear(output,64); return status;
+}
