@@ -46,6 +46,12 @@ jobs:
         run: make -f qualification/native-polar/Makefile build check
       - name: Bootstrap the exact independent Idriç compiler through Chez
         run: ./Idric/edric bootstrap
+      - name: Install the oracle compiler support library
+        run: make -C Idric install-support PREFIX="$HOME/.idris2"
+      - name: Install the oracle compiler's pinned Prelude and libraries
+        env:
+          PATH: ${{ github.workspace }}/Idric/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        run: make -C Idric install-bootstrap-libs IDRIS2="$GITHUB_WORKSPACE/Idric/build/exec/idris2"
       - name: Execute the candidate and every required defect through the outer runner
         env:
           PATH: ${{ github.workspace }}/Idric/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
