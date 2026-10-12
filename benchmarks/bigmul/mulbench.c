@@ -19,7 +19,11 @@
 
 int mul_schoolbook(const uint32_t *a, size_t na,
                    const uint32_t *b, size_t nb, uint32_t *out) {
-    if (na > SIZE_MAX - nb) return 1;
+    /* This low-level ABI requires nonoverlapping, aligned arrays.
+     * Check nulls and lengths before computing a byte count on 32-bit hosts. */
+    if (!a || !b || !out || !na || !nb ||
+        nb > SIZE_MAX / sizeof(*out) ||
+        na > SIZE_MAX / sizeof(*out) - nb) return 1;
     memset(out, 0, (na + nb) * sizeof(*out));
     for (size_t i = 0; i < na; ++i) {
         uint64_t carry = 0;
@@ -84,7 +88,8 @@ static int cmp_d(const void *a, const void *b) {
 static volatile uint32_t sink;
 static void benchmark_one(size_t abits, size_t bbits, int kind, int samples) {
     size_t na = limbs(abits), nb = limbs(bbits);
-    if (na > SIZE_MAX / sizeof(uint32_t) - nb) exit(3);
+    if (nb > SIZE_MAX / sizeof(uint32_t) ||
+        na > SIZE_MAX / sizeof(uint32_t) - nb) exit(3);
     uint32_t *a = malloc(na * sizeof(*a));
     uint32_t *b = malloc(nb * sizeof(*b));
     uint32_t *out = malloc((na+nb) * sizeof(*out));
@@ -155,48 +160,162 @@ static void print_hex(const uint32_t *a, size_t n, int negative) {
     for (size_t i=n-1; i>0; --i) printf("%08x", a[i-1]);
     putchar('\n');
 }
+/* Bounded source protocol; this limit is in input bytes, not operand bits. */
+#define MAX_RECORD_CHARS ((size_t)1048576)
+
+static int read_record(char *line, size_t *length) {
+    size_t len = 0;
+    int ch;
+    while ((ch = fgetc(stdin)) != EOF && ch != '\n') {
+        if (ch == 0) return -1;
+        if (len == MAX_RECORD_CHARS) return -2;
+        line[len++] = (char)ch;
+    }
+    if (ferror(stdin)) return -3;
+    if (ch == EOF && len == 0) return 0;
+    line[len] = '\0';
+    *length = len;
+    return 1;
+}
+
+/* Correctness-only adapter; timed --bench still measures raw MUL. It detects
+ * output under/overwrite by one word, input mutation and omitted output
+ * stores using different prefills. Arbitrary overflow still needs ASan. */
+static int checked_protocol_product(const uint32_t *a, size_t na,
+                                    const uint32_t *b, size_t nb,
+                                    uint32_t *out) {
+    if (!a || !b || !out || !na || !nb ||
+        nb > SIZE_MAX / sizeof(*out) - 2 ||
+        na > SIZE_MAX / sizeof(*out) - 2 - nb) return 1;
+    size_t count = na + nb;
+    if (na > SIZE_MAX / sizeof(*a) || nb > SIZE_MAX / sizeof(*b))
+        return 1;
+    size_t abytes = na * sizeof(*a), bbytes = nb * sizeof(*b);
+    size_t obytes = count * sizeof(*out);
+    uint32_t *saved_a = malloc(abytes), *saved_b = malloc(bbytes);
+    uint32_t *guarded = malloc((count + 2) * sizeof(*guarded));
+    uint32_t *first = malloc(obytes);
+    if (!saved_a || !saved_b || !guarded || !first) {
+        free(saved_a); free(saved_b); free(guarded); free(first);
+        return 1;
+    }
+    memcpy(saved_a, a, abytes);
+    memcpy(saved_b, b, bbytes);
+    int failure = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        guarded[0] = UINT32_C(0xc0deface);
+        guarded[count + 1] = UINT32_C(0x5afe0123);
+        memset(guarded + 1, pass ? 0x5a : 0xa5, obytes);
+        if (MUL(a, na, b, nb, guarded + 1) != 0 ||
+            guarded[0] != UINT32_C(0xc0deface) ||
+            guarded[count + 1] != UINT32_C(0x5afe0123) ||
+            memcmp(a, saved_a, abytes) ||
+            memcmp(b, saved_b, bbytes)) {
+            failure = 1;
+            break;
+        }
+        if (pass == 0) memcpy(first, guarded + 1, obytes);
+        else if (memcmp(first, guarded + 1, obytes)) failure = 1;
+    }
+    if (!failure) memcpy(out, first, obytes);
+    free(saved_a); free(saved_b); free(guarded); free(first);
+    return failure;
+}
+
 static int protocol(void) {
-    char *line = NULL;
-    size_t cap = 0;
-    ssize_t len;
-    while ((len = getline(&line, &cap, stdin)) >= 0) {
+    char *line = malloc(MAX_RECORD_CHARS + 1);
+    if (!line) { fprintf(stderr, "protocol record allocation failed\n"); return 3; }
+    for (;;) {
+        size_t len = 0;
+        int record = read_record(line, &len);
+        if (record == 0) break;
+        if (record < 0) {
+            fprintf(stderr, "malformed, binary, or overlong protocol record\n");
+            free(line);
+            return 2;
+        }
         if (!len) continue;
         char *a_s = line;
         while (isspace((unsigned char)*a_s)) ++a_s;
         if (!*a_s) continue;
         char *b_s = a_s;
         while (*b_s && !isspace((unsigned char)*b_s)) ++b_s;
-        if (!*b_s) { fprintf(stderr, "expected two hex operands\n"); free(line); return 2; }
+        if (!*b_s) {
+            fprintf(stderr, "expected exactly two hex operands\n");
+            free(line);
+            return 2;
+        }
         *b_s++ = '\0';
         while (isspace((unsigned char)*b_s)) ++b_s;
         char *end = b_s;
         while (*end && !isspace((unsigned char)*end)) ++end;
+        char *tail = end;
+        while (isspace((unsigned char)*tail)) ++tail;
+        if (*tail) {
+            fprintf(stderr, "extra protocol operand or trailing data\n");
+            free(line);
+            return 2;
+        }
         *end = '\0';
         uint32_t *a = NULL, *b = NULL, *out = NULL;
-        size_t na=0, nb=0;
-        int aneg=0, bneg=0;
-        if (from_hex(a_s, &a, &na, &aneg) || from_hex(b_s, &b, &nb, &bneg)) {
-            fprintf(stderr, "bad hex operand\n"); free(a); free(b); free(line); return 2;
+        size_t na = 0, nb = 0;
+        int aneg = 0, bneg = 0;
+        if (from_hex(a_s, &a, &na, &aneg) ||
+            from_hex(b_s, &b, &nb, &bneg)) {
+            fprintf(stderr, "bad hex operand\n");
+            free(a); free(b); free(line);
+            return 2;
         }
-        if (na > SIZE_MAX - nb || na+nb > SIZE_MAX/sizeof(*out)) {
-            fprintf(stderr, "size overflow\n"); free(a); free(b); free(line); return 2;
+        if (na > SIZE_MAX - nb ||
+            nb > SIZE_MAX / sizeof(*out) ||
+            na > SIZE_MAX / sizeof(*out) - nb) {
+            fprintf(stderr, "size overflow\n");
+            free(a); free(b); free(line);
+            return 2;
         }
-        out = malloc((na+nb) * sizeof(*out));
+        out = malloc((na + nb) * sizeof(*out));
         if (!out) { free(a); free(b); free(line); return 3; }
-        memset(out, 0xa5, (na+nb)*sizeof(*out)); /* catch incomplete writes */
-        if (MUL(a, na, b, nb, out)) { free(a); free(b); free(out); free(line); return 4; }
-        print_hex(out, na+nb, aneg ^ bneg);
+        memset(out, 0xa5, (na + nb) * sizeof(*out));
+        if (checked_protocol_product(a, na, b, nb, out)) {
+            fprintf(stderr, "candidate violated the checked C ABI\n");
+            free(a); free(b); free(out); free(line);
+            return 4;
+        }
+        print_hex(out, na + nb, aneg ^ bneg);
         fflush(stdout);
         free(a); free(b); free(out);
     }
     free(line);
     return ferror(stdin) ? 2 : 0;
 }
+
+/* Refuse prefix parses and size_t overflows on both 32- and 64-bit hosts. */
+static int decimal_size(const char *text, size_t *value) {
+    if (!*text) return 1;
+    size_t result = 0;
+    for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
+        if (*p < '0' || *p > '9') return 1;
+        unsigned digit = (unsigned)(*p - '0');
+        if (result > (SIZE_MAX - digit) / 10) return 1;
+        result = result * 10 + digit;
+    }
+    if (!result) return 1;
+    *value = result;
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    if (argc >= 2 && !strcmp(argv[1], "--pipe")) return protocol();
+    if (argc >= 2 && !strcmp(argv[1], "--pipe")) {
+        if (argc != 2) return 2;
+        return protocol();
+    }
     if (argc >= 2 && !strcmp(argv[1], "--bench")) {
-        size_t maxbits = argc > 2 ? (size_t)strtoull(argv[2], NULL, 10) : 8192;
-        int samples = argc > 3 ? atoi(argv[3]) : 7;
+        if (argc > 4) return 2;
+        size_t maxbits = 8192, sample_count = 7;
+        if ((argc > 2 && decimal_size(argv[2], &maxbits)) ||
+            (argc > 3 && decimal_size(argv[3], &sample_count)) ||
+            maxbits > 1048576 || sample_count > 31) return 2;
+        int samples = (int)sample_count;
         static const size_t sizes[] = {
             31,32,33,63,64,65,127,128,129,255,256,257,
             511,512,513,1023,1024,1025,2047,2048,2049,4096,8192,
