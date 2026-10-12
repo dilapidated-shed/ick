@@ -1,4 +1,4 @@
-module Run
+module LayoutRun
 import Data.List
 import Data.So
 import System

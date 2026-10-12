@@ -1,4 +1,4 @@
-module Gate
+module LayoutGate
 import Data.List
 import Data.Maybe
 import Data.String

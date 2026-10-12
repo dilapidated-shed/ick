@@ -48,8 +48,8 @@ stable LSD sorting and reinsertion. Sorting uses two sequential bucket tapes;
 RAM checks are distinguished from modeled tape moves. Full packed rectangles
 with active correction remain too large for this profile.
 
-All five required defects propagate nonzero statuses through Run.idr; their
-actual stdout, stderr, candidate, gate and outer statuses are retained. Gate.idr
+All five required defects propagate nonzero statuses through LayoutRun.idr; their
+actual stdout, stderr, candidate, gate and outer statuses are retained. LayoutGate.idr
 compares the whole reference and an explicit dynamic-import allowlist.
 
 Pinned Idriç exposed several source errors during generation: numeric lists
@@ -60,3 +60,11 @@ The sources were corrected in Idriç and no other-language oracle was used.
 The discarded attempts and their failures remain described here. Generated
 process code uses the existing escaped System seam, with an explicit fixed
 stderr redirection so negative evidence survives the outer runner.
+
+Hosted qualification first ran MUL-1 and MUL-2 in one checkout and exposed a
+module-cache collision: both helpers were originally named Gate and Run.
+The pinned compiler reused MUL-1's Run.ttc and invoked its older argument
+contract. The layout helpers now have unique LayoutGate/LayoutRun module and
+file names, job-specific TTC cache directories, and Makefile dependencies that
+rebuild helpers when their compiler command changes. The combined qualification
+sequence is required locally too; it also catches historical stale caches.

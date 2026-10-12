@@ -36,14 +36,14 @@ $(OUTPUT):
 $(OUTPUT)/candidate: $(SOURCES) $(HEADERS) | $(OUTPUT)
 	$(ICK_CC) $(FLAGS) $(SOURCES) -o $@
 
-$(OUTPUT)/oracle: $(GENERATED)/Oracle.idr | $(OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(GENERATED) --output-dir $(OUTPUT) $< -o oracle
+$(OUTPUT)/oracle: $(GENERATED)/Oracle.idr Makefile | $(OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(GENERATED) --build-dir $(OUTPUT)/idric-cache --output-dir $(OUTPUT) $< -o oracle
 
-$(OUTPUT)/gate: $(GENERATED)/Gate.idr | $(OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(GENERATED) --output-dir $(OUTPUT) $< -o gate
+$(OUTPUT)/gate: $(GENERATED)/Gate.idr Makefile | $(OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(GENERATED) --build-dir $(OUTPUT)/idric-cache --output-dir $(OUTPUT) $< -o gate
 
-$(OUTPUT)/runner: $(GENERATED)/Run.idr | $(OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(GENERATED) --output-dir $(OUTPUT) $< -o runner
+$(OUTPUT)/runner: $(GENERATED)/Run.idr Makefile | $(OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(GENERATED) --build-dir $(OUTPUT)/idric-cache --output-dir $(OUTPUT) $< -o runner
 
 $(OUTPUT)/scalar-v1.tsv: $(OUTPUT)/oracle
 	$< > $@
@@ -94,23 +94,23 @@ $(LAYOUT_OUTPUT)/frames-candidate: $(FRAME_SOURCES) $(LAYOUT_HEADERS) | $(LAYOUT
 $(LAYOUT_OUTPUT)/packed-candidate: $(PACKED_SOURCES) $(LAYOUT_HEADERS) | $(LAYOUT_OUTPUT)
 	$(ICK_CC) $(FLAGS) $(PACKED_SOURCES) -o $@
 
-$(LAYOUT_OUTPUT)/network-generator: $(LAYOUT_GENERATED)/NetworkGenerator.idr | $(LAYOUT_OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --output-dir $(LAYOUT_OUTPUT) $< -o network-generator
+$(LAYOUT_OUTPUT)/network-generator: $(LAYOUT_GENERATED)/NetworkGenerator.idr Makefile | $(LAYOUT_OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --build-dir $(LAYOUT_OUTPUT)/idric-cache --output-dir $(LAYOUT_OUTPUT) $< -o network-generator
 
-$(LAYOUT_OUTPUT)/packed-oracle: $(LAYOUT_GENERATED)/LayoutOracle.idr | $(LAYOUT_OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --output-dir $(LAYOUT_OUTPUT) $< -o packed-oracle
+$(LAYOUT_OUTPUT)/packed-oracle: $(LAYOUT_GENERATED)/LayoutOracle.idr Makefile | $(LAYOUT_OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --build-dir $(LAYOUT_OUTPUT)/idric-cache --output-dir $(LAYOUT_OUTPUT) $< -o packed-oracle
 
-$(LAYOUT_OUTPUT)/gate: $(LAYOUT_GENERATED)/Gate.idr | $(LAYOUT_OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --output-dir $(LAYOUT_OUTPUT) $< -o gate
+$(LAYOUT_OUTPUT)/gate: $(LAYOUT_GENERATED)/LayoutGate.idr Makefile | $(LAYOUT_OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --build-dir $(LAYOUT_OUTPUT)/idric-cache --output-dir $(LAYOUT_OUTPUT) $< -o gate
 
-$(LAYOUT_OUTPUT)/runner: $(LAYOUT_GENERATED)/Run.idr | $(LAYOUT_OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --output-dir $(LAYOUT_OUTPUT) $< -o runner
+$(LAYOUT_OUTPUT)/runner: $(LAYOUT_GENERATED)/LayoutRun.idr Makefile | $(LAYOUT_OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --build-dir $(LAYOUT_OUTPUT)/idric-cache --output-dir $(LAYOUT_OUTPUT) $< -o runner
 
-$(LAYOUT_OUTPUT)/operator-oracle: $(LAYOUT_GENERATED)/OperatorOracle.idr | $(LAYOUT_OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --output-dir $(LAYOUT_OUTPUT) $< -o operator-oracle
+$(LAYOUT_OUTPUT)/operator-oracle: $(LAYOUT_GENERATED)/OperatorOracle.idr Makefile | $(LAYOUT_OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --build-dir $(LAYOUT_OUTPUT)/idric-cache --output-dir $(LAYOUT_OUTPUT) $< -o operator-oracle
 
-$(LAYOUT_OUTPUT)/bit-oracle: $(LAYOUT_GENERATED)/BitOracle.idr | $(LAYOUT_OUTPUT)
-	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --output-dir $(LAYOUT_OUTPUT) $< -o bit-oracle
+$(LAYOUT_OUTPUT)/bit-oracle: $(LAYOUT_GENERATED)/BitOracle.idr Makefile | $(LAYOUT_OUTPUT)
+	$(ORACLE_IDRIC) --cg chez --source-dir $(LAYOUT_GENERATED) --build-dir $(LAYOUT_OUTPUT)/idric-cache --output-dir $(LAYOUT_OUTPUT) $< -o bit-oracle
 
 $(LAYOUT_OUTPUT)/bit-operators.tsv: $(LAYOUT_OUTPUT)/bit-oracle
 	$< > $@
