@@ -55,7 +55,19 @@ exact_status phase_layer_prepare(unsigned precision,unsigned axes,uint64_t budge
     for (unsigned earlier=0;earlier<axis;++earlier)
       if (embed(1u<<axis)&embed(1u<<earlier)) { status=EXACT_INVALID; goto done; }
   }
-  for (unsigned frequency=0;frequency<16;++frequency) TRY(frame_phase_prepare(embed(frequency),&plan->schedules[frequency],&work));
+  /* The projection is independent of frequency. Prepare each accepted frame
+   * once, then evaluate all 16 characters against that same matrix. */
+  for (unsigned frequency=0;frequency<16;++frequency) plan->schedules[frequency].frequency=embed(frequency);
+  for (unsigned identity=0;identity<944;++identity) {
+    frame_role role; frame_matrix matrix; TRY(frame_role_at(BINARY_LABELS,identity,&role));
+    for (unsigned node=0;node<26;++node) {
+      unsigned stage=node==0 ? 0 : node==25 ? 2 : (node-1)/8;
+      int time=node==0 ? -1 : node==25 ? 8 : (int)((node-1)%8);
+      TRY(frame_projection(BINARY_LABELS,&role,stage,time,&matrix)); work.matrix_entries+=4096;
+      for (unsigned frequency=0;frequency<16;++frequency)
+        plan->schedules[frequency].phases[node][identity]=(unsigned char)frame_binary_phase(&matrix,embed(frequency));
+    }
+  }
   TRY(initialize_values(&plan->spectra,944*16,plan->capacity));
   TRY(initialize_values(&plan->roles,944,plan->capacity));
   TRY(initialize_values(&plan->results,944*plan->slots,plan->capacity));
@@ -71,6 +83,10 @@ void phase_layer_clear(phase_layer_plan *plan) {
   if (!plan) return;
   clear_values(plan->spectra,944*16); clear_values(plan->roles,944); clear_values(plan->results,944*plan->slots);
   exact_clear(&plan->temporary.real); exact_clear(&plan->temporary.imaginary); free(plan);
+}
+exact_status phase_layer_describe(const phase_layer_plan *plan,phase_layer_trace *out) {
+  if (!plan || !out) return EXACT_INVALID;
+  *out=plan->trace; return EXACT_OK;
 }
 static exact_status disk_value(const exact_gaussian *value,unsigned precision) {
   if (!exact_valid(&value->real) || !exact_valid(&value->imaginary)

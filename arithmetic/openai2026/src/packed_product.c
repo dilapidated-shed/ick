@@ -149,6 +149,9 @@ exact_status packed_product_observed(const exact_gaussian *first,const exact_gau
     observed.left_bits[index]=exact_bits(&packed[left[index]]); observed.right_bits[index]=exact_bits(&packed[right[index]]);
     ++observed.calls;
     status=provider->multiply(&products[index],&packed[left[index]],&packed[right[index]]);
+#ifdef MUTANT_ONE_PRODUCT
+    if (index==1 && status==EXACT_OK) status=exact_set(&products[index],0,0);
+#endif
     packed[left[index]].sign=left_sign; packed[right[index]].sign=right_sign;
     if (status!=EXACT_OK) goto done;
     if (!exact_valid(&products[index]) || products[index].binary_scale || products[index].sign<0) { status=EXACT_INVALID; goto done; }
