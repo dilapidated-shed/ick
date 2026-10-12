@@ -6,7 +6,7 @@ host	phase	5208	0	0	c57ae1b5dd52bf22fa6235318c49b1cda96acd8d8e1bb21ffce9b5346120
 host	packed	1824	0	0	3ea051b8a930379bee1c1b14c2b678c69ce936dad432f3ace0be80054223a11b
 host	refusals	29	0	0	62a5fb0a7f639724f5a63b91d81a1d936d5dad8cced12a64850dba19f82c4a50
 host	candidate-ELF64-x86_64	0	0	0	4349955b171136c41710b07544eef62e8831a54314f8a31a52360192b98148ed
-host	combined-MUL1-MUL3-command	33591	0	0	check mutants check-numerical mutants-numerical
+host	combined-MUL1-MUL3-positive-records	259349	0	0	check mutants check-numerical mutants-numerical
 published-fixed	admission	1	3	0	unsupported-h100-Delta-row-header-provider
 native-ARM	acceptance	0	NOT_RUN	NOT_RUN	pending-ARM2
 Android-runtime	acceptance	0	NOT_RUN	NOT_RUN	pending-MUL6
