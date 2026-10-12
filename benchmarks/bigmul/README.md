@@ -60,11 +60,16 @@ Run the adversarial suite:
 python3 benchmarks/bigmul/abi/check_mb02.py
 ```
 
-CI runs it separately on native x86-64 and ARM64. This is a **first
-MB-02 implementation candidate**, not completion of the entire MB-02
-envelope: comprehensive sanitizer/32-bit qualification, fault-injected
-allocation failure, arbitrary out-of-bounds detection, independent AICI
-acceptance and real ARM32 target evidence remain separate work. See
+`python3 benchmarks/bigmul/abi/check_mb02_extended.py` additionally exercises
+host AddressSanitizer/UBSan, a write beyond the immediate guard, all eight
+protocol allocation sites, all three benchmark allocations, and an overflow
+check bypass. LeakSanitizer is separately disabled in the restricted container;
+this does not claim leak acceptance. The driver probes ordinary 32-bit builds
+and records missing headers/runtime as NOT_RUN.
+
+CI runs the suites separately on native x86-64 and ARM64. Full 32-bit/Android
+qualification, independent AICI acceptance and real ARM32 target evidence
+remain separate work. See
 [Flexible Pipes MB-02 #101](https://github.com/isomorphisms/flexible-pipes/issues/101).
 
 ## Tests, workloads, and interpretation
