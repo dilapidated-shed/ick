@@ -11,7 +11,7 @@ unsigned oracle_decode(unsigned format, unsigned code)
     case 1: return ick_float_bits(e4m3_to_float(e4m3_from_code((ick_byte)code)));
     case 2: return ick_float_bits(e5m2_to_float(e5m2_from_code((ick_byte)code)));
     case 3: return ick_float_bits(e3m2_to_float(e3m2_from_code((ick_byte)code)));
-    case 4: return ick_float_bits(e5m3_to_float(e5m3_from_code((ick_byte)code)));
+    case 4: return ick_float_bits(ootomo_e5m3_to_float(ootomo_e5m3_from_code((ick_byte)code)));
     default: return 0;
     }
 }
@@ -25,8 +25,8 @@ unsigned oracle_encode(unsigned format, unsigned bits)
     case 2: return e5m2_code(e5m2_from_float(value));
     case 3: return e3m2_code(e3m2_from_float(value));
     case 4: {
-        E5M3 out = e5m3_from_code(0);
-        return e5m3_from_float(value, &out) ? e5m3_code(out) : 0x10000u;
+        OotomoE5M3 out = ootomo_e5m3_from_code(0);
+        return ootomo_e5m3_from_float(value, &out) ? ootomo_e5m3_code(out) : 0x10000u;
     }
     default: return 0x10000u;
     }
@@ -81,7 +81,7 @@ static float oracle_packed_decode(unsigned format, unsigned code)
 {
     switch (format) {
     case 3: return e3m2_to_float(e3m2_from_code((ick_byte)code));
-    case 4: return e5m3_to_float(e5m3_from_code((ick_byte)code));
+    case 4: return ootomo_e5m3_to_float(ootomo_e5m3_from_code((ick_byte)code));
     default: return 0.0f;
     }
 }

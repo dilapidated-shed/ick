@@ -27,10 +27,17 @@ An explicit compiler representation-selection/lowering stage is still owed.
 | UE5M3 | 1 byte, unsigned Ootomo–Naruse storage | No direct arithmetic |
 | E5M3 | 9 meaningful bits in a 16-bit scalar container | Signed `+`/`-` directly; multiply/divide require explicit Float16 |
 
-UE5M3 ports the existing C `E5M3` Ootomo–Naruse byte codec from
+UE5M3 ports the explicitly named C `OotomoE5M3` Ootomo–Naruse byte codec from
 `ick/include/ick/imprecise.h`; the D name makes its unsigned storage role
-explicit. Signed E5M3 is a separate nine-bit arithmetic format specified in
+explicit; it is not NVIDIA/PTX UE5M3 scaling. Signed E5M3 is a separate nine-bit arithmetic format specified in
 `docs/signed-e5m3.md`.
+
+The C header/oracle names follow
+[the signed FP8 correction](https://github.com/isomorphisms/flexible-pipes/issues/83).
+That API propagation changes no signed nine-bit D arithmetic, D storage name,
+locked runtime, or packed-memory compiler semantics. The C oracle now calls
+`ootomo_e5m3_*` only for the unsigned codec; its independent `signed_e5m3_*`
+integer-lattice oracle is unchanged.
 
 ```d
 import icky.imprecise;

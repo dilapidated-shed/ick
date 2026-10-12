@@ -67,10 +67,10 @@ main(void)
         return 33;
 
     for (code = 0; code < 256; ++code) {
-        E5M3 value = e5m3_from_code((ick_byte)code);
-        E5M3 round_tripped;
-        if (!e5m3_from_float(e5m3_to_float(value), &round_tripped)
-            || e5m3_code(round_tripped) != code)
+        OotomoE5M3 value = ootomo_e5m3_from_code((ick_byte)code);
+        OotomoE5M3 round_tripped;
+        if (!ootomo_e5m3_from_float(ootomo_e5m3_to_float(value), &round_tripped)
+            || ootomo_e5m3_code(round_tripped) != code)
             return 40;
     }
 

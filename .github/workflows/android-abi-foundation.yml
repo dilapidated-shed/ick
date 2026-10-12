@@ -218,7 +218,7 @@ jobs:
           ! grep -Eq '__aeabi_d|__(add|sub|mul|div)df3' \
             /tmp/ick-imprecise.undefined
 
-          for kind in E5M3 CIRCLE CIRCLE_ROTATION_MIX; do
+          for kind in OOTOMO_E5M3 CIRCLE CIRCLE_ROTATION_MIX; do
             if "$ick" "${target_flags[@]}" -std=c11 -O2 -ffreestanding -nostdinc \
                 -Iick/include -DTEST_$kind \
                 -c qualification/imprecise-types/reject-arithmetic.c \
@@ -399,7 +399,7 @@ jobs:
 
           PASS: ICK compiler built and its own installed `cc1` was used
 
-          PASS: Float16/E4M3/E5M2/E3M2/E5M3 and Circle96 compiled with their intended arithmetic/category boundaries
+          PASS: Float16/E4M3/E5M2/E3M2/OotomoE5M3 and Circle96 compiled with their intended arithmetic/category boundaries
 
           PASS: expected ELF class/machine, PIC object, Android API 21 link,
           exported scalar boundary, mismatched-target refusal, and the ABI's
