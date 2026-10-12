@@ -10,6 +10,10 @@ G : Type
 G = (Integer,Integer)
 A : Type
 A = List G
+finiteIndices : Integer -> List Integer
+finiteIndices count = if count<=0 then [] else [0..count-1]
+indices : List item -> List Integer
+indices values = finiteIndices (cast (length values))
 
 at : Integer -> List item -> item -> item
 at position values fallback = fromMaybe fallback (lookup position (zip (the (List Integer) [0..cast (length values)-1]) values))
@@ -66,16 +70,16 @@ monomial ring exponent values = map moved [0..ring-1] where
 
 slot : List Integer -> Integer -> Integer -> Integer
 slot lengths axis bit =
-  sum [1 | level <- [0..bit-1],other <- lengths,logarithm other>level] +
-  sum [1 | earlier <- [0..axis-1],logarithm (at earlier lengths 1)>bit]
+  sum [1 | level <- finiteIndices bit,other <- lengths,logarithm other>level] +
+  sum [1 | earlier <- finiteIndices axis,logarithm (at earlier lengths 1)>bit]
 axisOffset : List Integer -> Integer -> Integer
 axisOffset lengths axis = sum (map logarithm (take (cast axis) lengths))
 location : List Integer -> Integer -> Integer
 location lengths logical = sum [((logical `div` power (axisOffset lengths axis+bit)) `mod` 2)*power (slot lengths axis bit)
-  | axis <- [0..cast (length lengths)-1],bit <- [0..logarithm (at axis lengths 1)-1]]
+  | axis <- indices lengths,bit <- finiteIndices (logarithm (at axis lengths 1))]
 reversed : List Integer -> Integer -> Integer
 reversed lengths logical = sum [((logical `div` power (axisOffset lengths axis+bit)) `mod` 2)*power (axisOffset lengths axis+logarithm (at axis lengths 1)-1-bit)
-  | axis <- [0..cast (length lengths)-1],bit <- [0..logarithm (at axis lengths 1)-1]]
+  | axis <- indices lengths,bit <- finiteIndices (logarithm (at axis lengths 1))]
 stored : List Integer -> Integer -> Integer
 stored lengths frequency = location lengths (reversed lengths frequency)
 records : List Integer -> Integer
@@ -117,7 +121,7 @@ twiddle ring lengths position opposite values = concatMap moved [0..records leng
   moved : Integer -> A
   moved address =
     let exponent = -sum [(2*ring `div` power (position+1))*((address `div` power (slot lengths axis position)) `mod` 2)*
-          sum [((address `div` power (slot lengths axis bit)) `mod` 2)*power bit | bit <- [0..position-1]]
+          sum [((address `div` power (slot lengths axis bit)) `mod` 2)*power bit | bit <- finiteIndices position]
           | axis <- [0..cast (length lengths)-1],logarithm (at axis lengths 1)>position]
         polynomial=[at (address*ring+coefficient) values (0,0) | coefficient <- [0..ring-1]] in
     monomial ring (if opposite then -exponent else exponent) polynomial
@@ -145,7 +149,7 @@ directDFTSum ring lengths opposite values = map value [(destination,coefficient)
     contribution : Integer -> G
     contribution source =
       let exponent=sum [(2*ring `div` size)*coordinate lengths source axis*coordinate lengths destination axis
-                        | (axis,size) <- zip (the (List Integer) [0..cast (length lengths)-1]) lengths]
+                        | (axis,size) <- zip (indices lengths) lengths]
           polynomial=[at (source*ring+index) values (0,0) | index <- [0..ring-1]] in
       at coefficient (monomial ring (if opposite then exponent else -exponent) polynomial) (0,0)
 
@@ -162,7 +166,9 @@ checkDFT ring lengths opposite input result = do
   let rounds=foldl max 0 (map logarithm lengths)
   let exact=directDFTSum ring lengths opposite (if opposite then unstore ring lengths input else input)
   let actual=if opposite then result else unstore ring lengths result
-  assert (all (\(computed,ideal) => squared (difference (scale count computed) ideal)<2*rounds*rounds*count*count) (zip actual exact))
+  let mismatches = filter (\(index,(computed,ideal)) => squared (difference (scale count computed) ideal) >= 2*rounds*rounds*count*count) (zip (indices actual) (zip actual exact))
+  traverse_ (\(index,(computed,ideal)) => putStrLn ("DFT mismatch ring=" ++ show ring ++ " lengths=" ++ show lengths ++ " opposite=" ++ show opposite ++ " index=" ++ show index ++ " grid=" ++ show computed ++ " ideal-sum=" ++ show ideal)) (take 4 mismatches)
+  assert (null mismatches)
 
 input : Integer -> Integer -> Integer -> Bool -> Integer -> A
 input precision length test convolution second = map value [0..length-1] where
@@ -279,9 +285,18 @@ main = do
       transformProfile 9 4 [4,2] 1
       transformProfile 33 4 [4,2,2] 2
       transformProfile 101 8 [8,4] 3
+      transformProfile 9 2 [2,1,2,2] 4
     "convolution" => do
       convolutionProfile 9 2 [2,2] 0
       convolutionProfile 9 4 [4,2] 1
       convolutionProfile 33 4 [4,2,2] 2
       convolutionProfile 101 8 [8,4] 3
+      convolutionProfile 9 2 [2,1,2,2] 4
+    "refusals" => traverse_ (\(name,status) => putStrLn ("refusal\t" ++ name ++ "\t" ++ show status))
+      (the (List (String,Integer)) [("precision-low",3),("precision-high",3),("ring",3),("axis-length",3),("no-axes",3),
+       ("record-limit",1),("record-budget",1),("published-fixed",3),("phase-precision",3),("phase-axes",3),("phase-budget",1),
+       ("fresh-plan",3),("phase-disk",3),("transform-disk",3),("phase-grid",3),("transform-grid",3),("nonprimary-X",3),
+       ("phase-alias",3),("transform-alias",3),("trace-alias",3),("convolution-margin",3),("convolution-provider",3),
+       ("convolution-radius",3),("phase-capacity",1),("transform-capacity",1),("packed-precision",3),("packed-ring",3),
+       ("packed-alias",3),("packed-capacity",1)])
     _ => exitWith (ExitFailure 10)

@@ -54,7 +54,7 @@ frame calls per layer. Each invocation has an unchanged source bank; half
 edges can add at most one fractional bit per stage. Character encoding,
 three stages and b^D thus require at most p+11 fractional bits. An invocation's
 intermediate coefficient is bounded by 16 times its incoming bound; three
-stages and decoding need less than 2^17 magnitude. The supplied 32 fractional
+stages, decoding and the b temporary have magnitude below 2^18. The 32 fractional
 and 32 magnitude guards are conservative. These are model-specific bounds,
 not the published Delta or the paper's factor-two row reservation claim.
 
@@ -88,14 +88,24 @@ The result is cyclic convolution in the axes, negacyclic in y, divided by rM.
 The declared final numerator width includes the log2 M rescaling allowance.
 Conventional short multiplication remains explicitly reduced-model-only.
 
-Candidate execution has returned status zero for 18,112 transform-stage,
-7,200 convolution-stage/provider and 706 child/wrap records, and for 29
-explicit refusal/transaction checks. The independent NumericOracle directly
-sums tensor butterflies, ring DFTs and quadratic ring convolution; it is
-pending completion and byte comparison at this checkpoint. Its first drafts
-used reserved names total/record and the Nat maximum function for a list;
-the retained corrections use gaussianSum, address and an Integer max fold.
+The final independent byte gates pass 18,240 transform-stage, 7,584
+convolution-stage/provider, 706 child/wrap, 5,208 phase and 1,824 packed records,
+plus 29 explicit refusal/transaction records: 33,591 in total. NumericOracle
+directly sums tensor butterflies, ring DFTs and quadratic ring convolution,
+and verifies the squared approximation bounds against its direct values.
+Mixed lengths include the identity axis of shape 2x1x2x2. Its first drafts
+used reserved names total/record/prefix and the Nat maximum function for a
+list. The retained corrections use gaussianSum, address, finiteIndices and
+an Integer max fold. Idriç ranges count downward when their endpoint is below
+their start, so empty index sets now have an explicit empty-list case. The
+direct DFT gate caught that oracle error before candidate acceptance.
 
-This is a partial implementation checkpoint. Independent transform/convolution
-comparison, provenance and required defect gates are pending. No MUL-5/ARM-2
-dependency is admitted from this branch yet.
+The combined MUL-1 check/mutants and MUL-3 check-numerical/mutants-numerical
+command exits zero. All nine numerical defects are detected: inverse phase,
+wrap sign, LB order, one packed product, r/M scale, early rounding, zero,
+external oracle bypass and forced exit. The byte-matching bypass has
+candidate=0, gate=9, outer=9. Forced exit retains matching bytes with
+candidate=57, gate=0, outer=57. Unique modules and per-job TTC caches preserve
+the actual helper identity. These reduced contracts are locally qualified;
+exact-head hosted CI is configured and pending. Full published, native and
+physical admission remain outside this qualification.

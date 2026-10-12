@@ -153,9 +153,10 @@ int main(int argc,char **argv) {
   }
   if (strcmp(argv[1],"transform") && strcmp(argv[1],"convolution")) return 43;
   int convolution=!strcmp(argv[1],"convolution");
-  const unsigned a[]={2,2},b[]={4,2},c[]={4,2,2},d[]={8,4};
+  const unsigned a[]={2,2},b[]={4,2},c[]={4,2,2},d[]={8,4},e[]={2,1,2,2};
   if (!profile(9,2,a,2,0,convolution) || !profile(9,4,b,2,1,convolution)
-      || !profile(33,4,c,3,2,convolution) || !profile(101,8,d,2,3,convolution)) return 45;
+      || !profile(33,4,c,3,2,convolution) || !profile(101,8,d,2,3,convolution)
+      || !profile(9,2,e,4,4,convolution)) return 45;
   if (ferror(stdout)) return 46;
 #ifdef MUTANT_FORCE_EXIT
   return 57;
