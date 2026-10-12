@@ -35,6 +35,38 @@ python3 compare.py baseline.csv candidate.csv > paired.csv
 
 `candidate.example.c` is only an adapter forwarding to the default schoolbook routine. Replace it with ICK's real component. Running the example does not demonstrate any speedup.
 
+## MB-02: bounded exactness protocol
+
+The \`--pipe\` interface now accepts at most **1,048,576 input bytes per
+record**, excluding the line terminator, with **exactly two** signed
+hexadecimal operands separated by whitespace (optional \`0x\` prefixes).
+The last record may omit its terminating newline. Blank or whitespace-only
+lines are ignored. Extra operands, nonhex data, embedded NULs and oversized
+records fail nonzero. A malformed *later* record may follow earlier completed
+output lines; the process is not transactional across records.
+
+In \`--pipe\` correctness mode only, the selected C implementation runs
+twice with distinct output prefills and sentinel guard words. Input-array
+mutation, omitted output words and writes one word before/after the declared
+output fail before printing that result. Independent Python exact integers
+must still reject semantically wrong arithmetic; guards are not a substitute
+for that oracle. The timed \`--bench\` path remains uninstrumented to preserve
+its measurement meaning. Numeric options must be full positive decimal
+values, with maximum requested size 1,048,576 bits and samples 1–31.
+
+Run the adversarial suite:
+
+\`\`\`sh
+python3 benchmarks/bigmul/abi/check_mb02.py
+\`\`\`
+
+CI runs it separately on native x86-64 and ARM64. This is a **first
+MB-02 implementation candidate**, not completion of the entire MB-02
+envelope: comprehensive sanitizer/32-bit qualification, fault-injected
+allocation failure, arbitrary out-of-bounds detection, independent AICI
+acceptance and real ARM32 target evidence remain separate work. See
+[Flexible Pipes MB-02 #101](https://github.com/isomorphisms/flexible-pipes/issues/101).
+
 ## Tests, workloads, and interpretation
 
 `--pipe` consumes lines of two hexadecimal integers and writes their exact product in hexadecimal. The Python acceptance test sends the **same** deterministic corpus through schoolbook and candidate, across bit-width boundaries and signed, sparse, alternating, dense, random, square, and unbalanced cases. This checks the wrapper as well as the arithmetic, with an optional second oracle in `bc`.
