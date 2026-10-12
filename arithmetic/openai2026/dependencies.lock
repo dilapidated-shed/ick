@@ -29,5 +29,7 @@ resampling_profiles	101/12/17/4;128/15/23/5;256/31/38/6;p/s/t/alpha
 resampling_reference_records_sha256	05b0b142bacd634f77c3edfc1179ef7ab58c6f65b6eeca9c41559d9222a3251c
 resampling_reference_precision	p+128;Euler-pi;binary-log-series;reciprocal-positive-exponential
 accepted_mul_3	32a7ec795013358c8c89493dda5406a681c28adc
-accepted_mul_3_level	local-reduced-numerical-gates;exact-head-CI-running
+accepted_mul_3_level	local-reduced-numerical-gates;exact-head-CI-success;run-38318375204
 accepted_mul_4	f1052245cedea175b8fbe87a8bbdfce2670032b3
+composition_parameter_reference_sha256	329b70a28065d555ff1366796a8c0ccbfefe92dd1f6f8fe99e0eac9ff451d783
+composition_crt_reference_sha256	f8b68eedaaa7ba5725f0ca4c3299f7afa7d33eba8f5bc76afa665c1ca5ccb769
