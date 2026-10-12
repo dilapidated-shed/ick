@@ -9,6 +9,8 @@ nothrow @nogc:
 extern(C) uint oracle_decode(uint format, uint code);
 extern(C) uint oracle_encode(uint format, uint bits);
 extern(C) uint oracle_operation(uint format, uint operation, uint left, uint right);
+extern(C) uint oracle_signed_e5m3_operation(uint operation, uint left, uint right);
+extern(C) uint oracle_signed_e5m3_compare(uint predicate, uint left, uint right);
 extern(C) uint oracle_float16_chain(uint firstOperation, uint secondOperation,
                                     uint left, uint middle, uint right);
 extern(C) uint oracle_packed_operation(uint left_format, uint right_format,
@@ -35,6 +37,7 @@ private bool nan_bits(uint bits)
 static assert(!__traits(compiles, UE5M3.init + UE5M3.init));
 static assert(__traits(compiles, E5M3.init + E5M3.init));
 static assert(__traits(compiles, E5M3.init - E5M3.init));
+static assert(__traits(compiles, -E5M3.init));
 static assert(!__traits(compiles, E5M3.init * E5M3.init));
 static assert(!__traits(compiles, E5M3.init / E5M3.init));
 static assert(E5M3.sizeof == 2);
@@ -138,6 +141,8 @@ void check_signed_e5m3()
         auto decoded = value.to_float();
         uint exponent = (code >> 3) & 0x1fu;
         uint fraction = code & 0x7u;
+        assert((-value).code() == (
+            exponent == 0x1fu && fraction != 0 ? canonicalNaN : (code ^ sign)));
         if (exponent == 0x1fu && fraction != 0)
         {
             assert(nan_bits(bits_of(decoded)));
@@ -149,28 +154,23 @@ void check_signed_e5m3()
 
     assert(E5M3.from_code(0x3ffu).code() == 0x1ffu);
 
-    // Exhaust every signed payload pair for the two native E5M3 operations.
-    // binary32 is only the oracle here: every E5M3 input converts exactly and
-    // its extra precision is far beyond the final three fraction bits.
+    // Exhaust all signed payload pairs against an independently written C
+    // oracle. It uses exact integer units and midpoint binary search, not
+    // binary32 arithmetic or the D ratio quantizer being tested here.
     foreach (uint leftCode; 0 .. 512)
     foreach (uint rightCode; 0 .. 512)
     {
         auto left = E5M3.from_code(cast(ushort)leftCode);
         auto right = E5M3.from_code(cast(ushort)rightCode);
 
-        auto gotAdd = left + right;
-        auto expectedAdd = E5M3.from_float(left.to_float() + right.to_float());
-        if (nan_bits(bits_of(expectedAdd.to_float())))
-            assert(nan_bits(bits_of(gotAdd.to_float())));
-        else
-            assert(gotAdd.code() == expectedAdd.code());
-
-        auto gotSubtract = left - right;
-        auto expectedSubtract = E5M3.from_float(left.to_float() - right.to_float());
-        if (nan_bits(bits_of(expectedSubtract.to_float())))
-            assert(nan_bits(bits_of(gotSubtract.to_float())));
-        else
-            assert(gotSubtract.code() == expectedSubtract.code());
+        assert((left + right).code() ==
+               oracle_signed_e5m3_operation(0, leftCode, rightCode));
+        assert((left - right).code() ==
+               oracle_signed_e5m3_operation(1, leftCode, rightCode));
+        assert(left.equal(right) ==
+               (oracle_signed_e5m3_compare(0, leftCode, rightCode) != 0));
+        assert(left.less(right) ==
+               (oracle_signed_e5m3_compare(1, leftCode, rightCode) != 0));
     }
 
     // Layout and landmarks: s eeeee mmm, bias 15.
@@ -207,12 +207,27 @@ void check_signed_e5m3()
     assert((one - one).code() == positiveZero.code());
     assert((negativeZero + negativeZero).code() == negativeZero.code());
     assert((positiveZero + negativeZero).code() == positiveZero.code());
+    assert((negativeZero - positiveZero).code() == negativeZero.code());
+    assert((-negativeZero).code() == positiveZero.code());
+    assert((-one).code() == negativeOne.code());
+    assert((-infinity).code() == negativeInfinityValue.code());
+
+    // Numerical comparisons have unordered NaNs and equal signed zeros;
+    // no total-order or operator overload is invented for NaNs.
+    auto nan = E5M3.from_code(canonicalNaN);
+    assert(!nan.equal(nan) && !nan.less(nan));
+    assert(negativeZero.equal(positiveZero));
+    assert(!negativeZero.less(positiveZero));
+    assert(!positiveZero.less(negativeZero));
+    assert(negativeOne.less(negativeZero));
+    assert(negativeZero.less(one));
+    assert((-nan).code() == canonicalNaN);
 
     // Multiplication/division are the explicit promotion boundary, not E5M3
     // operators. Addition still has explicit special-value behavior.
     assert(nan_bits(bits_of((infinity + negativeInfinityValue).to_float())));
 
-    puts("PASS: signed nine-bit E5M3 direct arithmetic and explicit domain rules");
+    puts("PASS: signed nine-bit E5M3 add/sub/negate and unordered comparisons against exact C oracle");
 }
 
 void check_storage()

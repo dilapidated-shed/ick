@@ -47,12 +47,15 @@ See [`ick/README.md`](ick/README.md) for the source-ownership rule.
 
 `<ick/imprecise.h>` exposes the five low-precision C representations
 `Float16`, `E4M3`, `E5M2`, `E3M2`, and the unsigned Ootomo–Naruse
-storage format historically named `E5M3`.
+storage format explicitly named `OotomoE5M3`.
 
 The Icky D line names that byte-storage representation `UE5M3` and reserves
 `E5M3` for the signed nine-bit arithmetic type. Signed E5M3 performs `+` and
 `-` directly; multiplication and division require an explicit wider arithmetic
-choice rather than silently widening.
+choice rather than silently widening. The D-qualified `icky.imprecise.UE5M3`
+storage codec is unrelated to NVIDIA/PTX's block-scale UE5M3. Standard signed
+eight-bit arithmetic uses E4M3 or E5M2; the signed nine-bit experiment is not
+evidence for that corrected FP8 requirement.
 
 `<ick/circle.h>` exposes `Circle96`, `Rotation96`, `Reflection96`, and
 `Tangent96` as distinct geometric categories with exact 96-position rotation,

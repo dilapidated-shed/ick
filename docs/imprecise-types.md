@@ -7,7 +7,7 @@ the Idriç/Edriç source layer:
 - `E4M3`
 - `E5M2`
 - `E3M2`
-- `E5M3`
+- `OotomoE5M3`
 
 The C boundary lives in `<ick/imprecise.h>`. The header is freestanding: it
 uses no libc headers and requires only an eight-bit byte, a 32-bit unsigned
@@ -20,7 +20,7 @@ Float16   16 bits
 E4M3       8 bits
 E5M2       8 bits
 E3M2       6 payload bits in one byte
-E5M3       8 bits
+OotomoE5M3       8 bits
 ```
 
 They are distinct C structure types rather than aliases for integer containers.
@@ -36,7 +36,7 @@ functions for those four types.
 
 This intentionally does not route through binary64.
 
-`E5M3` is different. It is the unsigned Ootomo-Naruse eight-bit storage
+`OotomoE5M3` is different. It is the unsigned Ootomo-Naruse eight-bit storage
 format. It has explicit encode/decode operations but no scalar arithmetic
 contract. Because it is a distinct structure type, ordinary C arithmetic on it
 is rejected.
@@ -72,12 +72,12 @@ backend. The six payload bits are one sign bit, three exponent bits, and two
 mantissa bits. E3M2 has subnormals and signed zero but no infinity or NaN
 encoding. Overflow saturates at 28. A source NaN maps to positive zero, matching the current Idriç source policy.
 
-## E5M3
+## OotomoE5M3
 
 ICK follows the Ootomo-Naruse unsigned storage format documented in the ARM
 Thumb backend. The published conversion applies to positive normal binary32
-inputs, so `e5m3_from_float` remains partial and returns failure for values
-outside that domain. `e5m3_to_float` implements the published midpoint
+inputs, so `ootomo_e5m3_from_float` remains partial and returns failure for values
+outside that domain. `ootomo_e5m3_to_float` implements the published midpoint
 reconstruction for every one of the 256 payload codes.
 
 ## Source alignment
@@ -85,9 +85,9 @@ reconstruction for every one of the 256 payload codes.
 The policy comes from the current Idriç work:
 
 - PR #49: Float16 binary32-carrier semantics
-- PR #120: first-class E4M3, E5M2, E3M2, and E5M3 source semantics
+- PR #120: historical first-class E4M3, E5M2, E3M2, and a bare E5M3 storage codec; the corrected C API is explicitly OotomoE5M3.
 
-The E3M2 and E5M3 storage references are also recorded in
+The E3M2 and OotomoE5M3 storage references are also recorded in
 `isomorphisms/idric-arm-thumb`.
 
 ## Qualification
@@ -98,7 +98,7 @@ The host semantic probe checks:
 - every finite positive E4M3 payload;
 - every finite positive E5M2 payload;
 - all 64 E3M2 payloads;
-- all 256 E5M3 payloads;
+- all 256 OotomoE5M3 payloads;
 - representative overflow and tie boundaries;
 - the four arithmetic formats' requantization policy.
 

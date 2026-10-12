@@ -322,6 +322,42 @@ struct E5M3
         else
             return signed_e5m3_add(this, signed_e5m3_negate(other));
     }
+
+    // Negation changes the sign without a floating-point conversion.
+    // Canonicalize all NaN encodings, as binary E5M3 arithmetic does.
+    E5M3 opUnary(string operation)() const nothrow @nogc
+        if (operation == "-")
+    {
+        return signed_e5m3_is_nan(payload)
+            ? signed_e5m3_nan() : signed_e5m3_negate(this);
+    }
+
+    // Explicit numeric predicates avoid defining a total order for NaNs.
+    // These compare the nine-bit values directly, not their float carriers.
+    bool equal(E5M3 other) const nothrow @nogc
+    {
+        ushort left = payload;
+        ushort right = other.payload;
+        if (signed_e5m3_is_nan(left) || signed_e5m3_is_nan(right))
+            return false;
+        if (signed_e5m3_is_zero(left) && signed_e5m3_is_zero(right))
+            return true;
+        return left == right;
+    }
+
+    bool less(E5M3 other) const nothrow @nogc
+    {
+        ushort left = payload;
+        ushort right = other.payload;
+        if (signed_e5m3_is_nan(left) || signed_e5m3_is_nan(right)
+            || (signed_e5m3_is_zero(left) && signed_e5m3_is_zero(right)))
+            return false;
+        bool leftNegative = signed_e5m3_signbit(left);
+        bool rightNegative = signed_e5m3_signbit(right);
+        if (leftNegative != rightNegative)
+            return leftNegative;
+        return leftNegative ? left > right : left < right;
+    }
 }
 
 private enum uint signed_e5m3_sign = 0x0100u;
