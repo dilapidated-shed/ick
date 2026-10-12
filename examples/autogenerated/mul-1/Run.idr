@@ -45,7 +45,14 @@ negative self candidate oracle gate artifact_stem = do
   save (artifact_stem ++ ".outer.status") (show outerStatus ++ "\n")
   Right candidateText <- readFile (artifact_stem ++ ".candidate.status") | _ => pure False
   Right gateText <- readFile (artifact_stem ++ ".gate.status") | _ => pure False
-  let detected = outerStatus/=0 && (candidateText/="0\n" || gateText/="0\n")
+  provenance_only <- if isSuffixOf "/oracle-bypass" candidate then do
+    Right expected <- readFile oracle | _ => pure False
+    Right actual <- readFile (artifact_stem ++ ".stdout.tsv") | _ => pure False
+    let matched = expected==actual && candidateText=="0\n" && gateText=="9\n" && outerStatus==9
+    save (artifact_stem ++ ".bypass-value-match.status") (if matched then "0\n" else "1\n")
+    pure matched
+    else pure True
+  let detected = provenance_only && outerStatus/=0 && (candidateText/="0\n" || gateText/="0\n")
   putStrLn ((if detected then "PASS detected " else "FAIL undetected ") ++ candidate)
   pure detected
 

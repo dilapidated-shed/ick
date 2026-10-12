@@ -73,6 +73,26 @@ static int refusal(void) {
   ok &= scalar_execute(&n,0)==EXACT_INVALID;
   n.side[0].real.limbs=saved; scalar_clear(&n); return ok;
 }
+static int long_chains(void) {
+  exact_dyadic power={0},one={0},result={0}; unsigned char bytes[128]; int ok=0;
+  if (exact_init(&power,40) || exact_init(&one,40) || exact_init(&result,40)) goto done;
+  if (exact_set(&power,1,0) || exact_shift(&power,&power,1024) || exact_set(&one,1,0)
+      || exact_subtract(&result,&power,&one) || result.length!=32 || result.sign!=1) goto done;
+  for (size_t index=0;index<32;++index) if (result.limbs[index]!=UINT32_MAX) goto done;
+  if (exact_add(&result,&result,&one) || result.length!=33 || result.limbs[32]!=1) goto done;
+  for (size_t index=0;index<32;++index) if (result.limbs[index]!=0) goto done;
+  if (exact_subtract(&result,&one,&power) || result.length!=32 || result.sign!=-1) goto done;
+  for (size_t index=0;index<32;++index) if (result.limbs[index]!=UINT32_MAX) goto done;
+  if (exact_set(&power,-1,0) || exact_shift(&power,&power,1023)
+      || exact_serialize(&power,0,bytes,sizeof(bytes)) || bytes[0]!=0x80) goto done;
+  for (size_t index=1;index<sizeof(bytes);++index) if (bytes[index]!=0) goto done;
+  if (exact_shift(&power,&power,1) || exact_serialize(&power,0,bytes,sizeof(bytes))!=EXACT_CAPACITY
+      || bytes[0]!=0x80) goto done;
+  for (size_t index=1;index<sizeof(bytes);++index) if (bytes[index]!=0) goto done;
+  ok=1;
+done:
+  exact_clear(&power); exact_clear(&one); exact_clear(&result); return ok;
+}
 static exact_status stage_record(void *context, unsigned step, const scalar_network *n) {
   unsigned test=*(unsigned *)context;
   for (size_t field=0;field<SCALAR_FIELDS;++field) for (unsigned channel=0;channel<2;++channel) {
@@ -91,7 +111,7 @@ int main(void) {
 #ifdef MUTANT_ORACLE_BYPASS
   return system("cat \"$SCALAR_ORACLE_OUTPUT\"");
 #endif
-  if (!primitives() || !refusal()) return 40;
+  if (!primitives() || !refusal() || !long_chains()) return 40;
   for (unsigned route=0;route<3;++route) for (unsigned test=0;test<67;++test) {
     scalar_network n; if (scalar_init(&n,8)) return 41;
     for (size_t field=0;field<SCALAR_FIELDS;++field) for (unsigned channel=0;channel<2;++channel) {

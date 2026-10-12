@@ -5,9 +5,11 @@ rectangular Gaussian values and the paper's actual eight scalar schedule
 steps for h=6. Forward, inverse and three-call signed swap preserve arbitrary
 auxiliary values. This is a scalar component, not a whole multiplication routine.
 
+Initialization takes a fresh record and leaves canonical zero on failure.
+Clear releases the record's original, independently owned initialized storage.
 Storage belongs to each initialized record. Distinct record buffers must not
-overlap; the same record may be both input and output. All invalid inputs,
-capacity failures and allocation failures leave destinations unchanged.
+overlap; the same record may be both input and output. Checked arithmetic,
+copy, network and serialization failures leave valid destinations unchanged.
 Capacity includes intermediate alignment and additions. Metadata and initialized
 buffers must remain valid for the duration of a call. Calls do not support
 concurrent mutation. Serialization is exact big-endian two's complement at the

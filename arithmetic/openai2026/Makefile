@@ -51,6 +51,7 @@ $(OUTPUT)/scalar-v1.tsv: $(OUTPUT)/oracle
 check: $(OUTPUT) identities $(OUTPUT)/candidate $(OUTPUT)/scalar-v1.tsv $(OUTPUT)/gate $(OUTPUT)/runner
 	$(OUTPUT)/runner one $(OUTPUT)/candidate $(OUTPUT)/scalar-v1.tsv $(OUTPUT)/gate $(OUTPUT)/candidate
 	sha256sum $(SOURCES) $(HEADERS) $(GENERATED)/Oracle.idr $(OUTPUT)/candidate $(OUTPUT)/scalar-v1.tsv > $(OUTPUT)/identities.sha256
+	grep -F 'cf36c5767db82ba4abb4d18be3ea871f24b7b470d34bb08abb7710cf6b62d074' $(OUTPUT)/identities.sha256
 	$(ICK_CC) --version > $(OUTPUT)/compiler-version.txt
 	$(ORACLE_IDRIC) --version > $(OUTPUT)/oracle-compiler-version.txt
 	readelf -h $(OUTPUT)/candidate > $(OUTPUT)/candidate.elf-header

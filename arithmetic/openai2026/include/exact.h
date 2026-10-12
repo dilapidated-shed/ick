@@ -11,6 +11,8 @@ typedef struct {
 } exact_dyadic;
 typedef struct { exact_dyadic real, imaginary; } exact_gaussian;
 
+/* Initialization requires a fresh record. Failure produces canonical zero;
+ * clear releases only its original independently owned initialized storage. */
 exact_status exact_init(exact_dyadic *, size_t capacity);
 void exact_clear(exact_dyadic *);
 exact_status exact_set(exact_dyadic *, int64_t numerator, size_t binary_scale);
