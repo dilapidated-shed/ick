@@ -40,3 +40,23 @@ required defects and dependent APIs are still pending.
 The generated reference record needed public export for its constructor and
 field projections; an export-only record could not be consumed by the separate
 gate. This was corrected in Idriç, preserving its independent arithmetic path.
+
+The ordered line checkpoint now passes 3,928 scalar, parameter, nearest-index
+and A/B0 records. Profiles (p,s,t,alpha) are (101,12,17,4), (128,15,23,5) and
+(256,31,38,6). Every line basis direction, dense signed complex values and
+half-grid inputs are checked. C scans increasing coordinates with upward ties;
+A follows S/2; B0 follows D' times the finite alternating N^-1/2 recipe.
+Each plan charges all coefficient buffers and reserved descriptor storage.
+Arithmetic work is labeled RAM and no multitape speed theorem is claimed.
+
+The independent reference directly sums wider Gaussian kernels and encloses
+the inverse with a higher-precision Neumann matrix, an independently checked
+row norm below one half, and a geometric remainder. It does not call the
+candidate's series or grid products. The gate bounds each line error strictly
+below p^2 2^-p and checks disk membership. Tensor composition, the surrounding
+Fourier identity and all required mutants are still outstanding.
+
+The pinned parser required let expressions in comprehension heads to be
+replaced with typed row functions. All generated iterations use finite ranges.
+Each helper has a component-specific module name to avoid the TTC collision
+observed when MUL-1 and MUL-2 were built in the same checkout.

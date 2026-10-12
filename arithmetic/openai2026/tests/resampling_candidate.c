@@ -9,6 +9,62 @@ static int emit(const exact_dyadic *value,unsigned precision) {
   for (size_t index=0;index<width;++index) printf("%02x",bytes[index]);
   return 1;
 }
+static int set_line_input(exact_gaussian *values,unsigned length,unsigned example,unsigned precision) {
+  for (unsigned index=0;index<length;++index) {
+    int64_t real=example<length ? index==example : (int64_t)((index*7+example*3)%3)-1;
+    int64_t imaginary=example<length ? 0 : (int64_t)((index*11+example*5)%3)-1;
+    size_t scale=example<length ? 0 : example==length ? 1 : precision;
+    if (exact_set(&values[index].real,real,scale) || exact_set(&values[index].imaginary,imaginary,scale)) return 0;
+  }
+  return 1;
+}
+static int line_checks(unsigned precision,unsigned source,unsigned target,unsigned alpha) {
+  resampling_parameters parameters;
+  exact_status status=resampling_admit(precision,source,target,alpha,65536,&parameters);
+  if (status!=EXACT_OK) { fprintf(stderr,"parameter refusal p=%u s=%u t=%u alpha=%u status=%u\n",precision,source,target,alpha,status); return 0; }
+  resampling_plan *plan=NULL; status=resampling_prepare(&parameters,65536,&plan);
+  if (status!=EXACT_OK) { fprintf(stderr,"preparation refusal p=%u status=%u\n",precision,status); return 0; }
+  int success=0; exact_gaussian input[64]={0},output[64]={0};
+  for (unsigned index=0;index<64;++index)
+    if (exact_init(&input[index].real,16) || exact_init(&input[index].imaginary,16)
+        || exact_init(&output[index].real,16) || exact_init(&output[index].imaginary,16)) goto done;
+  printf("line-parameter\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",precision,source,target,alpha,
+         parameters.gaussian_radius,parameters.error_radius,parameters.neumann_terms);
+  for (unsigned index=0;index<source;++index)
+    printf("nearest\t%u\t%u\t%u\t%u\t%u\n",precision,source,target,index,resampling_nearest(&parameters,index));
+  for (unsigned direction=0;direction<2;++direction) {
+    unsigned input_length=direction ? target : source,output_length=direction ? source : target;
+    for (unsigned example=0;example<input_length+2;++example) {
+      if (!set_line_input(input,input_length,example,precision)) goto done;
+      status=direction ? resampling_B0(plan,input,input_length,output,output_length)
+                       : resampling_A(plan,input,input_length,output,output_length);
+      if (status!=EXACT_OK) { fprintf(stderr,"line refusal p=%u direction=%u case=%u status=%u\n",precision,direction,example,status); goto done; }
+      for (unsigned index=0;index<output_length;++index) {
+        printf("line\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t",direction ? "B0" : "A",precision,source,target,alpha,example,index);
+        if (!emit(&output[index].real,precision)) goto done;
+        putchar('\t'); if (!emit(&output[index].imaginary,precision)) goto done;
+        putchar('\n');
+      }
+    }
+  }
+  if (resampling_A(plan,input,source,output,target-1)!=EXACT_INVALID
+      || resampling_A(plan,input,source,input,target)!=EXACT_INVALID) goto done;
+  if (exact_set(&input[0].real,2,0) || resampling_A(plan,input,source,output,target)!=EXACT_INVALID) goto done;
+  resampling_work work;
+  if (resampling_receipt(plan,&parameters,&work)) goto done;
+  fprintf(stderr,"line-work\tp=%u\ts=%u\tt=%u\talpha=%u\tcoefficients=%llu\tallocated_limb_bytes=%llu\tallocated_descriptor_bytes=%llu\tram_products=%llu\tram_additions=%llu\tselection_records=%llu\tline_calls=%llu\tseries_terms=%llu\tpeak_scalar_limb_bytes=%llu\n",
+          precision,source,target,alpha,(unsigned long long)work.coefficient_count,(unsigned long long)work.allocated_limb_bytes,
+          (unsigned long long)work.allocated_descriptor_bytes,(unsigned long long)work.ram_products,(unsigned long long)work.ram_additions,
+          (unsigned long long)work.selection_records,(unsigned long long)work.line_calls,
+          (unsigned long long)work.scalar.series_terms,(unsigned long long)work.scalar.peak_limb_bytes);
+  success=1;
+done:
+  for (unsigned index=0;index<64;++index) {
+    exact_clear(&input[index].real); exact_clear(&input[index].imaginary);
+    exact_clear(&output[index].real); exact_clear(&output[index].imaginary);
+  }
+  resampling_clear(plan); return success;
+}
 int main(void) {
   certified_scalar_context refused;
   if (certified_scalar_init(&refused,100)!=EXACT_INVALID || refused.pi.lower.limbs
@@ -65,5 +121,6 @@ int main(void) {
     if (context.work.live_limb_bytes!=4*32*sizeof(uint32_t)) return 48;
     certified_scalar_clear(&context);
   }
+  if (!line_checks(101,12,17,4) || !line_checks(128,15,23,5) || !line_checks(256,31,38,6)) return 50;
   exact_clear(&output.real); exact_clear(&output.imaginary); return ferror(stdout) ? 49 : 0;
 }

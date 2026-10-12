@@ -26,4 +26,25 @@ exact_status certified_root(certified_scalar_context *, uint32_t j,uint32_t k,
 exact_status certified_exponential(certified_scalar_context *,uint32_t j,uint32_t k,
                                      int positive,unsigned binary_scale,
                                      exact_dyadic *,scalar_certificate *);
+typedef struct {
+  unsigned precision,source_length,target_length,alpha;
+  unsigned gaussian_radius,error_radius,neumann_terms;
+} resampling_parameters;
+typedef struct resampling_plan resampling_plan;
+typedef struct {
+  uint64_t coefficient_count,allocated_limb_bytes,allocated_descriptor_bytes,ram_products,ram_additions;
+  uint64_t selection_records,line_calls;
+  scalar_work scalar;
+} resampling_work;
+exact_status resampling_admit(unsigned p,unsigned s,unsigned t,unsigned alpha,
+                               uint64_t coefficient_budget,resampling_parameters *);
+/* Fresh null plan pointer; owned plan is immutable except measured counters.
+ * Calls require initialized, disjoint caller arrays of disk-grid Gaussian
+ * records and preserve every output on failure. Calls are not concurrent. */
+exact_status resampling_prepare(const resampling_parameters *,uint64_t coefficient_budget,resampling_plan **);
+void resampling_clear(resampling_plan *);
+exact_status resampling_A(resampling_plan *,const exact_gaussian *,size_t input_length,exact_gaussian *,size_t output_length);
+exact_status resampling_B0(resampling_plan *,const exact_gaussian *,size_t input_length,exact_gaussian *,size_t output_length);
+exact_status resampling_receipt(const resampling_plan *,resampling_parameters *,resampling_work *);
+unsigned resampling_nearest(const resampling_parameters *,unsigned source_index);
 #endif

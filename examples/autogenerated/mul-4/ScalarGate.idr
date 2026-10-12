@@ -11,6 +11,7 @@ import Reference
 number : String -> Maybe Integer
 number = parseInteger
 
+export
 hexadecimal : Integer -> String -> Maybe Integer
 hexadecimal precision text = do
   let digits = unpack text
@@ -36,6 +37,7 @@ candidateConstant rows precision constant =
     [[_,_,_,value]] => hexadecimal (precision+64) value
     _ => Nothing
 
+export
 constantsNarrow : List (List String) -> Integer -> Bool
 constantsNarrow rows precision = fromMaybe False $ do
   piLower <- candidateConstant rows precision 0
@@ -57,9 +59,11 @@ rangeValid rows precision numerator denominator positive power shifts = fromMayb
     let remainder = subtract argument (scaled logTwo shifts 1)
     pure (remainder.lower>=0 && remainder.upper<=2*logTwo.upper)
 
+export
 distance : Integer -> Integer -> Integer -> Integer
 distance value lower upper = max (abs (value-lower)) (abs (value-upper))
 
+export
 rowValid : List (List String) -> List String -> List String -> Bool
 rowValid referenceRows expected actual = fromMaybe False $ case (expected,actual) of
   (["constant",p,index,q,lo,hi],["constant",actualP,actualIndex,hex]) => do
@@ -115,12 +119,18 @@ rowValid referenceRows expected actual = fromMaybe False $ case (expected,actual
   _ => Nothing
 
 allowed : List String
-allowed = ["calloc","free","memcpy","memmove","memset","printf","sprintf","strcmp","putchar","putc",
+allowed = ["calloc","free","memcmp","memcpy","memmove","memset","printf","sprintf","strcmp","putchar","putc",
            "fprintf","fputs","fwrite","ferror","stderr","stdout","__libc_start_main",
            "__cxa_finalize","__gmon_start__","_ITM_deregisterTMCloneTable","_ITM_registerTMCloneTable"]
 
 symbol : String -> String
 symbol line = pack (takeWhile (/= '@') (unpack (fromMaybe "" (last' (words line)))))
+
+export
+candidateProvenance : String -> Bool
+candidateProvenance symbols =
+  let names = map symbol (filter (/= "") (lines symbols)) in
+  not (null names) && elem "calloc" names && elem "__libc_start_main" names && all (`elem` allowed) names
 
 main : IO ()
 main = do
@@ -130,8 +140,7 @@ main = do
   Right symbols <- readFile symbolsPath | _ => exitWith (ExitFailure 9)
   let referenceRows = map words (lines reference)
   let actualRows = map words (lines actual)
-  let names = map symbol (filter (/= "") (lines symbols))
-  let provenance = not (null names) && elem "calloc" names && elem "__libc_start_main" names && all (`elem` allowed) names
+  let provenance = candidateProvenance symbols
   if length referenceRows==141 && length actualRows==141 && provenance &&
      all (\(expected,value) => rowValid referenceRows expected value) (zip referenceRows actualRows) &&
      all (constantsNarrow actualRows) (the (List Integer) [101,128,256])
