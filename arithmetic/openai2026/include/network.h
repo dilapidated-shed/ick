@@ -29,6 +29,9 @@ typedef struct {
 exact_status frame_lower_factorization(const frame_matrix *, frame_factorization *, preparation_work *);
 exact_status frame_check_factorization(const frame_matrix *, const frame_factorization *, preparation_work *);
 exact_status frame_find_prime(const frame_factorization *, uint64_t search_limit, uint64_t *prime);
+exact_status frame_apply_shear(const frame_matrix *, const frame_factorization *, uint64_t prime,
+                               unsigned digits, uint64_t earlier[64], uint64_t later[64],
+                               uint64_t *interchanges);
 unsigned frame_role_count(label_field);
 exact_status frame_role_at(label_field, unsigned identity, frame_role *);
 exact_status frame_projection(label_field, const frame_role *, unsigned stage,
@@ -40,5 +43,7 @@ exact_status frame_check_binary_basis(const frame_matrix *, const binary_basis *
 unsigned frame_binary_phase(const frame_matrix *, uint64_t frequency);
 uint64_t frame_tensor_indicator(const unsigned coordinates[3]);
 unsigned frame_popcount(uint64_t);
+unsigned frame_route_target(unsigned identity);
+int frame_route_sign(role_kind);
 exact_status frame_profile_admit(unsigned ground_dimension, label_field, uint64_t role_budget);
 #endif

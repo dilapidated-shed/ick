@@ -82,3 +82,8 @@ main = do
   traverse_ putStrLn (concat [(if role<128 then data_edges field role else scratch_edges field role)
                               | field <- ["rational","binary"],
                                 role <- [0..(if field=="rational" then 319 else 943)]])
+  traverse_ (\(field,role) =>
+    let destination = if role<64 then role+64 else if role<128 then role-64 else role
+        sign = if field=="binary" && role>=64 && role<128 then -1 else 1 in
+    putStrLn ("endpoint\t" ++ field ++ "\t" ++ show role ++ "\t" ++ show destination ++ "\t" ++ show sign))
+    [(field,role) | field <- ["rational","binary"], role <- the (List Integer) [0..(if field=="rational" then 319 else 943)]]

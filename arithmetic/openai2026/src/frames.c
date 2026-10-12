@@ -1,4 +1,5 @@
 #include "network.h"
+#include "exact_internal.h"
 #include <limits.h>
 #include <string.h>
 
@@ -7,6 +8,14 @@ unsigned frame_popcount(uint64_t value) {
   unsigned count=0; while (value) { value&=value-1; ++count; } return count;
 }
 unsigned frame_role_count(label_field field) { return field==RATIONAL_LABELS ? 320 : 944; }
+unsigned frame_route_target(unsigned identity) { return identity<64 ? identity+64 : identity<128 ? identity-64 : identity; }
+int frame_route_sign(role_kind kind) {
+#ifdef MUTANT_ENDPOINT_SIGN
+  (void)kind; return 1;
+#else
+  return kind==DATA_Y ? -1 : 1;
+#endif
+}
 static unsigned scratch_stride(label_field field) { return field==RATIONAL_LABELS ? 4 : 17; }
 exact_status frame_role_at(label_field field, unsigned identity, frame_role *out) {
   if (!out || (field!=RATIONAL_LABELS && field!=BINARY_LABELS) || identity>=frame_role_count(field))
@@ -70,7 +79,12 @@ exact_status frame_projection(label_field field, const frame_role *role, unsigne
     int64_t full=row==column ? (field==RATIONAL_LABELS ? 216 : 1) : 0;
     int64_t line=tensor_entry(field,coordinates,0,row,column), value=0;
     if (time==-1) value=role->kind==DATA_X ? line : 0;
-    else if (time==8) value=role->kind==DATA_Y ? full-line : full;
+    else if (time==8) {
+      value=role->kind==DATA_Y ? full-line : full;
+#ifdef MUTANT_AUXILIARY_FRAME
+      if (role->kind==SIDE_ROLE || role->kind==CENTER_ROLE) value=0;
+#endif
+    }
     else {
       int64_t all_current=tensor_entry(field,coordinates,through,row,column);
       int64_t prefix_line=tensor_entry(field,coordinates,1u<<stage,row,column);
@@ -277,6 +291,7 @@ exact_status frame_check_factorization(const frame_matrix *matrix, const frame_f
 }
 exact_status frame_find_prime(const frame_factorization *factor, uint64_t search_limit, uint64_t *out) {
   if (!factor || !out) return EXACT_INVALID;
+  if (factor->maximum_coefficient>=search_limit) return EXACT_CAPACITY;
   uint64_t candidate=factor->maximum_coefficient+1;
   if (candidate<3) candidate=3;
   if (!(candidate&1)) ++candidate;
@@ -287,6 +302,84 @@ exact_status frame_find_prime(const frame_factorization *factor, uint64_t search
     if (prime) { *out=candidate; return EXACT_OK; }
   }
   return EXACT_CAPACITY;
+}
+static uint64_t modular_power(uint64_t base,uint64_t exponent,uint64_t modulus) {
+  uint64_t result=1;
+  while (exponent) { if (exponent&1) result=result*base%modulus; base=base*base%modulus; exponent>>=1; }
+  return result;
+}
+static exact_status specialize(rational value,uint64_t prime,uint64_t modulus,uint64_t *out) {
+  if (value.denominator<=0 || (uint64_t)value.denominator%prime==0) return EXACT_INVALID;
+  uint64_t numerator=magnitude(value.numerator)%modulus;
+  if (value.numerator<0 && numerator) numerator=modulus-numerator;
+  uint64_t exponent=modulus-modulus/prime-1;
+  *out=numerator*modular_power((uint64_t)value.denominator%modulus,exponent,modulus)%modulus;
+  return EXACT_OK;
+}
+static exact_status triangular_inverse(uint64_t matrix[64][64],uint64_t inverse[64][64],
+                                       uint64_t prime,uint64_t modulus) {
+  memset(inverse,0,64*64*sizeof(uint64_t));
+  for (unsigned row=0;row<64;++row) {
+    if (matrix[row][row]%prime==0) return EXACT_INVALID;
+    uint64_t reciprocal=modular_power(matrix[row][row],modulus-modulus/prime-1,modulus);
+    for (unsigned column=0;column<=row;++column) {
+      uint64_t value=row==column ? 1 : 0;
+      for (unsigned middle=column;middle<row;++middle) {
+        uint64_t product=matrix[row][middle]*inverse[middle][column]%modulus;
+        value=value>=product ? value-product : modulus-(product-value);
+      }
+      inverse[row][column]=value*reciprocal%modulus;
+    }
+  }
+  return EXACT_OK;
+}
+static void triangular_apply(uint64_t matrix[64][64],uint64_t values[64],uint64_t modulus) {
+  for (unsigned position=64;position;--position) {
+    unsigned row=position-1; uint64_t value=0;
+    for (unsigned column=0;column<=row;++column) value=(value+matrix[row][column]*values[column]%modulus)%modulus;
+    values[row]=value;
+  }
+}
+exact_status frame_apply_shear(const frame_matrix *matrix,const frame_factorization *factor,uint64_t prime,
+                               unsigned digits,uint64_t earlier[64],uint64_t later[64],uint64_t *interchanges) {
+  if (!matrix || !factor || !earlier || !later || !interchanges || prime<3 || !(prime&1)
+      || !digits || prime>UINT32_MAX || factor->rank>64
+      || exact_overlap(earlier,64*sizeof(uint64_t),later,64*sizeof(uint64_t))) return EXACT_INVALID;
+  for (unsigned index=0;index<factor->rank;++index)
+    if (factor->pivot_rows[index]>=64 || factor->pivot_columns[index]>=64) return EXACT_INVALID;
+  for (uint64_t divisor=3;divisor<=prime/divisor;divisor+=2) if (prime%divisor==0) return EXACT_INVALID;
+  uint64_t modulus=1;
+  for (unsigned digit=0;digit<digits;++digit) {
+    if (modulus>UINT32_MAX/prime) return EXACT_CAPACITY;
+    modulus*=prime;
+  }
+  uint64_t first[64][64],second[64][64],first_inverse[64][64],second_inverse[64][64];
+  uint64_t h[64],d[64],expected[64];
+  for (unsigned row=0;row<64;++row) {
+    if (earlier[row]>=modulus || later[row]>=modulus) return EXACT_INVALID;
+    h[row]=earlier[row]; d[row]=later[row]; expected[row]=h[row];
+    for (unsigned column=0;column<64;++column) {
+      exact_status status;
+      if ((status=specialize(factor->lower_first[row][column],prime,modulus,&first[row][column]))!=EXACT_OK
+          || (status=specialize(factor->lower_second[row][column],prime,modulus,&second[row][column]))!=EXACT_OK) return status;
+      uint64_t coefficient;
+      if ((status=specialize((rational){matrix->entries[row][column],216},prime,modulus,&coefficient))!=EXACT_OK) return status;
+      expected[row]=(expected[row]+coefficient*later[column]%modulus)%modulus;
+    }
+  }
+  exact_status status;
+  if ((status=triangular_inverse(first,first_inverse,prime,modulus))!=EXACT_OK
+      || (status=triangular_inverse(second,second_inverse,prime,modulus))!=EXACT_OK) return status;
+  triangular_apply(second,d,modulus); triangular_apply(first_inverse,h,modulus);
+  for (unsigned index=0;index<factor->rank;++index) {
+    unsigned row=factor->pivot_rows[index],column=factor->pivot_columns[index];
+    d[column]=(d[column]+h[row])%modulus;
+    uint64_t saved=h[row]; h[row]=d[column]; d[column]=saved;
+    d[column]=h[row]>=d[column] ? h[row]-d[column] : modulus-(d[column]-h[row]);
+  }
+  triangular_apply(first,h,modulus); triangular_apply(second_inverse,d,modulus);
+  for (unsigned row=0;row<64;++row) if (h[row]!=expected[row] || d[row]!=later[row]) return EXACT_INVALID;
+  memcpy(earlier,h,sizeof(h)); memcpy(later,d,sizeof(d)); *interchanges=factor->rank; return EXACT_OK;
 }
 
 static uint64_t apply_binary(const frame_matrix *matrix, uint64_t value) {
