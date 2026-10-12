@@ -30,3 +30,33 @@ c53800d945392f74b5e88a5661940c62dfac06b6 with 225,758 exact records and all requ
 defect/provenance gates. The generator targets pinned Idriç
 081b9cde0591154839fb5d80d76e5570e0436300 through Chez. No alternate-language oracle
 or approximate arithmetic is introduced.
+
+The implemented reduced interfaces are a finite-support one-point bit array
+and one-column Fourier-character Gaussian arrays. The first executes all 320
+basis directions in five parallel bit planes, applies the actual rational
+edge permutations modulo 223, checks physical gate alignment, and preserves
+the later address fields. The second executes all 944 role basis directions
+and five dense signed complex cases through the actual three-stage gates and
+frame phases. These exact restricted representations avoid materializing a
+2^64-entry array; they are not dense-array or tape-cost acceptance.
+
+The frame reference contains 10,931 records, including 8,368 edge certificates,
+all 1,264 routed endpoints, complete restricted role operators, and physical
+bit addresses. Packed tests compare 123,904 direct maps and execute a closed
+4,096-record bad-address orbit with nonzero payloads through correction,
+stable LSD sorting and reinsertion. Sorting uses two sequential bucket tapes;
+RAM checks are distinguished from modeled tape moves. Full packed rectangles
+with active correction remain too large for this profile.
+
+All five required defects propagate nonzero statuses through Run.idr; their
+actual stdout, stderr, candidate, gate and outer statuses are retained. Gate.idr
+compares the whole reference and an explicit dynamic-import allowlist.
+
+Pinned Idriç exposed several source errors during generation: numeric lists
+needed explicit Integer types; conditional expressions in comprehensions
+needed parentheses; a variable named guard shadowed the monadic guard; and
+List.index' accepts a bounded Fin rather than an optional numeric index.
+The sources were corrected in Idriç and no other-language oracle was used.
+The discarded attempts and their failures remain described here. Generated
+process code uses the existing escaped System seam, with an explicit fixed
+stderr redirection so negative evidence survives the outer runner.

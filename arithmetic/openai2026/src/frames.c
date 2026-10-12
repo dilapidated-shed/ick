@@ -7,7 +7,7 @@ static const unsigned triple_masks[4]={7,11,13,14};
 unsigned frame_popcount(uint64_t value) {
   unsigned count=0; while (value) { value&=value-1; ++count; } return count;
 }
-unsigned frame_role_count(label_field field) { return field==RATIONAL_LABELS ? 320 : 944; }
+unsigned frame_role_count(label_field field) { return field==RATIONAL_LABELS ? 320 : field==BINARY_LABELS ? 944 : 0; }
 unsigned frame_route_target(unsigned identity) { return identity<64 ? identity+64 : identity<128 ? identity-64 : identity; }
 int frame_route_sign(role_kind kind) {
 #ifdef MUTANT_ENDPOINT_SIGN
@@ -78,7 +78,12 @@ exact_status frame_projection(label_field field, const frame_role *role, unsigne
   for (unsigned row=0;row<64;++row) for (unsigned column=0;column<64;++column) {
     int64_t full=row==column ? (field==RATIONAL_LABELS ? 216 : 1) : 0;
     int64_t line=tensor_entry(field,coordinates,0,row,column), value=0;
-    if (time==-1) value=role->kind==DATA_X ? line : 0;
+    if (time==-1) {
+      value=role->kind==DATA_X ? (field==RATIONAL_LABELS ? -line : line) : 0;
+#ifdef MUTANT_SOURCE_RANK
+      if (field==RATIONAL_LABELS && role->kind==DATA_X) value=-value;
+#endif
+    }
     else if (time==8) {
       value=role->kind==DATA_Y ? full-line : full;
 #ifdef MUTANT_AUXILIARY_FRAME

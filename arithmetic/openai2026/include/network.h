@@ -46,4 +46,15 @@ unsigned frame_popcount(uint64_t);
 unsigned frame_route_target(unsigned identity);
 int frame_route_sign(role_kind);
 exact_status frame_profile_admit(unsigned ground_dimension, label_field, uint64_t role_budget);
+/* Exact one-column Fourier-character slice. Coefficients are Gaussian dyadics;
+ * the physical 2^64-entry array is not materialized. Caller owns 944 records. */
+typedef struct { uint64_t frequency; unsigned char phases[26][944]; } phase_character_schedule;
+/* A prepared schedule is immutable while consumed. Its constructor is qualified
+ * independently by the complete role operator oracle, not by scalar endpoints. */
+exact_status frame_phase_prepare(uint64_t, phase_character_schedule *, preparation_work *);
+exact_status frame_phase_network(exact_gaussian *, size_t roles, const phase_character_schedule *);
+/* One-point finite-support slice; supplied physical source points must align
+ * in a common gate frame. This coordinate executor counts RAM work. */
+exact_status frame_bit_point_network(uint64_t *, size_t roles, uint64_t earlier[320][64],
+                                     const uint64_t later[64], uint64_t prime, preparation_work *);
 #endif

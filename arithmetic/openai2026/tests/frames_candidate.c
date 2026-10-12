@@ -116,16 +116,7 @@ static exact_status certificate(const frame_matrix *matrix, unsigned *rank) {
 static exact_status vertex(label_field field, const frame_role *role, int node, frame_matrix *out) {
   unsigned stage=node<0 ? 0 : node==24 ? 2 : (unsigned)node/8;
   int time=node<0 ? -1 : node==24 ? 8 : node%8;
-  exact_status status=frame_projection(field,role,stage,time,out);
-  if (status==EXACT_OK && field==RATIONAL_LABELS && role->kind==DATA_X && node==-1)
-    for (unsigned row=0;row<64;++row) for (unsigned column=0;column<64;++column)
-      out->entries[row][column]=-out->entries[row][column];
-#ifdef MUTANT_SOURCE_RANK
-  if (status==EXACT_OK && field==RATIONAL_LABELS && role->kind==DATA_X && node==-1)
-    for (unsigned row=0;row<64;++row) for (unsigned column=0;column<64;++column)
-      out->entries[row][column]=-out->entries[row][column];
-#endif
-  return status;
+  return frame_projection(field,role,stage,time,out);
 }
 static int inspect_role(label_field field, unsigned identity) {
   frame_role role; if (frame_role_at(field,identity,&role)) return 0;
@@ -181,6 +172,76 @@ static int inspect_endpoint(label_field field, unsigned identity) {
   printf("endpoint\t%s\t%u\t%u\t%d\n",field==RATIONAL_LABELS ? "rational" : "binary",identity,destination,sign);
   return 1;
 }
+static int phase_operator_checks(void) {
+  exact_gaussian *values=calloc(944,sizeof(*values)); if (!values) return 0;
+  int success=0;
+  for (unsigned role=0;role<944;++role)
+    if (exact_init(&values[role].real,8) || exact_init(&values[role].imaginary,8)) goto done;
+  uint64_t frequencies[]={UINT64_C(123456789),0,1,UINT64_C(123456789),UINT64_MAX,UINT64_C(1)<<63};
+  phase_character_schedule schedule; preparation_work work={0};
+  for (unsigned group=0;group<6;++group) {
+    if (frame_phase_prepare(frequencies[group],&schedule,&work)) goto done;
+    unsigned cases=group ? 1 : 944;
+    for (unsigned basis=0;basis<cases;++basis) {
+      for (unsigned role=0;role<944;++role) {
+        int64_t real=group ? (int64_t)((role*17+group*11)%41)-20 : role==basis;
+        int64_t imaginary=group ? (int64_t)((role*13+group*7)%37)-18 : 0;
+        if (exact_set(&values[role].real,real,0) || exact_set(&values[role].imaginary,imaginary,0)) goto done;
+      }
+      if (frame_phase_network(values,944,&schedule)) goto done;
+      printf("phase-operator\t%llu\t%u\t%u\t",(unsigned long long)frequencies[group],group,basis);
+      for (unsigned role=0;role<944;++role) for (unsigned channel=0;channel<2;++channel) {
+        uint8_t bytes[4]; const exact_dyadic *value=channel ? &values[role].imaginary : &values[role].real;
+        if (exact_serialize(value,10,bytes,4)) goto done;
+        for (unsigned byte=0;byte<4;++byte) printf("%02x",bytes[byte]);
+      }
+      putchar('\n');
+    }
+  }
+  fprintf(stderr,"phase-character-slice\tbasis_cases=944\tdense_cases=5\tschedule_bytes=%zu\tpreparation_matrix_entries=%llu\trole_records=944\tchannels=2\n",
+          sizeof(schedule),(unsigned long long)work.matrix_entries);
+  success=1;
+done:
+  for (unsigned role=0;role<944;++role) { exact_clear(&values[role].real); exact_clear(&values[role].imaginary); }
+  free(values); return success;
+}
+static int bit_operator_checks(void) {
+  uint64_t values[320],later[64]={1},points[320][64],initial[320][64];
+  preparation_work work={0};
+  for (unsigned role=0;role<320;++role) {
+    frame_role description; frame_matrix source;
+    if (frame_role_at(RATIONAL_LABELS,role,&description)
+        || frame_projection(RATIONAL_LABELS,&description,0,-1,&source)) return 0;
+    for (unsigned coordinate=0;coordinate<64;++coordinate) {
+      int64_t entry=source.entries[coordinate][0]%223;
+      if (entry<0) entry+=223;
+      initial[role][coordinate]=((coordinate ? coordinate*17+11 : 222)+(uint64_t)entry*191)%223;
+    }
+  }
+  for (unsigned group=0;group<6;++group) {
+    memcpy(points,initial,sizeof(points));
+    for (unsigned role=0;role<320;++role)
+      values[role]=group==5 ? (role*19+17)%257 : role/64==group ? UINT64_C(1)<<(role%64) : 0;
+    if (frame_bit_point_network(values,320,points,later,223,&work)) return 0;
+    printf("bit-operator\t%u\t",group);
+    for (unsigned role=0;role<320;++role) printf("%016llx",(unsigned long long)values[role]);
+    putchar('\n');
+    if (group==0) for (unsigned role=0;role<320;++role) {
+      printf("bit-address\t%u\t",role);
+      for (unsigned coordinate=0;coordinate<64;++coordinate)
+        printf("%s%llu",coordinate ? "," : "",(unsigned long long)points[role][coordinate]);
+      putchar('\n');
+    }
+  }
+  if (later[0]!=1 || frame_bit_point_network(values,319,points,later,223,&work)!=EXACT_INVALID) return 0;
+  memcpy(points,initial,sizeof(points)); points[128][0]=(points[128][0]+1)%223;
+  uint64_t saved[320][64],saved_values[320]; memcpy(saved,points,sizeof(saved)); memcpy(saved_values,values,sizeof(values));
+  if (frame_bit_point_network(values,320,points,later,223,&work)!=EXACT_INVALID
+      || memcmp(saved,points,sizeof(saved)) || memcmp(saved_values,values,sizeof(values))) return 0;
+  fprintf(stderr,"bit-point-slice\tbasis_directions=320\tdense_cases=1\tmodulus=223\tmatrix_entries=%llu\tallocated_frame_bytes=%zu\tallocated_point_bytes=%zu\n",
+          (unsigned long long)work.matrix_entries,320*sizeof(frame_matrix),sizeof(points));
+  return 1;
+}
 int main(void) {
   if (frame_profile_admit(9,RATIONAL_LABELS,1000)!=EXACT_INVALID
       || frame_profile_admit(100,BINARY_LABELS,UINT64_MAX)!=EXACT_CAPACITY
@@ -206,5 +267,8 @@ int main(void) {
           (unsigned long long)preparation.rational_operations,(unsigned long long)preparation.maximum_rational_bits,
           (unsigned long long)preparation.basis_operations,(unsigned long long)factorizations,(unsigned long long)prime,
           (unsigned long long)(CERTIFICATE_CACHE_BUDGET*sizeof(*cache)));
-  free(cache); return ferror(stdout) ? 44 : 0;
+  free(cache);
+  if (!phase_operator_checks()) return 48;
+  if (!bit_operator_checks()) return 49;
+  return ferror(stdout) ? 44 : 0;
 }
