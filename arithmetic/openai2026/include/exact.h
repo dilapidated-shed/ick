@@ -35,5 +35,9 @@ void scalar_clear(scalar_network *);
 exact_gaussian *scalar_field(scalar_network *, size_t index);
 const exact_gaussian *scalar_const_field(const scalar_network *, size_t index);
 exact_status scalar_execute(scalar_network *, int inverse);
+/* Observer snapshots are emitted after each completed schedule step. A failed
+ * observation aborts the transaction but retains already-emitted evidence. */
+typedef exact_status (*scalar_observer)(void *, unsigned step, const scalar_network *);
+exact_status scalar_execute_observed(scalar_network *, int inverse, scalar_observer, void *);
 exact_status scalar_signed_swap(scalar_network *);
 #endif

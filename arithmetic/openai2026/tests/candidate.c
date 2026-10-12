@@ -73,6 +73,20 @@ static int refusal(void) {
   ok &= scalar_execute(&n,0)==EXACT_INVALID;
   n.side[0].real.limbs=saved; scalar_clear(&n); return ok;
 }
+static exact_status stage_record(void *context, unsigned step, const scalar_network *n) {
+  unsigned test=*(unsigned *)context;
+  for (size_t field=0;field<SCALAR_FIELDS;++field) for (unsigned channel=0;channel<2;++channel) {
+    const exact_gaussian *g=scalar_const_field(n,field); unsigned char bytes[8];
+    if (exact_serialize(channel ? &g->imaginary : &g->real,4,bytes,8)) return EXACT_INVALID;
+#ifdef MUTANT_ZERO
+    memset(bytes,0,sizeof(bytes));
+#endif
+    printf("stage\t%u\t%u\t%zu\t%u\t",step,test,field,channel);
+    for (unsigned i=0;i<8;++i) printf("%02x",bytes[i]);
+    putchar('\n');
+  }
+  return ferror(stdout) ? EXACT_INVALID : EXACT_OK;
+}
 int main(void) {
 #ifdef MUTANT_ORACLE_BYPASS
   return system("cat \"$SCALAR_ORACLE_OUTPUT\"");
@@ -98,6 +112,16 @@ int main(void) {
       putchar('\n');
     }
     scalar_clear(&n);
+  }
+  for (unsigned test=35;test<67;++test) {
+    scalar_network n; if (scalar_init(&n,8)) return 41;
+    for (size_t field=0;field<SCALAR_FIELDS;++field) for (unsigned channel=0;channel<2;++channel) {
+      exact_gaussian *g=scalar_field(&n,field); size_t scale;
+      int64_t numerator=initial(test,field,channel,&scale);
+      if (exact_set(channel ? &g->imaginary : &g->real,numerator,scale)) { scalar_clear(&n); return 42; }
+    }
+    exact_status status=scalar_execute_observed(&n,0,stage_record,&test);
+    scalar_clear(&n); if (status!=EXACT_OK) return 46;
   }
   return ferror(stdout) ? 45 : 0;
 }

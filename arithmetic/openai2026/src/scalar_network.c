@@ -57,11 +57,17 @@ static exact_status clone(scalar_network *out, const scalar_network *in) {
   }
   return EXACT_OK;
 }
-static void commit(scalar_network *out, const scalar_network *in) {
+static exact_status commit(scalar_network *out, const scalar_network *in) {
+  for (size_t i=0;i<SCALAR_FIELDS;++i) {
+    const exact_gaussian *a=scalar_const_field(in,i), *b=scalar_const_field(out,i);
+    if (a->real.length>b->real.capacity || a->imaginary.length>b->imaginary.capacity)
+      return EXACT_CAPACITY;
+  }
   for (size_t i=0;i<SCALAR_FIELDS;++i) {
     const exact_gaussian *a=scalar_const_field(in,i); exact_gaussian *b=scalar_field(out,i);
     (void)exact_copy(&b->real,&a->real); (void)exact_copy(&b->imaginary,&a->imaginary);
   }
+  return EXACT_OK;
 }
 static unsigned popcount(unsigned bits) {
   unsigned count=0; while (bits) { count+=bits&1; bits>>=1; } return count;
@@ -72,7 +78,7 @@ static int neighbor(unsigned a, unsigned b) {
 static exact_status accumulate(exact_dyadic *out, const exact_dyadic *in, int sign) {
   return sign>0 ? exact_add(out,out,in) : exact_subtract(out,out,in);
 }
-static exact_status schedule(scalar_network *n, int inverse) {
+static exact_status schedule(scalar_network *n, int inverse, scalar_observer observer, void *context) {
   unsigned triples[20], count=0;
   for (unsigned a=0;a<6;++a) for (unsigned b=a+1;b<6;++b) for (unsigned c=b+1;c<6;++c)
     triples[count++]=(1u<<a)|(1u<<b)|(1u<<c);
@@ -126,14 +132,21 @@ static exact_status schedule(scalar_network *n, int inverse) {
         }
       }
     }
+    if (observer) {
+      exact_status status=observer(context,step,n);
+      if (status!=EXACT_OK) return status;
+    }
   }
   return EXACT_OK;
 }
 exact_status scalar_execute(scalar_network *n, int inverse) {
+  return scalar_execute_observed(n,inverse,NULL,NULL);
+}
+exact_status scalar_execute_observed(scalar_network *n, int inverse, scalar_observer observer, void *context) {
   if (inverse!=0 && inverse!=1) return EXACT_INVALID;
   scalar_network work; exact_status status=clone(&work,n);
   if (status!=EXACT_OK) return status;
-  status=schedule(&work,inverse); if (status==EXACT_OK) commit(n,&work);
+  status=schedule(&work,inverse,observer,context); if (status==EXACT_OK) status=commit(n,&work);
   scalar_clear(&work); return status;
 }
 static void exchange(scalar_network *n) {
@@ -144,9 +157,9 @@ static void exchange(scalar_network *n) {
 exact_status scalar_signed_swap(scalar_network *n) {
   scalar_network work; exact_status status=clone(&work,n);
   if (status!=EXACT_OK) return status;
-  status=schedule(&work,0);
-  if (status==EXACT_OK) { exchange(&work); status=schedule(&work,1); }
-  if (status==EXACT_OK) { exchange(&work); status=schedule(&work,0); }
-  if (status==EXACT_OK) commit(n,&work);
+  status=schedule(&work,0,NULL,NULL);
+  if (status==EXACT_OK) { exchange(&work); status=schedule(&work,1,NULL,NULL); }
+  if (status==EXACT_OK) { exchange(&work); status=schedule(&work,0,NULL,NULL); }
+  if (status==EXACT_OK) status=commit(n,&work);
   scalar_clear(&work); return status;
 }
