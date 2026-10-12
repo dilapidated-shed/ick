@@ -38,6 +38,34 @@ SHA256 is 3ea051b8a930379bee1c1b14c2b678c69ce936dad432f3ace0be80054223a11b.
 The compiler required a typed contribution function instead of a let expression
 in a comprehension head; the correction remains in Idriç.
 
-This is a partial implementation checkpoint. Complete phase/layer, transform,
-convolution and required defect gates are pending. No MUL-5/ARM-2 dependency is
-admitted from this branch yet.
+The additional phase model is a closed quotient on four disjoint vectors
+e_i tensor t_0 tensor t_0, each of weight nine. Their span is invariant under
+all accepted Fourier-diagonal frame operators. Only X role zero may be
+nonzero; every Y and auxiliary role is allowed. The primary tensor indicator
+is the sum of the first three vectors. Source and sink endpoint characters
+therefore stay in this span. Constant unused coordinates reduce C^tensor4
+to the requested C^tensorD. Direct 16-character encoding and decoding change
+representation; the complete accepted three-stage motif executes between them.
+Routing, the inverse Y sign, i^27 endpoint phase, S_D and b^D=(1-i)^D/2^D
+produce H0^tensorD. Only the completed layer is truncated toward zero.
+
+The model reserves all 944 roles, including zero padding. It makes 16 full
+frame calls per layer. Each invocation has an unchanged source bank; half
+edges can add at most one fractional bit per stage. Character encoding,
+three stages and b^D thus require at most p+11 fractional bits. An invocation's
+intermediate coefficient is bounded by 16 times its incoming bound; three
+stages and decoding need less than 2^17 magnitude. The supplied 32 fractional
+and 32 magnitude guards are conservative. These are model-specific bounds,
+not the published Delta or the paper's factor-two row reservation claim.
+
+The direct exact H0 oracle matches 5,208 completed-grid records at p=5,9,33,
+D=1..4, including every basis direction, half-grid cases and independently
+tagged nonzero values in all Y and auxiliary roles. Reference SHA256 is
+c57ae1b5dd52bf22fa6235318c49b1cda96acd8d8e1bb21ffce9b53461206a3b.
+Preparation charges 1,608,515,584 matrix entries per plan. There is no saving
+claim for this model. The separate inverse-child primitive retains the
+explicit (-i) Z C Z factorization and remains pending its defect gate.
+
+This is a partial implementation checkpoint. Transform, convolution,
+refusals, provenance and required defect gates are pending. No MUL-5/ARM-2
+dependency is admitted from this branch yet.
