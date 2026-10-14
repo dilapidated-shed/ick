@@ -1,0 +1,33 @@
+name: Native polar runtime
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out the exact owned compiler head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          submodules: true
+      - name: Install compiler bootstrap dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential flex bison texinfo libgmp-dev libmpfr-dev libmpc-dev
+      - name: Build ICK and its native target runtimes
+        run: make -f qualification/native-polar/Makefile build
+      - name: Execute dialect and complex regressions at O0, O2, and O3
+        run: make -f qualification/native-polar/Makefile check
+      - name: Preserve runtime dependency receipts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-polar-runtime-receipts
+          path: |
+            build/native-polar/scalar-runtime-packages.tsv
+            build/native-polar/ick-runtime.sha256

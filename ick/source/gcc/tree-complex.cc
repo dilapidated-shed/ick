@@ -48,6 +48,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "optabs-tree.h"
 #include "tree-ssa-dce.h"
 
+/* The explicit FloatN helper is also used by target-specific lowering.  */
+extern tree mathfn_built_in_explicit (tree, combined_fn);
+
 /* For each complex ssa name, a lattice value.  We're interested in finding
    out whether a complex number is degenerate in some way, having only real
    or only complex parts.  */
@@ -1408,17 +1411,30 @@ expand_complex_libcall (gimple_stmt_iterator *gsi, tree type, tree ar, tree ai,
    types, but perform transcendental work in the narrowest wider binary type
    that has the required builtin, then convert the result back to storage
    precision.  Never silently compute in a narrower type.  */
+/* GCC records the _Float128 math declarations as explicit-only builtins.
+   The polar representation requires those scalar operations even when no
+   source-level call has enabled their implicit declaration.  Their libc
+   symbols remain a target runtime dependency; never narrow the precision.  */
+static tree
+polar_math_builtin (tree type, enum built_in_function code)
+{
+  if (TYPE_MAIN_VARIANT (type) == float128_type_node)
+    return mathfn_built_in_explicit (type, as_combined_fn (code));
+  return mathfn_built_in (type, code);
+}
+
 static tree
 polar_math_call_type (tree type, enum built_in_function code)
 {
-  if (mathfn_built_in (type, code))
+  if (polar_math_builtin (type, code))
     return type;
 
   tree candidates[] = { float_type_node, double_type_node,
 			long_double_type_node, float128_type_node };
   for (unsigned int i = 0; i < ARRAY_SIZE (candidates); ++i)
-    if (TYPE_PRECISION (candidates[i]) >= TYPE_PRECISION (type)
-	&& mathfn_built_in (candidates[i], code))
+    if (candidates[i]
+	&& TYPE_PRECISION (candidates[i]) >= TYPE_PRECISION (type)
+	&& polar_math_builtin (candidates[i], code))
       return candidates[i];
 
   return NULL_TREE;
@@ -1443,7 +1459,7 @@ build_polar_unary_call (gimple_seq *stmts, location_t loc, tree type,
   if (work_type != type)
     arg = gimple_convert (stmts, loc, work_type, arg);
 
-  tree fn = mathfn_built_in (work_type, code);
+  tree fn = polar_math_builtin (work_type, code);
   tree lhs = make_ssa_name (work_type);
   gcall *call = gimple_build_call (fn, 1, arg);
 
@@ -1470,7 +1486,7 @@ build_polar_binary_call (gimple_seq *stmts, location_t loc, tree type,
       arg1 = gimple_convert (stmts, loc, work_type, arg1);
     }
 
-  tree fn = mathfn_built_in (work_type, code);
+  tree fn = polar_math_builtin (work_type, code);
   tree lhs = make_ssa_name (work_type);
   gcall *call = gimple_build_call (fn, 2, arg0, arg1);
 

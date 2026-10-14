@@ -1,6 +1,8 @@
 # Shared assertions; local input paths only. No duplicated verifier implementation.
 actions_pinned	ICK-ABI-ACTION-PINS	.github/workflows/android-abi-foundation.yml
 actions_pinned	ICK-PRUNING-ACTION-PINS	.github/workflows/ick-pruned-language-gate.yml
+actions_pinned	ICK-NATIVE-POLAR-ACTION-PINS	.github/workflows/native-polar-runtime.yml
 actions_pinned	ICK-MODEL-ACTION-PINS	.github/workflows/vendor-model.yml
 yaml_primary_checkout_ref	ICK-ABI-EXACT-HEAD	.github/workflows/android-abi-foundation.yml	${{ github.event.pull_request.head.sha || github.sha }}
 yaml_primary_checkout_ref	ICK-PRUNING-EXACT-HEAD	.github/workflows/ick-pruned-language-gate.yml	${{ github.event.pull_request.head.sha || github.sha }}
+yaml_primary_checkout_ref	ICK-NATIVE-POLAR-EXACT-HEAD	.github/workflows/native-polar-runtime.yml	${{ github.event.pull_request.head.sha || github.sha }}
