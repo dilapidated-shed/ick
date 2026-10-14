@@ -15,7 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        include:
+          - runner: ubuntu-24.04
+            architecture: x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: aarch64
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out exact initiating commit
@@ -31,6 +35,12 @@ jobs:
           git rev-parse HEAD
       - name: Exactness and harness smoke tests
         run: python3 benchmarks/bigmul/test_mulbench.py
+      - name: MB-02 bounded C ABI and protocol adversarial tests
+        run: python3 benchmarks/bigmul/abi/check_mb02.py
+      - name: MB-02 host sanitizer, overflow and allocation failure controls
+        run: python3 benchmarks/bigmul/abi/check_mb02_extended.py
+      - name: Execute available MB campaign controls with honest readiness boundaries
+        run: python3 benchmarks/bigmul/release/check_mb21.py --run-controls --allow-missing-bc --expected-arch ${{ matrix.architecture }} --output benchmarks/bigmul/release/last-run/campaign.json
       - name: Calibrated schoolbook smoke timing (not a regression gate)
         working-directory: benchmarks/bigmul
         run: |
@@ -56,9 +66,10 @@ jobs:
       - name: Retain machine-specific timing receipts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: bigmul-smoke-${{ matrix.runner }}
+          name: bigmul-smoke-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runner }}
           path: |
             benchmarks/bigmul/baseline.csv
             benchmarks/bigmul/machine.txt
+            benchmarks/bigmul/release/last-run/campaign.json
           if-no-files-found: error
           retention-days: 30

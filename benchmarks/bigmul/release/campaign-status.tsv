@@ -1,0 +1,22 @@
+job	implemented_scope	remaining_boundary
+MB01	explicit source/binary selection; outer negative controls; normal and optimized Python	paper-path source/link/stage provenance belongs to MB16
+MB02	buffer/protocol controls; ASan/UBSan; allocation failures; overflow bypass	ordinary 32-bit environment; actual ICK; independent AICI; physical ARM32
+MB03	legacy corpus pinned verbatim; deterministic v2 bytes/schema/hash validators	implementation-specific transform thresholds await accepted candidate
+MB04	Python route checks exhaustive byte pairs and all v2 smoke cases; bc-required refusal	actual bc executable and qualified second-oracle execution absent locally
+MB05	NOT_IMPLEMENTED	accepted complete MB01/MB02/MB03 handoff; serious conventional/GMP adapter; GMP header absent locally
+MB06	standalone raw timing engine; fake clocks; cap flags; optimized/LTO controls	shared-C integration and uninstrumented real-provider measurements
+MB07	NOT_IMPLEMENTED	accepted MB03/MB05/MB06; hot/square/workspace modes
+MB08	NOT_IMPLEMENTED	accepted MB03/MB05/MB06; mixed persistent-request mode
+MB09	NOT_IMPLEMENTED	accepted MB03/MB05/MB06; bounded cache/first-touch experiments
+MB10	NOT_IMPLEMENTED	accepted MB01/MB02/MB03/MB05/MB06; endpoint/conversion measurements
+MB11	NOT_IMPLEMENTED	accepted MB02/MB03/MB05/MB06; allocation/workspace accounting
+MB12	NOT_IMPLEMENTED	accepted corpus/timing plus real mode data from MB07-MB11
+MB13	existing native workflow now replays available controls and archives receipts	full independent bc/provider/hot-mode lanes; exact-head hosted results pending
+MB14	NOT_IMPLEMENTED	accepted host modules and explicit physical A1 serial/transport access
+MB15	NOT_IMPLEMENTED	accepted portability modules and already-authorized native POWER/AIX host
+MB16	NOT_IMPLEMENTED	accepted MUL5 implementation and component receipts; no substitute example
+MB17	executed schoolbook trace schema, lifetimes, last-write edges, arithmetic checks	retained recursive trace and actual paper provider hooks
+MB18	executed schoolbook DAGs; checked permutations/layouts; finite-ring transform controls	recursive/paper provider structure; full integrated acceptance
+MB19	executed baseline carry statistics; exhaustive small-radix and exact certificate fixtures	paper precision/recovery contracts and signed-packing cases
+MB20	logical traffic; hand-checked bounded copy/tape schedules; explicit unresolved costs	accepted paper component transpose/permutation/network schedules
+MB21	available-control suite; strict refusal of full readiness; gate mutant checks	MB05/MB07-MB16 and full dependent stage receipts remain absent or partial

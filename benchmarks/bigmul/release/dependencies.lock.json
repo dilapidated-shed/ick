@@ -1,0 +1,95 @@
+{
+  "schema": "mb-campaign-source-lock-v1",
+  "repository": "dilapidated-shed/ick",
+  "campaign_issue": "https://github.com/dilapidated-shed/ick/issues/83",
+  "base": "c61e448251744a2f40ad743ebef1a027bdcd2f9d",
+  "aggregate_preparation_head": "9d187d29a636309af9b48790c2c4e302493aa644",
+  "absolute_checkout": "/workspace/scratch/af8a01bc4868/mb21",
+  "component_heads": {
+    "sun/mb01-candidate-acceptance": "5d1d71954683340419811403519b3bfc5fb2e526",
+    "sun/mb02-abi-and-buffer-safety": "989c2e0f524aac0b95de59399986de51669fc7c2",
+    "sun/mb03-shared-corpus": "994a1f713c1a4b3c2ab5bccc98bac6a37ee86544",
+    "sun/mb04-independent-oracles": "c0d73ea1bb27d7de3e06077ad5ed38fe81485364",
+    "sun/mb06-measurement-engine": "d8428d0939ad6937ec9387332db0ba1e33e5fd61",
+    "sun/mb17-operation-traces": "aabd11a5f9b9db0af650baa7d90b7efbfb1a0125",
+    "sun/mb18-algorithm-structure": "10411e90bb362f55c50e1be17a601a7ed9c6b5af",
+    "sun/mb19-precision-carry-evidence": "0f529c950a73c508b390ed8725f58704363e43c0",
+    "sun/mb20-cost-models": "f1377bca1b22faccf8b5a55c1bf5c268e9e3b012"
+  },
+  "compiler_control": {
+    "path": "/usr/bin/x86_64-linux-gnu-gcc-13",
+    "sha256": "6117c52522997d2aaccb2b52b3c6bf42c0a6c5edb1d718431fed6b2fc5fec234",
+    "lane": "host GCC control, not qualified ICK"
+  },
+  "python": {
+    "path": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+    "sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7"
+  },
+  "inputs": {
+    "corpus/mul-v1.tsv": "96e5ce0181dc92b269e444bc63c8f63684c56ad476474094b193ce4cd474f5f3",
+    "corpus/smoke-v2.tsv": "0e7db66fc80400449f9a5df4c7a3761b64eae8588f69f4d0c712dc73ce2d3dd1"
+  },
+  "output_receipt": "release/last-run/campaign.json records actual checked-out head, command arrays, flags, source/compiler/provider/binary/input/output hashes and raw timing/traces",
+  "reconciliation": [
+    "MB02 source repairs consumed from existing retained branch and PR, without replacing its owner.",
+    "MB01/03/06/17 branches originated at current main; baseline downstream branches pin exact predecessors in ancestry.",
+    "Aggregate accepts no full-job or algorithm readiness merely from isolated passing controls.",
+    "Native ARM disassembly call pattern includes bl/b as well as x86 call/jmp; scoped integration correction only.",
+    "Authenticated connector publication changed commit metadata; every published component tree was checked equal to its locally tested source tree. Both original local heads and canonical published heads are retained here."
+  ],
+  "not_established": [
+    "qualified ICK compiler driver",
+    "bc local executable",
+    "GMP development header",
+    "accepted MUL5/MB16 paper candidate",
+    "physical MIRO A1 serial/transport",
+    "native AIX/POWER host"
+  ],
+  "published_component_heads": {
+    "sun/mb01-candidate-acceptance": {
+      "sha": "d75951f758247a29b8c80aa23a067b422c998462",
+      "tree_sha": "c8ebc5c4035b4b6fd510b858d64e7bb3f193acd1",
+      "local_source_head": "5d1d71954683340419811403519b3bfc5fb2e526"
+    },
+    "sun/mb02-abi-and-buffer-safety": {
+      "sha": "20106ded018855010bd51cb74075bf085d80ae38",
+      "tree_sha": "86722ac7377a46d06a9a62b6a5f204b17dc69d44",
+      "local_source_head": "989c2e0f524aac0b95de59399986de51669fc7c2"
+    },
+    "sun/mb03-shared-corpus": {
+      "sha": "0cd1777145d7ed17b4219ddd3fd50acc2683243f",
+      "tree_sha": "ebec8fd8fb4024e5744fde9a2b176481a2ec9113",
+      "local_source_head": "994a1f713c1a4b3c2ab5bccc98bac6a37ee86544"
+    },
+    "sun/mb06-measurement-engine": {
+      "sha": "70f2897b941f4210104583b84e79186f5f97b549",
+      "tree_sha": "008c081f831258c8e57502c4bee009b57f41d99f",
+      "local_source_head": "d8428d0939ad6937ec9387332db0ba1e33e5fd61"
+    },
+    "sun/mb17-operation-traces": {
+      "sha": "cb630bf5b9acd6c96f289f439c0626654209b48b",
+      "tree_sha": "c04ce9ded9f6370b9852d28a2746b9e1dda9ab83",
+      "local_source_head": "aabd11a5f9b9db0af650baa7d90b7efbfb1a0125"
+    },
+    "sun/mb04-independent-oracles": {
+      "sha": "286e05e35faf51b1def1fd6832050ff5918dd3af",
+      "tree_sha": "cf9b8ec8b3c8b4f5cbfde2a539d9ccc67647aa0f",
+      "local_source_head": "c0d73ea1bb27d7de3e06077ad5ed38fe81485364"
+    },
+    "sun/mb18-algorithm-structure": {
+      "sha": "9453d6c113b32c1eae5c7ffc4fff89d3ab252eec",
+      "tree_sha": "9e63a340976eaa62957951f4d5d914e06b91cf24",
+      "local_source_head": "10411e90bb362f55c50e1be17a601a7ed9c6b5af"
+    },
+    "sun/mb19-precision-carry-evidence": {
+      "sha": "66986e6e874e21d887dc57d947e2053ac3b10581",
+      "tree_sha": "2e1e437863b39cf568f638744ab889fd68dabba7",
+      "local_source_head": "0f529c950a73c508b390ed8725f58704363e43c0"
+    },
+    "sun/mb20-cost-models": {
+      "sha": "cf73fd8c8b66ea58c04436da711c729c35c13ef0",
+      "tree_sha": "7ab0ca6c427d143964c26961b8c835d82680da56",
+      "local_source_head": "f1377bca1b22faccf8b5a55c1bf5c268e9e3b012"
+    }
+  }
+}
