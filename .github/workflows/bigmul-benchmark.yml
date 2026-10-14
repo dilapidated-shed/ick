@@ -31,6 +31,10 @@ jobs:
           git rev-parse HEAD
       - name: Exactness and harness smoke tests
         run: python3 benchmarks/bigmul/test_mulbench.py
+      - name: MB-02 bounded C ABI and protocol adversarial tests
+        run: python3 benchmarks/bigmul/abi/check_mb02.py
+      - name: MB-02 host sanitizer, overflow and allocation failure controls
+        run: python3 benchmarks/bigmul/abi/check_mb02_extended.py
       - name: Calibrated schoolbook smoke timing (not a regression gate)
         working-directory: benchmarks/bigmul
         run: |
