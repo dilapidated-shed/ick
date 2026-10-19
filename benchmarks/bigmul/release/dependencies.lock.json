@@ -39,12 +39,17 @@
   ],
   "not_established": [
     "qualified ICK compiler driver",
-    "bc local executable",
-    "GMP development header",
     "accepted MUL5/MB16 paper candidate",
     "physical MIRO A1 serial/transport",
     "native AIX/POWER host"
   ],
+  "mb05_continuation": {
+    "parent_sha": "7c2b51cd2aa8655afc3ab825a6bc5dcf9a28933b",
+    "component_lock": "benchmarks/bigmul/providers/dependencies.lock.json",
+    "scope": "bounded comparison controls plus minimal existing workflow/release integration",
+    "resolved_local_prerequisites": ["matching GMP 6.3.0 development header extracted without system installation", "bc 1.07.1 extracted host executable"],
+    "receipt": "MB21 campaign receipt embeds MB05 source/compiler/library/binary/input hashes and raw native/adapter batches"
+  },
   "published_component_heads": {
     "sun/mb01-candidate-acceptance": {
       "sha": "d75951f758247a29b8c80aa23a067b422c998462",

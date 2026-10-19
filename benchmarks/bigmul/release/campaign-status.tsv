@@ -2,8 +2,8 @@ job	implemented_scope	remaining_boundary
 MB01	explicit source/binary selection; outer negative controls; normal and optimized Python	paper-path source/link/stage provenance belongs to MB16
 MB02	buffer/protocol controls; ASan/UBSan; allocation failures; overflow bypass	ordinary 32-bit environment; actual ICK; independent AICI; physical ARM32
 MB03	legacy corpus pinned verbatim; deterministic v2 bytes/schema/hash validators	implementation-specific transform thresholds await accepted candidate
-MB04	Python route checks exhaustive byte pairs and all v2 smoke cases; bc-required refusal	actual bc executable and qualified second-oracle execution absent locally
-MB05	NOT_IMPLEMENTED	accepted complete MB01/MB02/MB03 handoff; serious conventional/GMP adapter; GMP header absent locally
+MB04	Python route checks exhaustive byte pairs and v2 smoke; independently executed bc route; required-bc refusal retained	paper-candidate comparison and broader full oracle-job acceptance remain separate
+MB05	bounded schoolbook/Karatsuba and pinned GMP controls; identical corpus and ABI guards; native versus adapter samples; repacking mutant	complete prerequisite-job acceptance; qualified ICK; original GMP build flags/internal algorithm UNKNOWN
 MB06	standalone raw timing engine; fake clocks; cap flags; optimized/LTO controls	shared-C integration and uninstrumented real-provider measurements
 MB07	NOT_IMPLEMENTED	accepted MB03/MB05/MB06; hot/square/workspace modes
 MB08	NOT_IMPLEMENTED	accepted MB03/MB05/MB06; mixed persistent-request mode

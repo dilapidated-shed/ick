@@ -1,0 +1,37 @@
+{
+  "schema": "mb05-provider-dependencies-v1",
+  "repository": "dilapidated-shed/ick",
+  "branch": "sun/mb05-baseline-providers",
+  "absolute_checkout": "/workspace/scratch/11e337dc6f0c/ick",
+  "original_inspected_base": "44ca65637acc6410a649502a139560412c7e108c",
+  "reconciled_base": "7c2b51cd2aa8655afc3ab825a6bc5dcf9a28933b",
+  "campaign_branch": "sun/mb21-benchmark-delivery",
+  "predecessor_source_pins": {
+    "MB01": "d75951f758247a29b8c80aa23a067b422c998462",
+    "MB02": "20106ded018855010bd51cb74075bf085d80ae38",
+    "MB03": "0cd1777145d7ed17b4219ddd3fd50acc2683243f",
+    "MB06_standalone": "70f2897b941f4210104583b84e79186f5f97b549"
+  },
+  "predecessor_receipt": {
+    "source_sha": "7c2b51cd2aa8655afc3ab825a6bc5dcf9a28933b",
+    "native_run": "https://github.com/dilapidated-shed/ick/actions/runs/38207516388",
+    "scope": "available-control jobs passed on native x86_64 and aarch64; not full predecessor-job or ICK acceptance"
+  },
+  "gmp": {
+    "required_version": "6.3.0",
+    "local_runtime_package": "2:6.3.0+dfsg-2ubuntu6.1",
+    "local_header_package": "libgmp-dev_2%3a6.3.0+dfsg-2ubuntu6.1_amd64.deb",
+    "header_sha256": "1a5bb6702226627c7322821b06084a4ee4ac69b71f987a36a6a46df0de4364b0",
+    "runtime_sha256": "0ccdfb6d6f5c039465f6d002cf7e4c072d48ac6a2cffc8dd6c748dec31592804",
+    "contract": "https://gmplib.org/manual/Low_002dlevel-Functions",
+    "license": "LGPLv3+ OR GPLv2+",
+    "internal_algorithm": "UNKNOWN",
+    "original_build_configuration": "UNKNOWN"
+  },
+  "inputs": {
+    "corpus/mul-v1.tsv": "96e5ce0181dc92b269e444bc63c8f63684c56ad476474094b193ce4cd474f5f3",
+    "corpus/smoke-v2.tsv": "0e7db66fc80400449f9a5df4c7a3761b64eae8588f69f4d0c712dc73ce2d3dd1"
+  },
+  "execution_identities": "Generated MB05 receipt records exact compiler, executable, source and effective input hashes; MB21 records actual checked-out commit.",
+  "acceptance_boundary": "Scoped host controls only. Full prerequisite acceptance, qualified ICK, paper-path and physical execution are not established by these controls."
+}

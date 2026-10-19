@@ -76,6 +76,12 @@ def gate_controls():
 def execute_control(job,path,optional_bc):
     argv=[sys.executable,str(path)]
     if job=="MB04" and optional_bc:argv.append("--allow-missing-bc")
+    if job=="MB05":
+        # Local extracted headers remain an explicit host configuration;
+        # hosted lanes install the pinned GMP development package instead.
+        import os
+        for variable,option in (("MB05_GMP_INCLUDE","--gmp-include"),("MB05_GMP_LIBRARY","--gmp-library")):
+            if os.environ.get(variable):argv.extend([option,os.environ[variable]])
     result=subprocess.run(argv,capture_output=True,text=True,timeout=180,cwd=REPOSITORY)
     parsed=None
     if result.stdout:

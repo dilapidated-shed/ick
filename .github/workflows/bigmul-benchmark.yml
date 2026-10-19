@@ -33,6 +33,10 @@ jobs:
           cc --version | head -n 1
           python3 --version
           git rev-parse HEAD
+      - name: Refresh host package metadata
+        run: sudo apt-get update
+      - name: Install independent host oracle and GMP comparison headers
+        run: sudo apt-get install --no-install-recommends -y bc libgmp-dev
       - name: Exactness and harness smoke tests
         run: python3 benchmarks/bigmul/test_mulbench.py
       - name: MB-02 bounded C ABI and protocol adversarial tests

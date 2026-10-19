@@ -16,12 +16,20 @@ Actual ready-manifest ingestion/admission is deliberately not enabled for this
 partial package. It must consume qualified immutable stage receipts and rerun
 the combined source once all mandatory deliverables exist.
 
-Current available scope is MB01, extended MB02, MB03, Python-only MB04,
-standalone MB06 and baseline/control portions of MB17–MB20. MB05 and MB07–MB16
-are absent. MB14/AIX native access and accepted MUL5 remain concrete external or
+Current available scope is MB01, extended MB02, MB03, MB04 (bc required unless
+explicitly omitted), MB05 host comparison providers, standalone MB06 and
+baseline/control portions of MB17–MB20. MB07–MB16 are absent.
+MB14/AIX native access and accepted MUL5 remain concrete external or
 implementation dependencies. MB17's recursive trace, MB19's paper certificate
 contracts and MB20's paper component schedules remain pending. No complete
 campaign, ICK code generation, physical-device speed or paper speedup is claimed.
 
 This follows the existing MUL6 qualification ownership. It adds no competing
 workflow, merge policy or default provider-selection rule.
+
+MB05 requires the GMP 6.3.0 header/runtime pair by default. The native workflow
+installs its development package and bc. For a host using an extracted matching
+development package, `MB05_GMP_INCLUDE` and `MB05_GMP_LIBRARY` explicitly select
+the header directory and shared library; both are recorded and hashed by MB05.
+The standalone MB05 driver's `--allow-missing-gmp` records omitted coverage;
+the integrated campaign does not silently pass that option.
