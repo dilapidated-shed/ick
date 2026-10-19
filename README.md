@@ -49,10 +49,12 @@ See [`ick/README.md`](ick/README.md) for the source-ownership rule.
 
 ## Imprecise storage types
 
-`<ick/imprecise.h>` exposes the five low-precision numeric types `Float16`,
-`E4M3`, `E5M2`, `E3M2`, and `E5M3`. The first four use explicit binary32
-one-operation-then-requantize arithmetic; unsigned storage-only `E5M3` has no
-invented arithmetic.
+The signed OCP FP8 formats exposed by `<ick/imprecise.h>` are `E4M3`
+(1/4/3) and `E5M2` (1/5/2). Together with `Float16` and `E3M2`, they
+have explicit binary32 one-operation-then-requantize arithmetic. The
+unrelated unsigned Ootomo–Naruse storage codec is named `OotomoE5M3` and
+has no scalar arithmetic. Neither that codec nor NVIDIA/PTX's `UE5M3`
+block scale is an alias for signed OCP FP8.
 
 `<ick/circle.h>` exposes `Circle96`, `Rotation96`, `Reflection96`, and
 `Tangent96` as distinct geometric categories with exact 96-position rotation,

@@ -264,7 +264,7 @@ jobs:
           ! grep -Eq '__aeabi_d|__(add|sub|mul|div)df3' \
             /tmp/ick-imprecise.undefined
 
-          for kind in E5M3 CIRCLE CIRCLE_ROTATION_MIX; do
+          for kind in OOTOMO_E5M3 BARE_E5M3 FP8_SWAP CIRCLE CIRCLE_ROTATION_MIX; do
             if "$ick" "${target_flags[@]}" -std=c11 -O2 -ffreestanding -nostdinc \
                 -Iick/include -DTEST_$kind \
                 -c qualification/imprecise-types/reject-arithmetic.c \
@@ -273,7 +273,17 @@ jobs:
               echo "$kind category error was accepted" >&2
               exit 1
             fi
-            grep -Eqi 'invalid operands|incompatible types' /tmp/reject-$kind.log
+            # A removed typedef has a different expected diagnostic from
+            # arithmetic on two incompatible typed structures.  Keep the
+            # negative checks specific so infrastructure errors cannot pass.
+            case "$kind" in
+              BARE_E5M3)
+                grep -Eqi 'unknown type name.*E5M3' /tmp/reject-$kind.log
+                ;;
+              *)
+                grep -Eqi 'invalid operands|incompatible types' /tmp/reject-$kind.log
+                ;;
+            esac
           done
 
       - name: Verify Android-specific compile rules
@@ -609,7 +619,7 @@ jobs:
             echo
             echo 'PASS: ICK compiler built and its own installed `cc1` was used'
             echo
-            echo 'PASS: Float16/E4M3/E5M2/E3M2/E5M3 and Circle96 compiled with their intended arithmetic/category boundaries'
+            echo 'PASS: Float16/E4M3/E5M2/E3M2/OotomoE5M3 and Circle96 compiled with their intended arithmetic/category boundaries'
             echo
             echo 'PASS: expected ELF class/machine, PIC object, Android API 21 link, exported scalar boundary, mismatched-target refusal, and the ABI required load alignment'
             echo
