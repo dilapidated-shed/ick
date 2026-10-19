@@ -220,7 +220,8 @@ jobs:
         with:
           name: ick-bootstrap-bison-${{ matrix.abi }}-${{ github.run_id }}
           path: .ick-bootstrap-guard/bison-invocations.tsv
-          if-no-files-found: warn
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
 
       - name: Verify ordinary C and target identity

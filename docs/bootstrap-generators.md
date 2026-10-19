@@ -18,7 +18,7 @@ The [October 8, 2026 C-only qualification](https://github.com/dilapidated-shed/i
 
 A historical log cannot establish how the build behaves with Bison unavailable, and a grep through GCC source cannot establish which generators a particular build actually executes.
 
-The C-only qualification now runs with a Bison/Yacc shadow and process-level `execve` traces across configure, build and install. It distinguishes version/help probes from generation attempts, and checks for unshadowed absolute-path Bison/Yacc execution. The four Android ABI build lanes use the same deny/shadow control but do not yet retain their own system-call traces. A passing guard is evidence only for the concrete build revision and host configuration that ran it.
+The C-only qualification now runs with a Bison/Yacc shadow and process-level `execve` traces across configure, build and install. It distinguishes version/help probes from generation attempts, and checks for unshadowed absolute-path Bison/Yacc execution. The four Android ABI build lanes and the native polar-extraction regression use the same deny/shadow control but do not yet retain their own system-call traces. Their bootstrap receipts must be uploaded with hidden files enabled and missing evidence treated as an error. A passing guard is evidence only for the concrete build revision and host configuration that ran it.
 
 Flex remains an **explicit foreign GCC bootstrap dependency** while `gengtype-lex.cc` is generated from `gengtype-lex.l`. Its executable version and the generated source hash must be recorded; there is no authorization to call it ICKY or to treat a provisioned package as a compiler-runtime dependency. No separate Flex removal or lexer rewrite has been qualified.
 

@@ -33,7 +33,18 @@ jobs:
       - name: Install bootstrap tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential flex bison texinfo libgmp-dev libmpfr-dev libmpc-dev
+          sudo apt-get install -y build-essential flex texinfo libgmp-dev libmpfr-dev libmpc-dev
+      - name: Materialize the source before bootstrap tool isolation
+        run: >-
+          make -f .producer/ick-host/Makefile "$RUNNER_TEMP/ick-build/source/.materialized"
+          ICK_SOURCE="$GITHUB_WORKSPACE"
+          ICK_REVISION='${{ github.event.pull_request.head.sha || github.sha }}'
+          ICK_BUILD="$RUNNER_TEMP/ick-build"
+          ICK_STAGE="$RUNNER_TEMP/ick-stage"
+      - name: Check bootstrap guard controls
+        run: sh qualification/bootstrap-tools/test-bison-guard.sh
+      - name: Isolate Bison/Yacc while retaining GCC gengtype Flex
+        run: sh qualification/bootstrap-tools/bison-guard.sh setup "${{ runner.temp }}/ick-build/source"
       - name: Build exact current source
         run: >-
           make -f .producer/ick-host/Makefile all
@@ -41,6 +52,16 @@ jobs:
           ICK_REVISION='${{ github.event.pull_request.head.sha || github.sha }}'
           ICK_BUILD="$RUNNER_TEMP/ick-build"
           ICK_STAGE="$RUNNER_TEMP/ick-stage"
+      - name: Verify native bootstrap Bison/Yacc isolation
+        run: sh qualification/bootstrap-tools/bison-guard.sh verify "${{ runner.temp }}/ick-build/objects/gengtype-lex.cc"
+      - name: Retain native bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: polar-extraction-bootstrap
+          path: .ick-bootstrap-guard/
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Execute extraction and unchanged storage regressions
         run: >-
           make -f qualification/complex-extraction/Makefile all
