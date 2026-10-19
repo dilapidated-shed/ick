@@ -53,7 +53,7 @@ jobs:
           ICK_BUILD="$RUNNER_TEMP/ick-build"
           ICK_STAGE="$RUNNER_TEMP/ick-stage"
       - name: Verify native bootstrap Bison/Yacc isolation
-        run: sh qualification/bootstrap-tools/bison-guard.sh verify "${{ runner.temp }}/ick-build/objects/gengtype-lex.cc"
+        run: sh qualification/bootstrap-tools/bison-guard.sh verify "${{ runner.temp }}/ick-build/objects/gcc/gengtype-lex.cc"
       - name: Retain native bootstrap evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
