@@ -15916,6 +15916,7 @@ fold_indirect_ref_1 (location_t loc, tree type, tree op0)
 	}
       /* *(foo *)&complexfoo => __real__ complexfoo */
       else if (TREE_CODE (optype) == COMPLEX_TYPE
+	       && !SCALAR_FLOAT_TYPE_P (TREE_TYPE (optype))
 	       && type == TREE_TYPE (optype))
 	return fold_build1_loc (loc, REALPART_EXPR, type, op);
       /* *(foo *)&vectorfoo => BIT_FIELD_REF<vectorfoo,...> */
@@ -15969,6 +15970,7 @@ fold_indirect_ref_1 (location_t loc, tree type, tree op0)
 	    }
 	  /* ((foo*)&complexfoo)[1] => __imag__ complexfoo */
 	  else if (TREE_CODE (op00type) == COMPLEX_TYPE
+		   && !SCALAR_FLOAT_TYPE_P (TREE_TYPE (op00type))
 		   && type == TREE_TYPE (op00type))
 	    {
 	      if (known_eq (wi::to_poly_offset (TYPE_SIZE_UNIT (type)),

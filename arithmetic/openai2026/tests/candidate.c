@@ -46,6 +46,14 @@ static int primitives(void) {
   if (exact_set(&a,-1,0) || exact_set(&b,1,1) || exact_add(&out,&a,&b)
       || out.sign!=-1 || out.length!=1 || out.limbs[0]!=1 || out.binary_scale!=1) goto done;
   if (exact_compare(&order,&out,&a) || order!=1) goto done;
+  if (exact_set(&a,3,0) || exact_set(&b,5,0)) goto done;
+  if (exact_compare(&a.sign,&a,&b)!=EXACT_INVALID || a.sign!=1 || a.limbs[0]!=3) {
+    fputs("FAIL exact_compare output aliases input metadata\n",stderr); goto done;
+  }
+  if (exact_serialize(&a,0,(uint8_t *)&a.sign,1)!=EXACT_INVALID
+      || a.sign!=1 || a.limbs[0]!=3) {
+    fputs("FAIL exact_serialize output aliases input metadata\n",stderr); goto done;
+  }
   if (exact_set(&a,1,SIZE_MAX) || exact_half(&out,&a)!=EXACT_CAPACITY) goto done;
   if (exact_set(&a,INT64_MIN,0) || !equals(&a,"8000000000000000")) goto done;
   exact_dyadic alias=a;

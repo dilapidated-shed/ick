@@ -1,0 +1,21 @@
+# Independent AICI checks on the exact-head bootstrap artifact.
+# The C-only builder owns invocation observation; AICI does not invent a new compiler parser.
+nonempty	ICK-BOOTSTRAP-CONFIG-TRACE	evidence/configure.execve
+nonempty	ICK-BOOTSTRAP-BUILD-TRACE	evidence/build.execve
+nonempty	ICK-BOOTSTRAP-INSTALL-TRACE	evidence/install.execve
+nonempty	ICK-BOOTSTRAP-GENERATED-LEXER	evidence/gengtype-lex.cc
+nonempty	ICK-BOOTSTRAP-LEXER-HASH	evidence/gengtype-lex.sha256
+nonempty	ICK-BOOTSTRAP-SOURCE-REV	evidence/ick-source-commit.txt
+nonempty	ICK-BOOTSTRAP-GCC-LOCK	evidence/SOURCE.lock
+nonempty	ICK-BOOTSTRAP-PRUNE	evidence/PRUNE
+nonempty	ICK-BOOTSTRAP-FLEX-VERSION	evidence/flex-version.txt
+nonempty	ICK-BOOTSTRAP-FLEX-EXECUTABLE	evidence/flex-executable.sha256
+contains	ICK-BOOTSTRAP-FLEX-GENGTYPE	evidence/build.execve	-ogengtype-lex.cc
+contains	ICK-BOOTSTRAP-FLEX-EXECPATH	evidence/build.execve	execve("/usr/bin/flex"
+not_contains	ICK-BOOTSTRAP-NO-BISON-BUILD	evidence/build.execve	execve("/usr/bin/bison"
+not_contains	ICK-BOOTSTRAP-NO-YACC-BUILD	evidence/build.execve	execve("/usr/bin/yacc"
+not_contains	ICK-BOOTSTRAP-NO-BISON-CONFIG	evidence/configure.execve	execve("/usr/bin/bison"
+not_contains	ICK-BOOTSTRAP-NO-YACC-CONFIG	evidence/configure.execve	execve("/usr/bin/yacc"
+not_contains	ICK-BOOTSTRAP-NO-BISON-INSTALL	evidence/install.execve	execve("/usr/bin/bison"
+not_contains	ICK-BOOTSTRAP-NO-YACC-INSTALL	evidence/install.execve	execve("/usr/bin/yacc"
+not_contains	ICK-BOOTSTRAP-NO-BISON-GENERATION	evidence/bison-invocations.tsv	use

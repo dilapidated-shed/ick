@@ -28,7 +28,7 @@ claim to execute those whole products.
 
 The required `check` and `mutants` Make targets take absolute `ICK_CC`,
 `ORACLE_IDRIC` and `CORPUS` paths. The oracle compiler must report the pinned
-081b9cde0 revision and use Chez. `check` retains actual output, candidate and gate
+2734ac5a8 revision and use Chez. `check` retains actual output, candidate and gate
 statuses, dynamic symbols, dependencies, executable disassembly and hashes.
 `mutants` invokes the same outer runner on wrong-side-sign, omitted-undo,
 dropped-carry, zero and oracle-bypass executables. Each failed child or comparison

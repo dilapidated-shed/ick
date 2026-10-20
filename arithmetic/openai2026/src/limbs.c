@@ -101,6 +101,8 @@ static int magnitude_compare(const exact_dyadic *a, const exact_dyadic *b) {
 }
 exact_status exact_compare(int *order, const exact_dyadic *a, const exact_dyadic *b) {
   if (!order || !exact_valid(a) || !exact_valid(b) || exact_alias_invalid(a,b)
+      || exact_overlap(order,sizeof(*order),a,sizeof(*a))
+      || exact_overlap(order,sizeof(*order),b,sizeof(*b))
       || exact_overlap(order,sizeof(*order),a->limbs,a->capacity*sizeof(uint32_t))
       || exact_overlap(order,sizeof(*order),b->limbs,b->capacity*sizeof(uint32_t))) return EXACT_INVALID;
   *order=a->sign!=b->sign ? (a->sign>b->sign ? 1 : -1)
