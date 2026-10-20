@@ -103,6 +103,7 @@ done:
 exact_status exact_serialize(const exact_dyadic *in, size_t scale, uint8_t *out, size_t width) {
   if (!exact_valid(in) || !out || !width || width>SIZE_MAX/8
       || scale<in->binary_scale
+      || exact_overlap(out,width,in,sizeof(*in))
       || exact_overlap(out,width,in->limbs,in->capacity*sizeof(uint32_t))) return EXACT_INVALID;
   size_t shift=scale-in->binary_scale, bits=exact_bits(in), available=width*8;
   if (bits && (shift>available || bits>available-shift)) return EXACT_CAPACITY;

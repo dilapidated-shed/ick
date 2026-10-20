@@ -17,6 +17,8 @@ exact_status exact_init(exact_dyadic *, size_t capacity);
 void exact_clear(exact_dyadic *);
 exact_status exact_set(exact_dyadic *, int64_t numerator, size_t binary_scale);
 exact_status exact_copy(exact_dyadic *, const exact_dyadic *);
+/* Comparison and serialization outputs may not overlap any input record's
+ * metadata or magnitude limbs. Refusal preserves both output and inputs. */
 exact_status exact_compare(int *order, const exact_dyadic *, const exact_dyadic *);
 exact_status exact_add(exact_dyadic *, const exact_dyadic *, const exact_dyadic *);
 exact_status exact_subtract(exact_dyadic *, const exact_dyadic *, const exact_dyadic *);

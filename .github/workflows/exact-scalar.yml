@@ -9,6 +9,9 @@ on:
       - .github/workflows/exact-scalar.yml
 permissions:
   contents: read
+env:
+  IDRIS2_PREFIX: ${{ github.workspace }}/Idric/_/bootstrap-build
+  CHEZ: ${{ github.workspace }}/Idric/_/.tools/bin/scheme
 jobs:
   exact-scalar:
     runs-on: ubuntu-24.04
@@ -31,7 +34,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: isomorphisms/Idric
-          ref: 081b9cde0591154839fb5d80d76e5570e0436300
+          ref: 2734ac5a86610eddfab73b1644d72b4ac85a65ee
           path: Idric
           persist-credentials: false
       - name: Check out the immutable STAR corpus
@@ -47,25 +50,22 @@ jobs:
         working-directory: runtime-source
         run: make -f qualification/native-polar/Makefile build check
       - name: Bootstrap the exact independent Idriç compiler through Chez
-        run: ./Idric/edric bootstrap
-      - name: Install the oracle compiler support library
-        run: make -C Idric install-support PREFIX="$HOME/.idris2"
-      - name: Install the oracle compiler's pinned Prelude and libraries
         env:
-          PATH: ${{ github.workspace }}/Idric/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        run: make -C Idric install-bootstrap-libs IDRIS2="$GITHUB_WORKSPACE/Idric/build/exec/idris2"
+          CC: ${{ github.workspace }}/runtime-source/build/native-polar/stage/bin/gcc
+          CFLAGS: -fno-link-libatomic -static-libgcc
+        run: ./Idric/edric bootstrap
       - name: Execute the candidate and every required defect through the outer runner
         env:
-          PATH: ${{ github.workspace }}/Idric/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        run: make -C arithmetic/openai2026 check mutants ICK_CC="$GITHUB_WORKSPACE/runtime-source/build/native-polar/stage/bin/gcc" ORACLE_IDRIC="$GITHUB_WORKSPACE/Idric/build/exec/idris2" CORPUS="$GITHUB_WORKSPACE/STAR/integer-multiplication/openai-2026/contracts/mul-v1.tsv"
+          PATH: ${{ github.workspace }}/Idric/_/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        run: make -C arithmetic/openai2026 check mutants ICK_CC="$GITHUB_WORKSPACE/runtime-source/build/native-polar/stage/bin/gcc" ORACLE_IDRIC="$GITHUB_WORKSPACE/Idric/_/build/exec/idris2" CORPUS="$GITHUB_WORKSPACE/STAR/integer-multiplication/openai-2026/contracts/mul-v1.tsv"
       - name: Execute reduced frame networks, address layouts and every required defect
         env:
-          PATH: ${{ github.workspace }}/Idric/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        run: make -C arithmetic/openai2026 check-layouts mutants-layouts ICK_CC="$GITHUB_WORKSPACE/runtime-source/build/native-polar/stage/bin/gcc" ORACLE_IDRIC="$GITHUB_WORKSPACE/Idric/build/exec/idris2" CORPUS="$GITHUB_WORKSPACE/STAR/integer-multiplication/openai-2026/contracts/mul-v1.tsv"
+          PATH: ${{ github.workspace }}/Idric/_/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        run: make -C arithmetic/openai2026 check-layouts mutants-layouts ICK_CC="$GITHUB_WORKSPACE/runtime-source/build/native-polar/stage/bin/gcc" ORACLE_IDRIC="$GITHUB_WORKSPACE/Idric/_/build/exec/idris2" CORPUS="$GITHUB_WORKSPACE/STAR/integer-multiplication/openai-2026/contracts/mul-v1.tsv"
       - name: Execute motif layers, synthetic transforms, convolution and every required defect
         env:
-          PATH: ${{ github.workspace }}/Idric/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        run: make -C arithmetic/openai2026 check-numerical mutants-numerical ICK_CC="$GITHUB_WORKSPACE/runtime-source/build/native-polar/stage/bin/gcc" ORACLE_IDRIC="$GITHUB_WORKSPACE/Idric/build/exec/idris2" CORPUS="$GITHUB_WORKSPACE/STAR/integer-multiplication/openai-2026/contracts/mul-v1.tsv"
+          PATH: ${{ github.workspace }}/Idric/_/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        run: make -C arithmetic/openai2026 check-numerical mutants-numerical ICK_CC="$GITHUB_WORKSPACE/runtime-source/build/native-polar/stage/bin/gcc" ORACLE_IDRIC="$GITHUB_WORKSPACE/Idric/_/build/exec/idris2" CORPUS="$GITHUB_WORKSPACE/STAR/integer-multiplication/openai-2026/contracts/mul-v1.tsv"
       - name: Preserve exact values, descriptors, dependencies, identities and statuses
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
