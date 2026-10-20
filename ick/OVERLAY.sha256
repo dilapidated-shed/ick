@@ -4,14 +4,14 @@ c084c5eee315bf0b0650d1b9684ea3113614d01f6d6a67e1d2876f71a9ad8a49  ick/source/gcc
 eb5224f958342e3f90ea592e46bb6a1df25a40ec15e46a9c8c573191bbd51148  ick/source/gcc/c-family/c-common.def
 26c2de0fcc0177bf2cf0e0879a0e47657e50ab6bfc4f49b024838bbadc48c8bc  ick/source/gcc/c-family/c-lex.cc
 c59ae4eb8a60ed750a3d84cd0440778f6cb3be5fe233363e18a00b0b67b38721  ick/source/gcc/c-family/c-pragma.h
-02e4b541ce0feb37e75fd7af7b6d72b1f5dcb5cf7be272555ffaf8970db42abf  ick/source/gcc/c-family/c.opt
+2b9279ea2af852c32e0b7dfe624eeb7ee5fc00af3edebde78df482246029c8b9  ick/source/gcc/c-family/c.opt
 37e6af08ca57e3596f03e560db6c4e52010cfb8da39003a114ab9a1fb6f9007a  ick/source/gcc/c/c-decl.cc
 05ebaa543cf59276d5dd600d3b6f0ad5aafadf6c3de42b69ab73bedcb3e3c572  ick/source/gcc/c/c-parser.cc
 053d08c44021bacdb3658fcbad5ff2106941630f47432497ef2f6e49dba7d83a  ick/source/gcc/c/c-parser.h
 4899484bb96f27353366f1ea667bacbf775a42b8a210f0fb43beeabf8b52b537  ick/source/gcc/c/c-typeck.cc
 e79306adbfa5904ae520e36d03c52e693bb04b61c0ed2b11256b6a11edb91e75  ick/source/gcc/c/ick-android-availability.h
 78aff5b1d45c0570d5e37799d8c2c405dfff8621700b5d7f59854a96fe523e97  ick/source/gcc/c/icky-consumer.h
-f72a4c9096402b126df75cdbdea6bd9028cbd1291ebc24a42eb7c912a5c32a23  ick/source/gcc/c/icky-protocol.h
+2d924370da37fa8abaf6c064b3db5aece40396197b015c0e25ba26429a481d45  ick/source/gcc/c/icky-protocol.h
 83247d67c48e8587f6b762bf932e88f2b0c3bd356142afed5254dee9005eb874  ick/source/gcc/fold-const.cc
 85b6a87aebfa02b41f80bb86278effefc109432fb8a730f5d3c94557a3d8484e  ick/source/gcc/ipa-icf.cc
 6880e7e43f7fb53f7faa28bae0742910973758eafd27350c28f4caad547a9661  ick/source/gcc/testsuite/gcc.dg/ick-android-address-api.c

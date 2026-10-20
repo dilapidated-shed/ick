@@ -18,5 +18,6 @@ int main (void)
   /* Existing ICK syntax outside the selected lane remains ordinary C. */
   x ← 010;
   if (x != 8 || 6 × 3 != 18 || 8 ÷ 2 != 4) return 7;
+  if (__builtin_icky(( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( ( 010 ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) ) )) != 8) return 8;
   return 0;
 }

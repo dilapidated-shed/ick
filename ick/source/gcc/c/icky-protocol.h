@@ -201,7 +201,7 @@ class reader
       {
         node child;
         std::string expected = prefix + std::to_string (result.children.size ());
-        if (!piece (expected, depth + 1, child)) return false;
+        if (!piece (expected, depth, child)) return false;
         result.children.push_back (child);
       }
     if (result.children.empty ()
