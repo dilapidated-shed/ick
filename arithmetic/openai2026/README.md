@@ -42,6 +42,44 @@ compiler, libgcc, libatomic and all 21 native runtime tests passed; no new runti
 repair is included. Bootstrap host gcc/g++, oracle Scheme and maintained ICK
 compilation are separate stages. See `dependencies.lock` and generated receipts.
 
+MUL-2 adds lazy h=4 role/stage descriptors, checked rational projections and
+lower-permutation-lower factorizations, binary residual bases, and prime
+exclusion. All 8,368 edges and all 1,264 routed endpoints are checked, including
+the auxiliaries. Rational source matrices are negative projections on X.
+Every one of the 533 distinct rational factorizations is reconstructed and
+executes its 64-coordinate modular shear modulo a prime excluding its factors.
+Preparation bit growth, matrix work, cache hits and allocated/used cache bytes
+are recorded separately.
+
+Two exact restricted array profiles execute the frame changes and scalar gates
+together. A one-point bit profile qualifies all 320 role basis directions and
+physical common-gate alignment modulo 223. A one-column Fourier-character
+Gaussian profile qualifies all 944 role basis directions and five dense signed
+complex cases. Later address fields and nonzero scratch survive the prescribed
+route. The representations are explicit; no 2^64-entry array is materialized.
+The complete reduced frame reference has 10,931 records.
+
+The address component includes cyclic whole-row split/merge, padding, modeled
+LSB counters, three modular interchange shears, the eight packed rotations,
+their actual inverse, the exceptional correction T0 S0^-1, and stable LSD
+key sorting/reinsertion. A 4,096-record closed exceptional orbit checks nonzero
+payload transport. Another 123,904 cases compare direct address maps at guard
+boundaries, including wrapping and the highest selected bit. RAM coordinate
+checks and modeled sequential-tape moves are labeled separately.
+
+`check-layouts` and `mutants-layouts` use the same absolute compiler/corpus
+arguments as `check`. Candidate stdout/stderr, linkage, executable identities,
+disassembly, preparation counts and all child/gate/outer statuses are retained
+under `build/layouts`. Endpoint-sign, source-rank, inverse-order, auxiliary-frame
+and omitted-correction defects all must fail. Independent Idriç Integer
+references do not read the candidate's results.
+
+The h=100 constants are checked symbolically. Materialization refuses with a
+capacity result; h=9 rational labels refuse as singular. The h=4 profiles do
+not inherit the published rank saving, recursive dense-array schedule or tape
+performance theorem. Full packed rectangles with an active exceptional repair
+are outside the executable profile. Downstream admission must preserve these
+boundaries.
 MUL-4 adds precision-certified roots and Gaussian exponentials and the ordered
 resampling maps A=S/2 and B0=D' J' C. Its admitted domain is p=101..256,
 2<=s<t<=64, coprime lengths, alpha>=2, alpha^2<p and
