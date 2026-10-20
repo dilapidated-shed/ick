@@ -34,6 +34,6 @@ The ordinary ARM32 qualification and ICK's general floating-point policy remain
 strict, and this gate does not ask the compiler to auto-vectorize ordinary
 scalar float loops.
 
-Compact formats such as E5M3 remain governed by their separate arithmetic and
-storage contract. This gate proves the SIMD machine path without changing that
+Signed OCP E4M3/E5M2 and OotomoE5M3 storage retain their distinct
+arithmetic and storage contracts. This gate proves the SIMD machine path without changing that
 contract.

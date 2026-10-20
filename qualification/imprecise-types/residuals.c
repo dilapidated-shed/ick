@@ -89,7 +89,7 @@ print_constructor_samples(void)
         E4M3 e4 = e4m3_from_float(input);
         E5M2 e52 = e5m2_from_float(input);
         E3M2 e32 = e3m2_from_float(input);
-        E5M3 e53;
+        OotomoE5M3 e53;
         float result;
 
         result = float16_to_float(f16);
@@ -108,12 +108,12 @@ print_constructor_samples(void)
         printf("sample,E3M2,%.9g,%.9g,%.9g,0x%02x\n",
                input, result, result - input, (unsigned)e3m2_code(e32));
 
-        if (e5m3_from_float(input, &e53)) {
-            result = e5m3_to_float(e53);
-            printf("sample,E5M3,%.9g,%.9g,%.9g,0x%02x\n",
-                   input, result, result - input, (unsigned)e5m3_code(e53));
+        if (ootomo_e5m3_from_float(input, &e53)) {
+            result = ootomo_e5m3_to_float(e53);
+            printf("sample,OotomoE5M3,%.9g,%.9g,%.9g,0x%02x\n",
+                   input, result, result - input, (unsigned)ootomo_e5m3_code(e53));
         } else {
-            printf("sample,E5M3,%.9g,unsupported,unsupported,unsupported\n",
+            printf("sample,OotomoE5M3,%.9g,unsupported,unsupported,unsupported\n",
                    input);
         }
     }
@@ -140,7 +140,7 @@ constructor_sweeps(void)
                 float input = ick_float_from_bits(bits);
                 float magnitude = abs_float(input);
                 float result;
-                E5M3 encoded53;
+                OotomoE5M3 encoded53;
 
                 if (magnitude <= 65504.0f) {
                     result = float16_to_float(float16_from_float(input));
@@ -162,8 +162,8 @@ constructor_sweeps(void)
                     record_residual(&e32, input, input, result);
                 }
 
-                if (e5m3_from_float(input, &encoded53)) {
-                    result = e5m3_to_float(encoded53);
+                if (ootomo_e5m3_from_float(input, &encoded53)) {
+                    result = ootomo_e5m3_to_float(encoded53);
                     record_residual(&e53, input, input, result);
                 }
             }
@@ -175,7 +175,7 @@ constructor_sweeps(void)
     print_stats("constructor", "E4M3", "encode_decode", &e4);
     print_stats("constructor", "E5M2", "encode_decode", &e52);
     print_stats("constructor", "E3M2", "encode_decode", &e32);
-    print_stats("constructor", "E5M3", "encode_decode", &e53);
+    print_stats("constructor", "OotomoE5M3", "encode_decode", &e53);
 }
 
 static void
