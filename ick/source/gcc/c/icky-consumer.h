@@ -101,6 +101,11 @@ inline bool locate (location_t location, std::vector<raw_source> &sources,
 inline bool capture (const c_token &token, std::vector<raw_source> &sources,
                      token_mapping &mapping, std::string &problem)
 {
+  /* CPP records explicit #line and GNU linemarker directives separately from
+     its own startup and column-width maps.  Such logical maps cannot certify
+     physical source origin, even when another real file has matching text.  */
+  if (line_table->seen_line_directive)
+    return icky_consumer::refusal (problem, "ICKY_EXPANSION_MAP");
   if (!token.source_spelling || !token.source_spelling_length
       || token.source_spelling_length > 65536)
     return icky_consumer::refusal (problem, "ICKY_TOKEN_UNSUPPORTED");

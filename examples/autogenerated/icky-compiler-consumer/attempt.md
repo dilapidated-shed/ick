@@ -28,6 +28,8 @@ complete ordered token coverage; exact paths/group intervals/written slices;
 decimal-spelling consistency; no unsupported grammar fallback. Locations must
 resolve to retained real source bytes; fabricated `#line`, token-paste or other
 ambiguous mappings refuse. Raw snapshots are checked again after parser exit.
+CPP's existing `seen_line_directive` flag rejects logical #line/GNU markers;
+matching text in another physical file cannot certify their source origin.
 
 Effects: a bounded private input file, direct child execution of the declared
 native parser ABI, exit/output checking, optional compiler-owned TSV receipt.

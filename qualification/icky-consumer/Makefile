@@ -9,9 +9,9 @@ PARSER_LIBS := $(PARSER_ROOT)/runtime/elf:$(PARSER_ROOT)/app/icky-parser_app
 PARSER := env -i LD_LIBRARY_PATH=$(PARSER_LIBS) IDRIS2_INC_SRC=$(PARSER_ROOT)/app/icky-parser_app $(PARSER_ROOT)/runtime/elf/ld-linux-x86-64.so.2 --library-path $(PARSER_LIBS) $(PARSER_ROOT)/runtime/scheme -b $(PARSER_ROOT)/runtime/petite.boot -b $(PARSER_ROOT)/runtime/scheme.boot --program $(PARSER_ROOT)/app/icky-parser_app/icky-parser.so
 OPTIONS := -ficky-parser-package=$(PARSER_ROOT)
 LEVELS := O0 O2
-REFUSALS := 2 3 4 5 6 7 8
+REFUSALS := 2 3 4 5 6 7 8 9 10
 .PHONY: all protocol $(addprefix run-,$(LEVELS)) $(addprefix refuse-,$(REFUSALS)) parser-refusals mutants
-all: protocol $(addprefix run-,$(LEVELS)) $(addprefix refuse-,$(REFUSALS)) parser-refusals mutants
+all: protocol $(addprefix run-,$(LEVELS)) $(addprefix refuse-,$(REFUSALS)) parser-refusals mutants remap-diagnostics
 $(BUILD):
 	mkdir -p "$@"
 protocol: | $(BUILD)
@@ -34,6 +34,9 @@ refuse-$(1): | $(BUILD)
 	grep -E 'ICKY_|read-only' "$(BUILD)/refuse-$(1).log"
 endef
 $(foreach case,$(REFUSALS),$(eval $(call negative,$(case))))
+remap-diagnostics: refuse-9 refuse-10
+	grep ICKY_EXPANSION_MAP "$(BUILD)/refuse-9.log"
+	grep ICKY_EXPANSION_MAP "$(BUILD)/refuse-10.log"
 parser-refusals: | $(BUILD)
 	! timeout 30 "$(ICK)" -DCASE=1 -c "$(CASES)/negative.c" -o "$(BUILD)/missing.o" > "$(BUILD)/missing.log" 2>&1
 	grep ICKY_PARSER_REQUIRED "$(BUILD)/missing.log"

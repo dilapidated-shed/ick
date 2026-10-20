@@ -22,8 +22,10 @@ coordinates, every written token, nested structure, paths and ordered coverage.
 It retains actual GCC spelling and macro-expansion locations, verifies spelling
 slices against physical source snapshots, then checks those snapshots again
 after the child exits. Harmless source comments/spacing and simple macro
-expansion are supported through these maps. Fabricated locations, unavailable
-files and pasted tokens without a unique physical slice refuse. Raw files are
+expansion are supported through these maps. CPP's explicit line-directive flag
+rejects `#line` and GNU linemarkers, including redirects to existing files with
+matching token text. Preprocessed inputs containing such markers, unavailable
+files and pasted/spliced tokens without a unique physical slice refuse. Raw files are
 bounded to 1 MiB each / 8 MiB total; parsed buffers to 64 KiB / 512 tokens / 32
 group levels; protocol output to 1 MiB.
 
