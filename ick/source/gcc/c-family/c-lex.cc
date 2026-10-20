@@ -756,6 +756,19 @@ c_lex_with_flags (tree *value, location_t *loc, unsigned char *cpp_flags,
 	    break;
 	  }
 
+	/* U+00F7 DIVISION SIGN shares C's existing division token.
+	   Lower it after preprocessing so stringification and literals retain
+	   their original UTF-8 spelling.  Ordinary '/' remains accepted.  */
+	if (!c_dialect_cxx () && !c_dialect_objc ()
+	    && tok->val.str.len == 2
+	    && tok->val.str.text[0] == 0xc3
+	    && tok->val.str.text[1] == 0xb7)
+	  {
+	    type = CPP_DIV;
+	    *value = NULL_TREE;
+	    break;
+	  }
+
 	cppchar_t c = tok->val.str.text[0];
 
 	if (c == '"' || c == '\'')

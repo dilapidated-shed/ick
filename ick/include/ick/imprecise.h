@@ -17,13 +17,13 @@ typedef struct { ick_u16 payload; } Float16;
 typedef struct { ick_byte payload; } E4M3;
 typedef struct { ick_byte payload; } E5M2;
 typedef struct { ick_byte payload; } E3M2;
-typedef struct { ick_byte payload; } E5M3;
+typedef struct { ick_byte payload; } OotomoE5M3;
 
 _Static_assert(sizeof(Float16) == 2, "Float16 storage must be two bytes");
 _Static_assert(sizeof(E4M3) == 1, "E4M3 storage must be one byte");
 _Static_assert(sizeof(E5M2) == 1, "E5M2 storage must be one byte");
 _Static_assert(sizeof(E3M2) == 1, "E3M2 storage must be one byte");
-_Static_assert(sizeof(E5M3) == 1, "E5M3 storage must be one byte");
+_Static_assert(sizeof(OotomoE5M3) == 1, "OotomoE5M3 storage must be one byte");
 
 static inline ick_u32
 ick_float_bits(float value)
@@ -349,15 +349,15 @@ static inline E3M2 e3m2_multiply(E3M2 a, E3M2 b)
 static inline E3M2 e3m2_divide(E3M2 a, E3M2 b)
 { return e3m2_from_float(e3m2_to_float(a) / e3m2_to_float(b)); }
 
-/* Ootomo-Naruse unsigned E5M3 storage ---------------------------------- */
+/* Ootomo-Naruse unsigned OotomoE5M3 storage ---------------------------------- */
 
-static inline E5M3 e5m3_from_code(ick_byte code)
-{ E5M3 value = { code }; return value; }
-static inline ick_byte e5m3_code(E5M3 value)
+static inline OotomoE5M3 ootomo_e5m3_from_code(ick_byte code)
+{ OotomoE5M3 value = { code }; return value; }
+static inline ick_byte ootomo_e5m3_code(OotomoE5M3 value)
 { return value.payload; }
 
 static inline int
-e5m3_from_float(float value, E5M3 *output)
+ootomo_e5m3_from_float(float value, OotomoE5M3 *output)
 {
     ick_u32 bits = ick_float_bits(value);
     ick_u32 exponent = (bits >> 23) & 0xffu;
@@ -368,7 +368,7 @@ e5m3_from_float(float value, E5M3 *output)
 }
 
 static inline float
-e5m3_to_float(E5M3 value)
+ootomo_e5m3_to_float(OotomoE5M3 value)
 {
     ick_u32 bits = ((ick_u32)value.payload << 20) + 0x38080000u;
     return ick_float_from_bits(bits);
