@@ -1,13 +1,13 @@
 # Imprecise numeric types
 
-ICK exposes the same five low-precision numeric concepts currently defined by
-the Idriç/Edriç source layer:
+ICK exposes two signed OCP FP8 formats, two other compact arithmetic formats,
+and a separately named experimental unsigned storage codec:
 
 - `Float16`
 - `E4M3`
 - `E5M2`
 - `E3M2`
-- `E5M3`
+- `OotomoE5M3`
 
 The C boundary lives in `<ick/imprecise.h>`. The header is freestanding: it
 uses no libc headers and requires only an eight-bit byte, a 32-bit unsigned
@@ -20,7 +20,7 @@ Float16   16 bits
 E4M3       8 bits
 E5M2       8 bits
 E3M2       6 payload bits in one byte
-E5M3       8 bits
+OotomoE5M3       8 bits
 ```
 
 They are distinct C structure types rather than aliases for integer containers.
@@ -36,7 +36,7 @@ functions for those four types.
 
 This intentionally does not route through binary64.
 
-`E5M3` is different. It is the unsigned Ootomo-Naruse eight-bit storage
+The explicitly named `OotomoE5M3` is different. It is the unsigned Ootomo-Naruse eight-bit storage
 format. It has explicit encode/decode operations but no scalar arithmetic
 contract. Because it is a distinct structure type, ordinary C arithmetic on it
 is rejected.
@@ -72,12 +72,12 @@ backend. The six payload bits are one sign bit, three exponent bits, and two
 mantissa bits. E3M2 has subnormals and signed zero but no infinity or NaN
 encoding. Overflow saturates at 28. A source NaN maps to positive zero, matching the current Idriç source policy.
 
-## E5M3
+## OotomoE5M3
 
 ICK follows the Ootomo-Naruse unsigned storage format documented in the ARM
 Thumb backend. The published conversion applies to positive normal binary32
-inputs, so `e5m3_from_float` remains partial and returns failure for values
-outside that domain. `e5m3_to_float` implements the published midpoint
+inputs, so `ootomo_e5m3_from_float` remains partial and returns failure for values
+outside that domain. `ootomo_e5m3_to_float` implements the published midpoint
 reconstruction for every one of the 256 payload codes.
 
 ## Source alignment
@@ -85,9 +85,9 @@ reconstruction for every one of the 256 payload codes.
 The policy comes from the current Idriç work:
 
 - PR #49: Float16 binary32-carrier semantics
-- PR #120: first-class E4M3, E5M2, E3M2, and E5M3 source semantics
+- PR #120: first-class E4M3, E5M2, E3M2, and a historically bare E5M3 storage codec; its source name still needs reconciliation.
 
-The E3M2 and E5M3 storage references are also recorded in
+The E3M2 and OotomoE5M3 storage references are also recorded in
 `isomorphisms/idric-arm-thumb`.
 
 ## Qualification
@@ -98,9 +98,28 @@ The host semantic probe checks:
 - every finite positive E4M3 payload;
 - every finite positive E5M2 payload;
 - all 64 E3M2 payloads;
-- all 256 E5M3 payloads;
+- all 256 OotomoE5M3 payloads;
 - representative overflow and tie boundaries;
 - the four arithmetic formats' requantization policy.
 
 The Android four-ABI matrix then compiles the same freestanding interface with
 ICK itself and verifies that no binary64 helper has entered the boundary.
+
+## No ambiguous E5M3 name in ICK's C API
+
+The old bare `E5M3` C type and `e5m3_*` functions have been replaced by
+`OotomoE5M3` and `ootomo_e5m3_*`; no confusing compatibility alias
+is provided. For **signed OCP FP8** arithmetic select `E4M3` or `E5M2`
+explicitly. Ootomo–Naruse's unsigned codebook has neither signed FP8
+arithmetic nor OCP semantics. NVIDIA/PTX `UE5M3` block-scale encoding
+and experimental IDK's signed nine-logical-bit `E5M3` are also different.
+None of these raw codepoints may be reinterpreted as the others.
+
+The semantic test checks all 256 signed FP8 payloads for category/round-trip
+behavior, standard byte vectors, subnormal endpoints, ties-to-even and the
+explicit saturating overflow policy. Negative compiler fixtures reject both
+the old bare C name and E4M3/E5M2 type interchange. The host semantic
+test and ICK Android object gate are separate evidence classes, not QEMU
+or physical-device execution.
+
+Migration envelope: https://github.com/isomorphisms/flexible-pipes/issues/83
