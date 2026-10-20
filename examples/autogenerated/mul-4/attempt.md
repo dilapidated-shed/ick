@@ -67,3 +67,9 @@ helper collision observed in the combined MUL-1/MUL-2 qualification.
 This local qualification is a bounded numerical component. Exact-head hosted
 verification is configured separately. Whole multiplication and physical
 Android/device acceptance require their later independent gates.
+
+## BACKLOG-REPAIR-02 accepted-parent reconciliation
+
+The normal two-parent reconciliation retains this independent resampling component and accepted main scalar/compiler source bff5a413d2c86b85246017f16a8fbc76900e6942. The shared workflow conflict preserves both scalar and resampling positive/negative stages and uses the actual hidden-root paths for owned Idriç/Chez 2734ac5. The toolchain TSV retains the distinct native candidate and independent interval-reference roles, updated to that actual oracle compiler. No reference algorithm or serialized contract is changed. accepted_mul_1 names the real main merge.
+
+This PR now targets main after its scalar parent was integrated. Earlier hosted results remain historical; the reconciled head must execute inherited scalar plus certified scalar/line/tensor and all real defects afresh through retained native ICK/own-runtime 143e29580. Bounded correctness does not establish whole multiplication, a paper running-time result, ARM or physical-device acceptance.
