@@ -44,10 +44,31 @@ an Idriç-to-C fallback, or a new managed C++ runtime. All new syntax parsing is
 performed by the retained compiled Idriç program. Tests at this foreign ABI use
 the same consumer code and real compiler fixtures.
 
-Execution status: IMPLEMENTATION_IN_PROGRESS. No compiler-backed or independent
-K3 acceptance is claimed yet. Full GCC builds use the declared disposable hosted
-build profile; this session lacks Flex and has less than 1 GiB free, so it is
-not used as a full compiler-build host.
+Execution: source implementation is complete. The original archived parser
+executed its V3 identity and produced the source fixture consumed by 22 passing
+native foreign-boundary assertions. `make -f qualification/icky-consumer/Makefile
+protocol` with absolute BUILD and PARSER_ROOT selects that exact package. The
+test compiled with host C++11 and all warnings fatal. Address/undefined sanitizer
+replay also passed with leak checking disabled: this host's ptrace environment
+prevents LeakSanitizer's thread inspection; that first sanitizer invocation
+failed in the runtime and is not counted as a passing check.
+
+`protocol-test.cc` tests GCC's actual protocol reader. `protocol-mutant.cc`
+replays real archived-parser output with one deliberate corruption, and can
+append to its disposable raw-source fixture. Both are native foreign-boundary
+tests, not substitute syntax parsers or Python/Node fallbacks. The real compiler
+fixtures separately require octal eight, decimal ten, names, grouped nouns,
+macro expansion, raw Unicode comments and existing ordinary ICK operations.
+Outputs include objects and executables for independent consumers.
+
+Full GCC builds use the declared disposable hosted profile; this session lacks
+Flex and has less than 1 GiB free, so it is not used as a full compiler-build
+host. The exact-head workflow's terminal receipts determine compiler-backed
+qualification; source/local protocol results cannot stand in for that execution.
+K3 independent semantic/ABI acceptance and BC-P01-S01 authenticated ICK roles
+remain separate, uncompleted owner obligations. The current retained observer
+at ai-ci `5c80279dfcee565f4e999d2b1f97feb966b8efd3` still fixes compile to
+clang-18. No fabricated issuer, role replacement or weaker admission is supplied.
 
 Language work: the current versioned Idriç protocol supplies the needed syntax,
 positions and raw spelling. A direct typed Idriç/GCC AST foreign interface is

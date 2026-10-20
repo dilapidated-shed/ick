@@ -307,6 +307,8 @@ c_parser_icky_expression (c_parser *parser)
   while (c_parser_next_token_is_not (parser, CPP_EOF))
     {
       c_token token = *c_parser_peek_token (parser);
+      if (token.type == CPP_PRAGMA || token.type == CPP_PRAGMA_EOL)
+        { problem = "ICKY_TOKEN_UNSUPPORTED"; break; }
       if (token.type == CPP_CLOSE_PAREN && depth == 0)
         {
           finishing = token.get_finish ();
