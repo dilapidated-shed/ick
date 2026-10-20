@@ -68,3 +68,9 @@ contract. The layout helpers now have unique LayoutGate/LayoutRun module and
 file names, job-specific TTC cache directories, and Makefile dependencies that
 rebuild helpers when their compiler command changes. The combined qualification
 sequence is required locally too; it also catches historical stale caches.
+
+## BACKLOG-REPAIR-02 accepted-parent reconciliation
+
+The scalar source is now accepted on main at bff5a413d2c86b85246017f16a8fbc76900e6942. The normal two-parent reconciliation a95112e4459371c2f3816e024d42a02f66cd979c preserves the independent frame/layout additions and main's newer compiler/runtime controls. The only textual conflict was the shared arithmetic workflow. Both scalar and layout positive/negative stages remain; both use the actual hidden-root Idriç/Chez 2734ac5 paths and the retained 143e29580 native ICK runtime profile. The Makefile inherits the accepted metadata-alias guards, oracle revision and unchanged scalar reference hash. The accepted_mul_1 lock now points to the actual main merge.
+
+The target is main after its parent was integrated. Earlier green runs are historical and do not qualify this reconciled head. Exact-head inherited scalar, frame/layout and all required defects must run afresh. No ARM, physical A1/C67, whole-multiplier or paper running-time acceptance follows from these bounded profiles.
