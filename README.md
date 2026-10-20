@@ -21,6 +21,7 @@ See:
 - [`docs/targets.md`](docs/targets.md) for the orthogonal target model.
 - [`docs/c-assignment-arrow.md`](docs/c-assignment-arrow.md) for Icky C `←` assignment.
 - [`docs/c-multiplication-glyph.md`](docs/c-multiplication-glyph.md) for Icky C `×` multiplication.
+- [`docs/native-polar-float128.md`](docs/native-polar-float128.md) for native binary128 math and complex storage qualification.
 - [`docs/c-division-glyph.md`](docs/c-division-glyph.md) for Icky C `÷` division.
 - [`docs/android-release-gate.md`](docs/android-release-gate.md) for the Android/F-Droid compiler qualification matrix.
 - [`docs/bootstrap-generators.md`](docs/bootstrap-generators.md) for Bison/Yacc, retained gengtype Flex generation and ICKY's unimplemented integration boundary.
