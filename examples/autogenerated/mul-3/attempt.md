@@ -109,3 +109,9 @@ candidate=57, gate=0, outer=57. Unique modules and per-job TTC caches preserve
 the actual helper identity. These reduced contracts are locally qualified;
 exact-head hosted CI is configured and pending. Full published, native and
 physical admission remain outside this qualification.
+
+## BACKLOG-REPAIR-02 stack reconciliation
+
+Normal two-parent integration preserves this numerical component, accepted scalar main bff5a413d2c86b85246017f16a8fbc76900e6942 and reconciled frame source 6cc7e056ed02987f908691389e7608ef017111d5. Both parents' unique source survives. The workflow retains scalar, frame/layout and numerical positive/negative stages with actual owned Idriç/Chez 2734ac5 hidden-root paths and retained native ICK/own-runtime 143e29580. Source locks distinguish the already accepted scalar merge from the frame candidate source; pending frame acceptance is not relabelled complete.
+
+Earlier green runs are historical. The complete reconciled head must rerun all inherited components and every required numerical defect. Its frame parent must be integrated in dependency order before this source can move to main. No whole-multiplier, published-profile saving, ARM or physical A1/C67 claim is added.
