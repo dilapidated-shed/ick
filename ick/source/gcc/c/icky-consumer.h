@@ -254,7 +254,7 @@ inline bool receipt (const std::vector<raw_source> &sources,
                mapping.expansion.source, mapping.expansion.byte,
                mapping.expansion.line, mapping.expansion.column);
     }
-  for (size_t i = 0; i + 1 < arguments.size (); ++i)
+  for (size_t i = 0; i < arguments.size (); ++i)
     fprintf (record, "argv\t%zu\t%s\n", i,
              icky_consumer::hex (arguments[i]).c_str ());
   fprintf (record, "protocol\t%zu\t%s\nsyntax-accepted\t1\n",
