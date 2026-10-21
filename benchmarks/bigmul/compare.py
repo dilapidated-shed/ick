@@ -30,6 +30,8 @@ def read(path):
 def compare(base, candidate, out):
     base_rows = read(base)
     cand_rows = read(candidate)
+    if base_rows.keys() != cand_rows.keys():
+        raise ValueError("unpaired cases; partial intersections require an explicitly labeled analysis")
     common = sorted(base_rows.keys() & cand_rows.keys(),
                     key=lambda x: (int(x[1]), int(x[2]), int(x[0])))
     writer = csv.writer(out)

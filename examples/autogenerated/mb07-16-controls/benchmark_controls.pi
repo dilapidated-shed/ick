@@ -1,0 +1,1017 @@
+"""Checked controls: bounded host evidence, never full campaign acceptance."""
+import argparse
+import csv
+import hashlib
+import io
+import json
+import math
+import os
+import platform
+import random
+import selectors
+import shutil
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+from builtins import list, bytes, bytearray, format, isinstance, ValueError, OSError, FileNotFoundError, BaseException
+from pathlib import Path
+
+REPOSITORY ∈ str ← str(Path(__file__).resolve().parent.parent.parent.parent)
+ROOT ∈ str ← REPOSITORY + "/benchmarks/bigmul"
+sys.path.insert(0, ROOT + "/acceptance")
+sys.path.insert(0, ROOT + "/corpus")
+sys.path.insert(0, ROOT + "/providers")
+# Existing foreign Python modules are explicitly retained migration debt.
+from runner import resolve_executable
+from corpus import generate, value, validate_legacy
+from check_mb05 import words, FLAGS
+
+def require(condition ∈ bool, message ∈ str) → None:
+    if not condition:
+        raise ValueError(message)
+
+def contains(text ∈ str, fragment ∈ str) → bool:
+    offset ∈ int ← text.find(fragment)
+    return offset >= 0
+
+def digest(path ∈ str) → str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def command(argv ∈ list[str], log ∈ list[object], payload ∈ str) → object:
+    try:
+        result ∈ object ← subprocess.run(argv, input=payload, text=True, capture_output=True, timeout=120)
+    except subprocess.TimeoutExpired as error:
+        log.append({"argv": argv, "exit_status": "TIMEOUT", "stdout": str(error.stdout), "stderr": str(error.stderr)})
+        raise ValueError("command deadline exceeded")
+    log.append({"argv": argv, "exit_status": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
+    return result
+
+def checked(argv ∈ list[str], log ∈ list[object]) → object:
+    result ∈ object ← command(argv, log, "")
+    require(int(result.returncode) == 0, "command failed: " + str(result.stderr))
+    return result
+
+def compile_sources(folder ∈ str, sources ∈ list[str], log ∈ list[object], defect ∈ str, profile ∈ bool, gmp ∈ bool) → str:
+    compiler ∈ str ← str(resolve_executable(os.environ.get("CC", "cc")))
+    objects ∈ list[str] ← []
+    for source_index in range(len(sources)):
+        source ∈ str ← sources[source_index]
+        output ∈ str ← folder + "/object-" + str(source_index) + ".o"
+        argv ∈ list[str] ← [compiler]
+        argv.extend(FLAGS)
+        argv.append("-fno-lto")
+        if source == "mulbench.c":
+            argv.append("-Dmain=mb_unused_main")
+        if gmp and source == "modes/workload.c":
+            argv.append("-DMB_WITH_GMP")
+        if profile and (source == "mulbench.c" or source == "providers/karatsuba.c"):
+            argv.extend(["-include", ROOT + "/memory/tracker.h", "-Dmalloc=mb_malloc", "-Dcalloc=mb_calloc", "-Dfree=mb_free"])
+        if len(defect) > 0:
+            argv.append("-D" + defect)
+        argv.extend(["-c", ROOT + "/" + source, "-o", output])
+        checked(argv, log)
+        objects.append(output)
+    program ∈ str ← folder + "/program"
+    link ∈ list[str] ← [compiler]
+    link.extend(objects)
+    if gmp:
+        link.append("-lgmp")
+    link.extend(["-o", program])
+    checked(link, log)
+    return program
+
+def build(folder ∈ str, log ∈ list[object], defect ∈ str, profile ∈ bool, gmp ∈ bool) → str:
+    sources ∈ list[str] ← ["mulbench.c", "providers/karatsuba.c", "timing/engine.c", "memory/tracker.c", "modes/workload.c"]
+    if gmp:
+        sources.append("providers/gmp.c")
+    return compile_sources(folder, sources, log, defect, profile, gmp)
+
+def endpoint(folder ∈ str, log ∈ list[object], defect ∈ str) → str:
+    return compile_sources(folder, ["mulbench.c", "providers/karatsuba.c", "modes/end_to_end/binary_endpoint.c"], log, defect, False, False)
+
+def integer_value(limbs ∈ list[int]) → int:
+    result ∈ int ← 0
+    shift ∈ int ← 0
+    for word in limbs:
+        require(word >= 0 and word <= 4294967295, "invalid limb")
+        result ← result + (word << shift)
+        shift ← shift + 32
+    return result
+
+def cases(square ∈ bool) → list[object]:
+    generated ∈ list[object] ← generate("medium")
+    selected ∈ list[object] ← []
+    for row in generated:
+        if str(row.get("semantics")) == "unsigned-kernel" and int(row.get("left_limbs")) <= 129 and int(row.get("right_limbs")) <= 129:
+            left ∈ list[int] ← words(value(row, "left"), int(row.get("left_limbs")))
+            right ∈ list[int] ← words(value(row, "right"), int(row.get("right_limbs")))
+            if square:
+                right ← list(left)
+            combined ∈ list[int] ← list(left)
+            combined.extend(right)
+            fields ∈ list[str] ← [str(len(left)), str(len(right))]
+            encoded ∈ bytes ← len(left).to_bytes(4, "little")
+            count_bytes ∈ bytes ← len(right).to_bytes(4, "little")
+            encoded ← encoded + count_bytes
+            for word in combined:
+                field ∈ str ← format(word, "08x")
+                fields.append(field)
+                word_bytes ∈ bytes ← word.to_bytes(4, "little")
+                encoded ← encoded + word_bytes
+            case_hash ∈ str ← hashlib.sha256(encoded).hexdigest()
+            wire ∈ str ← " ".join(fields)
+            selected.append({"left": left, "right": right, "wire": wire, "case_sha256": case_hash,
+                             "source_case_sha256": row.get("case_sha256"), "product": integer_value(left) * integer_value(right)})
+    return selected
+
+def payload(corpus ∈ list[object]) → str:
+    text ∈ str ← ""
+    for case in corpus:
+        text ← text + str(case.get("wire")) + "\n"
+    return text
+
+def run_mode(program ∈ str, mode ∈ str, provider ∈ str, corpus ∈ list[object], log ∈ list[object], trials ∈ int, batch ∈ int, eviction ∈ int) → object:
+    text ∈ str ← payload(corpus)
+    result ∈ object ← command([program, mode, provider, str(trials), "4096", str(batch), "8388608", str(eviction)], log, text)
+    require(int(result.returncode) == 0, "workload failed: " + str(result.stderr))
+    rows ∈ list[object] ← list(csv.DictReader(io.StringIO(result.stdout), delimiter="\t"))
+    require(len(rows) == trials * len(corpus), "missing or extra response")
+    for row_index in range(len(rows)):
+        row ∈ object ← rows[row_index]
+        case ∈ object ← corpus[row_index % len(corpus)]
+        require(int(row.get("trial")) == row_index // len(corpus) and int(row.get("request")) == row_index % len(corpus), "duplicate/reordered response")
+        calls ∈ int ← int(row.get("calls"))
+        repetitions ∈ int ← int(row.get("repetitions"))
+        require(int(row.get("elapsed_ns")) > 0 and repetitions > 0 and calls == repetitions, "invalid time/call coverage")
+        if mode == "mixed" or mode == "first-touch" or mode == "eviction-preconditioned" or mode == "profile":
+            require(repetitions == 1, "first call warmed by repetition")
+        if mode == "rotating":
+            require(repetitions >= len(corpus), "rotating pool not covered")
+        if mode == "eviction-preconditioned":
+            require(int(row.get("precondition_bytes")) == (eviction + 63) // 64, "preconditioning was skipped")
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        product_hex ∈ str ← str(row.get("product_hex"))
+        require(len(product_hex) == 8 * (len(left) + len(right)), "truncated result")
+        require(int(product_hex, 16) == int(case.get("product")), "wrong exact product")
+        row.update({"case_sha256": case.get("case_sha256"), "source_case_sha256": case.get("source_case_sha256")})
+    operation ∈ str ← "multiply"
+    if provider == "gmp-mpn-sqr":
+        operation ← "specialized-square"
+    request_hash ∈ str ← hashlib.sha256(text.encode()).hexdigest()
+    return {"mode": mode, "provider": provider, "operation": operation, "request_sha256": request_hash,
+            "raw_samples": rows, "events_tsv": result.stderr, "binary_sha256": digest(program), "trials": trials,
+            "batch_size": batch, "eviction_span_bytes": eviction, "cost_boundary": "complete-limb32-adapter",
+            "workspace": "provider-owned-fresh", "timer": "CLOCK_MONOTONIC", "units": "ns per measured batch",
+            "precondition_bytes_meaning": "one byte per 64-byte stride; no proven cache state",
+            "scope": "host controls with callback/count instrumentation; no uninstrumented speed claim"}
+
+def binary_payload(corpus ∈ list[object]) → bytes:
+    result ∈ bytes ← b""
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        header ∈ bytes ← len(left).to_bytes(4, "little")
+        tail ∈ bytes ← len(right).to_bytes(4, "little")
+        result ← result + header + tail
+        combined ∈ list[int] ← list(left)
+        combined.extend(right)
+        for word in combined:
+            encoded ∈ bytes ← word.to_bytes(4, "little")
+            result ← result + encoded
+    return result
+
+def validate_binary(output ∈ bytes, corpus ∈ list[object], echo ∈ bool) → None:
+    offset ∈ int ← 0
+    for case in corpus:
+        require(offset + 4 <= len(output), "truncated frame header")
+        count ∈ int ← int.from_bytes(output[offset:offset + 4], "little")
+        offset ← offset + 4
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        require(count == len(left) + len(right), "wrong word count")
+        require(offset + 4 * count <= len(output), "truncated product")
+        product ∈ int ← int.from_bytes(output[offset:offset + 4 * count], "little")
+        offset ← offset + 4 * count
+        expected ∈ int ← int(case.get("product"))
+        if echo:
+            expected ← 0
+        require(product == expected, "wrong endpoint product")
+    require(offset == len(output), "surplus output")
+
+def collect(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], binary ∈ bool, echo ∈ bool, timeout ∈ float) → object:
+    require(len(data) < 4096, "request exceeds bounded pipe envelope")
+    start ∈ int ← time.monotonic_ns()
+    deadline ∈ int ← start + int(timeout * 1000000000.0)
+    process ∈ object ← subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+    output ∈ object ← bytearray()
+    errors ∈ object ← bytearray()
+    first ∈ int ← 0
+    try:
+        written ∈ int ← process.stdin.write(data)
+        require(written == len(data), "incomplete request write")
+        process.stdin.close()
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+            selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+            pending ∈ int ← len(selector.get_map())
+            while pending > 0:
+                remaining ∈ float ← (deadline - int(time.monotonic_ns())) / 1000000000.0
+                require(remaining > 0.0, "endpoint deadline exceeded")
+                events ∈ list[object] ← list(selector.select(remaining))
+                require(len(events) > 0, "endpoint deadline exceeded")
+                for event in events:
+                    key ∈ object ← event.__getitem__(0)
+                    chunk ∈ bytes ← os.read(key.fileobj.fileno(), 65536)
+                    if len(chunk) == 0:
+                        selector.unregister(key.fileobj)
+                        continue
+                    if str(key.data) == "stdout":
+                        output.extend(chunk)
+                        require(len(output) <= 65536, "output limit exceeded")
+                        captured ∈ bytes ← bytes(output)
+                        if first == 0:
+                            if binary and len(captured) >= 4:
+                                count ∈ int ← int.from_bytes(captured[:4], "little")
+                                require(count <= 4096, "oversized result header")
+                                if len(captured) >= 4 + 4 * count:
+                                    first ← int(time.monotonic_ns())
+                            if not binary:
+                                newline ∈ int ← captured.find(b"\n")
+                                if newline >= 0:
+                                    first ← int(time.monotonic_ns())
+                    else:
+                        errors.extend(chunk)
+                        require(len(errors) <= 65536, "stderr limit exceeded")
+                pending ← len(selector.get_map())
+        remaining ∈ float ← (deadline - int(time.monotonic_ns())) / 1000000000.0
+        require(remaining > 0.0, "endpoint deadline exceeded")
+        try:
+            process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            raise ValueError("endpoint deadline exceeded")
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        if not process.stdin.closed:
+            process.stdin.close()
+        process.stdout.close()
+        process.stderr.close()
+    end ∈ int ← time.monotonic_ns()
+    require(int(process.returncode) == 0, "endpoint failed after output: " + str(process.returncode))
+    captured ∈ bytes ← bytes(output)
+    if binary:
+        validate_binary(captured, corpus, echo)
+    else:
+        lines ∈ list[bytes] ← list(captured.splitlines())
+        require(len(lines) == len(corpus), "hex output count differs")
+        for line_index in range(len(lines)):
+            case ∈ object ← corpus[line_index]
+            require(int(lines[line_index], 16) == int(case.get("product")), "hex product differs")
+    require(first > 0, "no complete first result")
+    input_hash ∈ str ← hashlib.sha256(data).hexdigest()
+    output_hash ∈ str ← hashlib.sha256(captured).hexdigest()
+    error_text ∈ str ← bytes(errors).decode()
+    return {"argv": argv, "exit_status": process.returncode, "binary_sha256": digest(argv[0]),
+            "launch_to_first_result_ns": first - start, "launch_to_exit_ns": end - start,
+            "input_bytes": len(data), "output_bytes": len(captured), "input_sha256": input_hash,
+            "output_sha256": output_hash, "stderr": error_text,
+            "includes": "launch, import/allocation/arithmetic/export, I/O and observed first complete frame; validation excluded"}
+
+def emit(report ∈ object, output ∈ str) → None:
+    revision ∈ object ← subprocess.run(["git", "-C", REPOSITORY, "rev-parse", "HEAD"], text=True, capture_output=True, check=True)
+    changes ∈ object ← subprocess.run(["git", "-C", REPOSITORY, "status", "--porcelain"], text=True, capture_output=True, check=True)
+    environment ∈ object ← {}
+    names ∈ list[str] ← ["CC", "CPATH", "LIBRARY_PATH", "LD_LIBRARY_PATH", "PATH", "PYTHONOPTIMIZE", "ITHON", "ITHON_PYTHON"]
+    for name in names:
+        environment.__setitem__(name, str(os.environ.get(name, "UNSET")))
+    report.update({"source_sha": str(revision.stdout).strip(), "worktree_status": str(changes.stdout), "environment": environment,
+                   "architecture": platform.machine(), "system": platform.uname()._asdict(),
+                   "host_python": {"path": sys.executable, "sha256": digest(str(sys.executable)), "version": sys.version},
+                   "ithon_core_sha256": digest(str(__file__)), "ithon_check_receipt": os.environ.get("ITHON_CHECK_RECEIPT", "NOT_CONFIGURED")})
+    hashes ∈ object ← {}
+    files ∈ list[object] ← list(Path(ROOT).rglob("*"))
+    for file in files:
+        suffix ∈ str ← str(file.suffix)
+        if file.is_file():
+            if suffix == ".c" or suffix == ".h" or suffix == ".pi" or suffix == ".py":
+                hashes.__setitem__(str(file.relative_to(ROOT)), digest(str(file)))
+    report.__setitem__("source_hashes", hashes)
+    text ∈ str ← json.dumps(report, sort_keys=True)
+    if len(output) > 0:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_text(text + "\n")
+    print(text)
+
+def hot_job(folder ∈ str, report ∈ object, log ∈ list[object], require_gmp ∈ bool) → None:
+    validate_legacy()
+    compiler ∈ str ← str(resolve_executable(os.environ.get("CC", "cc")))
+    probe ∈ object ← command([compiler, "-M", ROOT + "/providers/gmp.c"], log, "")
+    has_gmp ∈ bool ← int(probe.returncode) == 0
+    require(not require_gmp or has_gmp, "required GMP header absent")
+    report.__setitem__("gmp", "NOT_RUN: development header absent")
+    if has_gmp:
+        metadata ∈ str ← folder + "/gmp-metadata"
+        arguments ∈ list[str] ← [compiler]
+        arguments.extend(FLAGS)
+        arguments.extend([ROOT + "/providers/gmp.c", ROOT + "/providers/gmp_fixture.c", ROOT + "/timing/engine.c", "-lgmp", "-o", metadata])
+        checked(arguments, log)
+        observed ∈ object ← checked([metadata, "--metadata"], log)
+        config ∈ object ← json.loads(observed.stdout)
+        require(str(config.get("gmp_version")) == "6.3.0" and str(config.get("header_version")) == "6.3.0", "GMP header/runtime pin mismatch")
+        report.__setitem__("gmp", config)
+        checked(["ldd", metadata], log)
+    report.__setitem__("compiler", {"path": compiler, "sha256": digest(compiler), "flags": FLAGS})
+    identity ∈ str ← str(platform.uname())
+    if Path("/proc/cpuinfo").is_file():
+        identity ← identity + str(Path("/proc/cpuinfo").read_text())
+    fingerprint ∈ str ← hashlib.sha256(identity.encode()).hexdigest()
+    report.__setitem__("machine_identity", fingerprint)
+    program ∈ str ← build(folder, log, "", False, has_gmp)
+    corpus ∈ list[object] ← cases(False)
+    equal ∈ list[object] ← cases(True)
+    modes ∈ list[str] ← ["hot", "rotating", "hot"]
+    groups ∈ list[list[object]] ← [corpus, corpus[:8], equal[:30]]
+    runs ∈ list[object] ← []
+    for block in range(3):
+        order ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+        if has_gmp:
+            order.extend(["gmp-mpn-mul", "gmp-mpn-sqr"])
+        random.Random(704 + block).shuffle(order)
+        for provider_index in range(len(order)):
+            provider ∈ str ← order[provider_index]
+            for mode_index in range(3):
+                if provider == "gmp-mpn-sqr" and mode_index != 2:
+                    continue
+                run ∈ object ← run_mode(program, modes[mode_index], provider, groups[mode_index], log, 1, 1, 0)
+                operation ∈ str ← "multiply"
+                if mode_index == 2:
+                    operation ← "generic-equal-values"
+                if provider == "gmp-mpn-sqr":
+                    operation ← "specialized-square"
+                run.update({"process_block": block, "provider_order": provider_index, "seed": 704 + block, "operation": operation})
+                runs.append(run)
+    report.__setitem__("runs", runs)
+    report.__setitem__("case_count", len(corpus))
+    defects ∈ list[str] ← ["MB_MUTANT_SKIP_CALL", "MB_MUTANT_CACHED", "MB_MUTANT_CARRY"]
+    mutants ∈ list[object] ← []
+    for defect in defects:
+        bad ∈ str ← build(folder, log, defect, False, False)
+        result ∈ object ← command([bad, "hot", "schoolbook", "1", "32", "1", "8388608", "0"], log, payload(corpus))
+        require(int(result.returncode) != 0 and contains(str(result.stderr), "workload failed: 3"), "provider defect accepted")
+        mutants.append({"name": defect, "status": "EXPECTED_REFUSAL", "exit_status": result.returncode})
+    report.__setitem__("mutants", mutants)
+
+def same_responses(observed ∈ list[object], expected ∈ list[object]) → bool:
+    if len(observed) != len(expected):
+        return False
+    fields ∈ list[str] ← ["trial", "request", "case_sha256", "product_hex"]
+    for response_index in range(len(observed)):
+        actual ∈ object ← observed[response_index]
+        wanted ∈ object ← expected[response_index]
+        for field in fields:
+            if str(actual.get(field)) != str(wanted.get(field)):
+                return False
+    return True
+
+def mixed_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    program ∈ str ← build(folder, log, "", False, False)
+    corpus ∈ list[object] ← cases(False)
+    small ∈ list[object] ← []
+    large ∈ list[object] ← []
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        if len(left) <= 2 and len(right) <= 2:
+            small.append(case)
+        if len(left) >= 32:
+            large.append(case)
+    heavy ∈ list[object] ← []
+    alternate ∈ list[object] ← []
+    for request_index in range(128):
+        if request_index % 16 == 0:
+            heavy.append(large[request_index % len(large)])
+        else:
+            heavy.append(small[request_index % len(small)])
+    for alternate_index in range(64):
+        alternate.append(large[alternate_index % len(large)])
+        alternate.append(small[alternate_index % len(small)])
+    change ∈ list[object] ← list(small[:64])
+    change.extend(large[:32])
+    change.extend(small[:32])
+    groups ∈ list[list[object]] ← [small[:64], heavy, alternate, change]
+    names ∈ list[str] ← ["varied-small", "small-heavy", "alternating", "size-change"]
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+    batches ∈ list[int] ← [1, 8, 64]
+    runs ∈ list[object] ← []
+    for schedule_index in range(4):
+        for batch in batches:
+            for provider in providers:
+                run ∈ object ← run_mode(program, "mixed", provider, groups[schedule_index], log, 2, batch, 0)
+                spans ∈ list[int] ← []
+                service ∈ list[float] ← []
+                batch_lines ∈ list[str] ← list(str(run.get("events_tsv")).splitlines())
+                for line in batch_lines:
+                    fields ∈ list[str] ← list(line.split("\t"))
+                    if len(fields) == 5 and fields[0] == "batch":
+                        spans.append(int(fields[4]))
+                rows ∈ list[object] ← run.get("raw_samples")
+                for row in rows:
+                    service.append(float(row.get("elapsed_ns")))
+                total_span ∈ int ← 0
+                for span in spans:
+                    total_span ← total_span + span
+                require(total_span > 0, "missing batch spans")
+                median ∈ float ← statistics.median(service)
+                run.update({"schedule": names[schedule_index], "arrival_policy": "closed-loop; one worker; no exogenous queue",
+                            "queue_time": "NOT_MEASURED", "service_median_ns": median, "sample_count": len(service),
+                            "throughput_requests_per_second": len(rows) * 1000000000.0 / total_span,
+                            "batch_wall_ns": spans, "batch_wall_includes": "validation and TSV output; no isolated arithmetic throughput claim"})
+                runs.append(run)
+    report.__setitem__("runs", runs)
+    first_run ∈ object ← runs[0]
+    original ∈ list[object] ← first_run.get("raw_samples")
+    mutants ∈ list[object] ← []
+    for kind in range(4):
+        bad ∈ list[object] ← list(original)
+        if kind == 0:
+            bad.pop()
+        if kind == 1:
+            bad.append(original[0])
+        if kind == 2:
+            bad.__setitem__(0, original[1])
+            bad.__setitem__(1, original[0])
+        if kind == 3:
+            source_row ∈ object ← original[1]
+            changed ∈ object ← source_row.copy()
+            changed.__setitem__("product_hex", "wrong")
+            bad.__setitem__(1, changed)
+        require(not same_responses(bad, original), "response defect accepted")
+        mutants.append({"kind": kind, "status": "EXPECTED_REFUSAL"})
+    report.__setitem__("mutants", mutants)
+
+def cache_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    report.__setitem__("page_size", int(os.sysconf("SC_PAGE_SIZE")))
+    report.__setitem__("hardware_counters", "NOT_AVAILABLE: no counter access requested")
+    cache_metadata ∈ object ← {}
+    cache_paths ∈ list[object] ← list(Path("/sys/devices/system/cpu/cpu0/cache").glob("index*"))
+    fields ∈ list[str] ← ["level", "type", "size", "coherency_line_size"]
+    for cache_path in cache_paths:
+        values ∈ object ← {}
+        for field in fields:
+            path ∈ str ← str(cache_path) + "/" + field
+            if Path(path).is_file():
+                values.__setitem__(field, str(Path(path).read_text()).strip())
+        cache_metadata.__setitem__(str(cache_path.name), values)
+    report.__setitem__("observable_caches", cache_metadata)
+    if Path("/sys/fs/cgroup/memory.max").is_file():
+        report.__setitem__("cgroup_memory_limit", str(Path("/sys/fs/cgroup/memory.max").read_text()).strip())
+    corpus ∈ list[object] ← cases(False)
+    program ∈ str ← build(folder, log, "", False, False)
+    modes ∈ list[str] ← ["hot", "rotating", "first-touch", "eviction-preconditioned", "eviction-preconditioned"]
+    groups ∈ list[list[object]] ← [corpus[:8], corpus[:64], corpus[-32:], corpus[-32:], corpus[-32:]]
+    evictions ∈ list[int] ← [0, 0, 0, 65536, 1048576]
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+    runs ∈ list[object] ← []
+    for provider in providers:
+        for mode_index in range(5):
+            run ∈ object ← run_mode(program, modes[mode_index], provider, groups[mode_index], log, 2, 1, evictions[mode_index])
+            run.update({"operational_condition": modes[mode_index] + "; malloc may reuse OS pages; residency unproven",
+                        "precondition": "outside kernel interval; output first-write faults may remain inside"})
+            runs.append(run)
+    report.__setitem__("runs", runs)
+    bad ∈ str ← build(folder, log, "MB_MUTANT_SKIP_PRECONDITION", False, False)
+    rejected ∈ bool ← False
+    try:
+        run_mode(bad, "eviction-preconditioned", "schoolbook", corpus[:8], log, 1, 1, 65536)
+    except ValueError as error:
+        require(contains(str(error), "preconditioning was skipped"), "wrong precondition diagnostic")
+        report.__setitem__("mutant", {"status": "EXPECTED_REFUSAL", "reason": str(error)})
+        rejected ← True
+    require(rejected, "skipped precondition accepted")
+    over ∈ object ← command([program, "hot", "schoolbook", "1", "8", "1", "4096", "0"], log, payload(corpus))
+    require(int(over.returncode) == 2, "working-set budget not enforced")
+    report.__setitem__("budget_refusal", {"status": "EXPECTED_REFUSAL", "exit_status": over.returncode})
+
+def expected_binary(corpus ∈ list[object]) → bytes:
+    output ∈ bytes ← b""
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        count ∈ int ← len(left) + len(right)
+        header ∈ bytes ← count.to_bytes(4, "little")
+        product ∈ int ← int(case.get("product"))
+        encoded ∈ bytes ← product.to_bytes(4 * count, "little")
+        output ← output + header + encoded
+    return output
+
+def endpoint_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    corpus ∈ list[object] ← cases(False)
+    selected ∈ list[object] ← corpus[31:39]
+    data ∈ bytes ← binary_payload(selected)
+    program ∈ str ← endpoint(folder, log, "")
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded", "echo"]
+    runs ∈ list[object] ← []
+    for provider in providers:
+        for trial in range(3):
+            run ∈ object ← collect([program, provider], data, selected, True, provider == "echo", 10.0)
+            run.update({"trial": trial, "mode": "persistent-binary", "provider": provider})
+            runs.append(run)
+            for case_index in range(2):
+                one ∈ list[object] ← [selected[case_index]]
+                run ∈ object ← collect([program, provider], binary_payload(one), one, True, provider == "echo", 10.0)
+                run.update({"trial": trial, "mode": "process-per-request-binary", "provider": provider})
+                runs.append(run)
+    hex_program ∈ str ← folder + "/hex-endpoint"
+    compiler ∈ str ← str(resolve_executable("cc"))
+    argv ∈ list[str] ← [compiler]
+    argv.extend(FLAGS)
+    argv.extend([ROOT + "/mulbench.c", "-o", hex_program])
+    checked(argv, log)
+    hex_text ∈ str ← ""
+    for case in selected:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        left_text ∈ str ← format(integer_value(left), "x")
+        right_text ∈ str ← format(integer_value(right), "x")
+        hex_text ← hex_text + left_text + " " + right_text + "\n"
+    encoded ∈ bytes ← hex_text.encode()
+    run ∈ object ← collect([hex_program, "--pipe"], encoded, selected, False, False, 10.0)
+    run.__setitem__("mode", "persistent-hex")
+    runs.append(run)
+    report.__setitem__("runs", runs)
+    mutants ∈ list[object] ← []
+    defects ∈ list[str] ← ["MB_DELAY_START", "MB_DELAY_OUTPUT", "MB_EXIT_AFTER_OUTPUT", "MB_ENDPOINT_HANG"]
+    one ∈ list[object] ← selected[:1]
+    for defect in defects:
+        bad ∈ str ← endpoint(folder, log, defect)
+        if defect == "MB_EXIT_AFTER_OUTPUT" or defect == "MB_ENDPOINT_HANG":
+            rejected ∈ bool ← False
+            timeout ∈ float ← 10.0
+            diagnostic ∈ str ← "99"
+            if defect == "MB_ENDPOINT_HANG":
+                timeout ← 0.1
+                diagnostic ← "deadline"
+            try:
+                collect([bad, "schoolbook"], binary_payload(one), one, True, False, timeout)
+            except ValueError as error:
+                require(contains(str(error), diagnostic), "wrong endpoint refusal diagnostic")
+                mutants.append({"name": defect, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+                rejected ← True
+            require(rejected, "endpoint failure hidden")
+        else:
+            run ∈ object ← collect([bad, "schoolbook"], binary_payload(one), one, True, False, 10.0)
+            require(int(run.get("launch_to_first_result_ns")) >= 15000000, "known delay absent")
+            mutants.append({"name": defect, "status": "PASS_DELAY_OBSERVED", "run": run})
+    expected ∈ bytes ← expected_binary(selected)
+    bad_outputs ∈ list[bytes] ← [expected[:-1], expected + b"x"]
+    for output in bad_outputs:
+        rejected ∈ bool ← False
+        try:
+            validate_binary(output, selected, False)
+        except ValueError as error:
+            mutants.append({"status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "invalid frame accepted")
+    report.__setitem__("mutants", mutants)
+
+def memory_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    corpus ∈ list[object] ← cases(False)
+    sequence ∈ list[object] ← [corpus[31], corpus[-1], corpus[32]]
+    program ∈ str ← build(folder, log, "", True, False)
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+    runs ∈ list[object] ← []
+    for provider in providers:
+        for case in sequence:
+            run ∈ object ← run_mode(program, "profile", provider, [case], log, 1, 1, 0)
+            rows ∈ list[object] ← run.get("raw_samples")
+            row ∈ object ← rows[0]
+            require(int(row.get("live_bytes")) == 0, "provider leaked workspace")
+            if provider == "karatsuba32-bounded":
+                require(int(row.get("allocations")) > 0 and int(row.get("peak_bytes")) > 0, "allocation tracking bypassed")
+            else:
+                require(int(row.get("allocations")) == 0, "schoolbook incorrectly attributed scratch")
+            run.__setitem__("timing_kind", "instrumented; not speed samples")
+            runs.append(run)
+    report.__setitem__("runs", runs)
+    compiler ∈ str ← str(resolve_executable("cc"))
+    defects ∈ list[str] ← ["", "MB_TRACKER_LEAK"]
+    for defect in defects:
+        fixture ∈ str ← folder + "/tracker-fixture"
+        argv ∈ list[str] ← [compiler]
+        argv.extend(FLAGS)
+        if len(defect) > 0:
+            argv.append("-D" + defect)
+        argv.extend([ROOT + "/memory/tracker.c", ROOT + "/memory/tracker_fixture.c", "-o", fixture])
+        checked(argv, log)
+        result ∈ object ← command([fixture], log, "")
+        if len(defect) > 0:
+            require(int(result.returncode) == 6 and contains(str(result.stderr), "tracked leak"), "leak fixture accepted")
+        else:
+            require(int(result.returncode) == 0 and contains(str(result.stdout), "peak=224"), "allocator counters wrong")
+    report.__setitem__("mutant", {"name": "tracked leak", "status": "EXPECTED_REFUSAL"})
+    report.__setitem__("tracked", "provider C requested heap payload only; excludes runtime/corpus and allocator headers")
+    report.__setitem__("rss", "NOT_AVAILABLE: fresh process per case; RSS collection not implemented")
+
+def main(job ∈ str) → int:
+    parser ∈ object ← argparse.ArgumentParser(description="Scoped MB controls; full acceptance remains incomplete")
+    parser.add_argument("--output", default="")
+    parser.add_argument("--input", default=ROOT + "/release/last-run/mb07.json")
+    parser.add_argument("--require-gmp", action="store_true")
+    parser.add_argument("--controls-only", action="store_true")
+    parser.add_argument("--expected-arch", default=platform.machine())
+    parser.add_argument("--require-bc", action="store_true")
+    args ∈ object ← parser.parse_args()
+    log ∈ list[object] ← []
+    report ∈ object ← {"job": job, "status": "FAIL", "complete": False, "commands": log,
+                       "remaining_obligations": "See modes/README.md; scoped controls do not discharge the original assignment"}
+    exit_status ∈ int ← 1
+    try:
+        with tempfile.TemporaryDirectory(prefix="bigmul-" + job + "-") as temporary:
+            folder ∈ str ← str(temporary)
+            if job == "MB07":
+                hot_job(folder, report, log, bool(args.require_gmp))
+            elif job == "MB08":
+                mixed_job(folder, report, log)
+            elif job == "MB09":
+                cache_job(folder, report, log)
+            elif job == "MB10":
+                endpoint_job(folder, report, log)
+            elif job == "MB11":
+                memory_job(folder, report, log)
+            elif job == "MB12":
+                analysis_job(report, str(args.input))
+            elif job == "MB13":
+                native_job(folder, report, log, str(args.expected_arch), bool(args.require_bc))
+            elif job == "MB14":
+                android_job(folder, report, log)
+            elif job == "MB15":
+                power_job(folder, report, log)
+            elif job == "MB16":
+                paper_job(report)
+            else:
+                raise ValueError("unsupported job")
+        report.__setitem__("status", "PASS_SCOPED_HOST_CONTROLS")
+        exit_status ← 0
+        if job == "MB14":
+            report.__setitem__("status", "PASS_LOCAL_TRANSPORT_FIXTURES")
+        if job == "MB15":
+            report.__setitem__("status", "PASS_LOCAL_PORTABILITY_FIXTURES")
+        if job == "MB16":
+            report.__setitem__("status", "PASS_GATE_FIXTURES_ONLY")
+            if not bool(args.controls_only):
+                report.__setitem__("status", "BLOCKED")
+                exit_status ← 2
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        report.__setitem__("error", str(error))
+    emit(report, str(args.output))
+    return exit_status
+
+def index_records(records ∈ list[object]) → object:
+    indexed ∈ object ← {}
+    for record in records:
+        duration ∈ float ← float(record.get("ns_per_call"))
+        finite ∈ bool ← math.isfinite(duration)
+        require(finite and duration > 0.0, "invalid duration")
+        key ∈ str ← str(int(record.get("process_block"))) + ":" + str(record.get("case_id"))
+        exists ∈ bool ← indexed.__contains__(key)
+        require(not exists, "duplicate process/case row")
+        indexed.__setitem__(key, record)
+    require(len(records) > 0, "empty comparison")
+    return indexed
+
+def paired_blocks(baseline ∈ list[object], candidate ∈ list[object]) → object:
+    left_index ∈ object ← index_records(baseline)
+    right_index ∈ object ← index_records(candidate)
+    left_keys ∈ list[str] ← list(left_index.keys())
+    right_keys ∈ list[str] ← list(right_index.keys())
+    left_keys.sort()
+    right_keys.sort()
+    require(left_keys == right_keys, "missing paired row")
+    fields ∈ list[str] ← ["case_sha256", "machine", "compiler", "profile", "mode", "operation"]
+    grouped ∈ object ← {}
+    first_order ∈ list[float] ← []
+    second_order ∈ list[float] ← []
+    for key in left_keys:
+        left ∈ object ← left_index.get(key)
+        right ∈ object ← right_index.get(key)
+        for field in fields:
+            require(str(left.get(field)) == str(right.get(field)), "incompatible " + field)
+        ratio ∈ float ← float(left.get("ns_per_call")) / float(right.get("ns_per_call"))
+        finite ∈ bool ← math.isfinite(ratio)
+        require(finite and ratio > 0.0, "invalid ratio")
+        block ∈ str ← str(int(left.get("process_block")))
+        exists ∈ bool ← grouped.__contains__(block)
+        if not exists:
+            initial ∈ list[float] ← []
+            grouped.__setitem__(block, initial)
+        group ∈ list[float] ← grouped.get(block)
+        group.append(ratio)
+        if int(left.get("provider_order")) < int(right.get("provider_order")):
+            first_order.append(ratio)
+        else:
+            second_order.append(ratio)
+    blocks ∈ list[str] ← list(grouped.keys())
+    blocks.sort()
+    ratios ∈ list[float] ← []
+    for block in blocks:
+        values ∈ list[float] ← grouped.get(block)
+        median ∈ float ← statistics.median(values)
+        ratios.append(median)
+    estimates ∈ list[float] ← []
+    generator ∈ object ← random.Random(1204)
+    for resample in range(2000):
+        chosen ∈ list[float] ← generator.choices(ratios, k=len(ratios))
+        estimate ∈ float ← statistics.median(chosen)
+        estimates.append(estimate)
+    estimates.sort()
+    interval ∈ object ← "INSUFFICIENT_PROCESS_BLOCKS"
+    if len(ratios) >= 5:
+        interval ← [estimates[49], estimates[1949]]
+    order_medians ∈ object ← {"baseline_first": "NOT_OBSERVED", "candidate_first": "NOT_OBSERVED"}
+    if len(first_order) > 0:
+        order_medians.__setitem__("baseline_first", statistics.median(first_order))
+    if len(second_order) > 0:
+        order_medians.__setitem__("candidate_first", statistics.median(second_order))
+    overall ∈ float ← statistics.median(ratios)
+    return {"blocks": len(ratios), "paired_cases": len(baseline), "block_median_ratios": ratios, "median_ratio": overall,
+            "ratio_interval_95": interval, "order_medians": order_medians,
+            "resampling_unit": "whole process block; inner calls are not independent observations",
+            "quantile_convention": "sorted bootstrap estimates at floor(p*(2000-1)), p=0.025,0.975",
+            "assumption": "exchangeable independent process blocks; descriptive interval under this assumption",
+            "scope": "measured finite sizes; no complexity or universal winner claim"}
+
+def analysis_fixture(ratio ∈ float) → list[list[object]]:
+    baseline ∈ list[object] ← []
+    candidate ∈ list[object] ← []
+    for block in range(8):
+        for case_index in range(3):
+            row ∈ object ← {"process_block": block, "case_id": str(case_index), "case_sha256": str(case_index),
+                            "machine": "fixture", "compiler": "fixture", "profile": "fixture", "mode": "hot", "operation": "multiply",
+                            "provider_order": block % 2, "ns_per_call": 100.0 * (case_index + 1)}
+            other ∈ object ← row.copy()
+            other.update({"provider_order": 1 - block % 2, "ns_per_call": 100.0 * (case_index + 1) / ratio})
+            baseline.append(row)
+            candidate.append(other)
+    return [baseline, candidate]
+
+def finite_slopes(sizes ∈ list[float], times ∈ list[float]) → object:
+    require(len(sizes) == len(times) and len(sizes) >= 3, "insufficient sizes")
+    slopes ∈ list[float] ← []
+    for size_index in range(len(sizes)):
+        finite_size ∈ bool ← math.isfinite(sizes[size_index])
+        finite_time ∈ bool ← math.isfinite(times[size_index])
+        require(finite_size and finite_time and sizes[size_index] > 1.0 and times[size_index] > 0.0, "invalid size/time series")
+        if size_index > 0:
+            require(sizes[size_index] > sizes[size_index - 1], "sizes must increase")
+        if size_index > 0 and size_index < len(sizes) - 1:
+            numerator ∈ float ← math.log(times[size_index] / times[size_index - 1])
+            denominator ∈ float ← math.log(sizes[size_index] / sizes[size_index - 1])
+            slopes.append(numerator / denominator)
+    exponent ∈ float ← statistics.median(slopes)
+    prediction ∈ float ← times[-2] * (sizes[-1] / sizes[-2]) ** exponent
+    return {"median_log_slope": exponent, "adjacent_log_slopes": slopes, "fit_sizes": sizes[:-1],
+            "held_out_size": sizes[-1], "held_out_observed_over_prediction": times[-1] / prediction,
+            "claim": "finite-range diagnostic; no asymptotic exponent inferred"}
+
+def analysis_job(report ∈ object, source_path ∈ str) → None:
+    known ∈ list[list[object]] ← analysis_fixture(2.0)
+    result ∈ object ← paired_blocks(known[0], known[1])
+    require(float(result.get("median_ratio")) == 2.0 and str(result.get("ratio_interval_95")) == "[2.0, 2.0]", "known speedup fixture")
+    fixtures ∈ object ← {"known_speedup": result}
+    equal ∈ list[list[object]] ← analysis_fixture(1.0)
+    result ∈ object ← paired_blocks(equal[0], equal[1])
+    require(float(result.get("median_ratio")) == 1.0, "equal-speed fixture")
+    fixtures.__setitem__("equal_speed", result)
+    names ∈ list[str] ← ["missing", "duplicate", "case_sha256", "machine", "compiler", "profile", "mode", "operation", "nan", "zero", "negative", "infinity"]
+    mutants ∈ list[object] ← []
+    for name in names:
+        pair ∈ list[list[object]] ← analysis_fixture(2.0)
+        baseline ∈ list[object] ← pair[0]
+        candidate ∈ list[object] ← pair[1]
+        if name == "missing":
+            candidate.pop()
+        elif name == "duplicate":
+            candidate.append(candidate[-1])
+        else:
+            row ∈ object ← candidate[0]
+            if name == "nan":
+                row.__setitem__("ns_per_call", float("nan"))
+            elif name == "zero":
+                row.__setitem__("ns_per_call", 0.0)
+            elif name == "negative":
+                row.__setitem__("ns_per_call", -1.0)
+            elif name == "infinity":
+                row.__setitem__("ns_per_call", float("inf"))
+            else:
+                row.__setitem__(name, "wrong")
+        rejected ∈ bool ← False
+        try:
+            paired_blocks(baseline, candidate)
+        except ValueError as error:
+            mutants.append({"name": name, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "accepted analysis defect " + name)
+    slopes ∈ object ← finite_slopes([2.0, 4.0, 8.0, 16.0], [4.0, 16.0, 64.0, 256.0])
+    require(float(slopes.get("median_log_slope")) == 2.0 and float(slopes.get("held_out_observed_over_prediction")) == 1.0, "analytic slope fixture")
+    fixtures.__setitem__("finite_slopes", slopes)
+    report.update({"fixtures": fixtures, "mutants": mutants})
+    require(bool(Path(source_path).is_file()), "real MB07 receipt missing")
+    source ∈ object ← json.loads(Path(source_path).read_text())
+    require(str(source.get("status")) == "PASS_SCOPED_HOST_CONTROLS", "MB07 receipt failed")
+    runs ∈ list[object] ← source.get("runs")
+    baseline ∈ list[object] ← []
+    candidate ∈ list[object] ← []
+    for run in runs:
+        provider ∈ str ← str(run.get("provider"))
+        if str(run.get("mode")) != "hot" or str(run.get("operation")) != "multiply":
+            continue
+        if provider != "schoolbook" and provider != "karatsuba32-bounded":
+            continue
+        rows ∈ list[object] ← run.get("raw_samples")
+        for sample in rows:
+            compiler ∈ object ← source.get("compiler")
+            flags ∈ str ← json.dumps(compiler.get("flags"))
+            record ∈ object ← {"process_block": run.get("process_block"), "provider_order": run.get("provider_order"),
+                               "case_id": sample.get("source_case_sha256"), "case_sha256": sample.get("case_sha256"),
+                               "ns_per_call": float(sample.get("elapsed_ns")) / int(sample.get("repetitions")),
+                               "machine": source.get("machine_identity"), "compiler": str(compiler.get("sha256")) + flags,
+                               "profile": "unsigned-limb32-v1", "mode": "hot-adapter32", "operation": "multiply"}
+            if provider == "schoolbook":
+                baseline.append(record)
+            else:
+                candidate.append(record)
+    real ∈ object ← paired_blocks(baseline, candidate)
+    real.__setitem__("acceptance", "diagnostic MB07 host controls, not an accepted full mode")
+    report.__setitem__("real_data", real)
+
+def verify_identity(observed ∈ object, expected ∈ object) → None:
+    fields ∈ list[str] ← ["architecture", "source_sha", "binary_sha256"]
+    for field in fields:
+        require(str(observed.get(field)) == str(expected.get(field)), "wrong native identity: " + field)
+
+def native_job(folder ∈ str, report ∈ object, log ∈ list[object], expected_arch ∈ str, require_bc ∈ bool) → None:
+    require(str(platform.machine()) == expected_arch, "wrong native architecture label")
+    compiler ∈ str ← str(resolve_executable(os.environ.get("CC", "cc")))
+    checked([compiler, "--version"], log)
+    revision ∈ object ← checked(["git", "-C", REPOSITORY, "rev-parse", "HEAD"], log)
+    bc_available ∈ bool ← bool(shutil.which("bc"))
+    require(not require_bc or bc_available, "required bc missing")
+    report.__setitem__("bc", "NOT_RUN: required bc absent on host")
+    if bc_available:
+        report.__setitem__("bc", "AVAILABLE: qualification remains owned by MB04")
+    report.update({"compiler": {"path": compiler, "sha256": digest(compiler), "flags": FLAGS},
+                   "qualified_ick": "NOT_RUN", "hosted_workflow": "NOT_RUN", "mandatory_artifact_upload": "NOT_RUN",
+                   "native_arm64": "NOT_RUN", "frequency_thermal": "UNKNOWN: no inference from CPU name"})
+    if Path("/proc/cpuinfo").is_file():
+        report.__setitem__("cpuinfo", Path("/proc/cpuinfo").read_text())
+    program ∈ str ← build(folder, log, "", False, False)
+    corpus ∈ list[object] ← cases(False)
+    report.__setitem__("run", run_mode(program, "hot", "schoolbook", corpus[-8:], log, 1, 1, 0))
+    identity ∈ object ← {"architecture": platform.machine(), "source_sha": str(revision.stdout).strip(), "binary_sha256": digest(program)}
+    report.__setitem__("observed_identity", identity)
+    tools ∈ list[str] ← ["objdump", "nm", "ldd"]
+    options ∈ list[list[str]] ← [["-d"], ["-u"], []]
+    for tool_index in range(3):
+        tool ∈ str ← str(resolve_executable(tools[tool_index]))
+        argv ∈ list[str] ← [tool]
+        argv.extend(options[tool_index])
+        argv.append(program)
+        checked(argv, log)
+    probe ∈ str ← compile_sources(folder, ["platforms/native/probe.c", "timing/engine.c"], log, "", False, False)
+    observation ∈ object ← checked([probe], log)
+    report.__setitem__("abi_timer_tsv", observation.stdout)
+    verify_identity(identity, identity)
+    fields ∈ list[str] ← ["architecture", "source_sha", "binary_sha256"]
+    mutants ∈ list[object] ← []
+    for field in fields:
+        changed ∈ object ← identity.copy()
+        changed.__setitem__(field, "wrong")
+        rejected ∈ bool ← False
+        try:
+            verify_identity(identity, changed)
+        except ValueError as error:
+            mutants.append({"field": field, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "native identity defect accepted")
+    report.__setitem__("mutants", mutants)
+    if str(platform.machine()) == "aarch64":
+        report.__setitem__("native_arm64", "PASS_SCOPED_HOST_CONTROL")
+
+def validate_target(serial ∈ str, model ∈ str, abi ∈ str, sdk ∈ str) → None:
+    require(len(serial) > 0 and not contains(serial, "-"), "explicit device serial required")
+    normalized ∈ str ← model.strip().lower()
+    require(normalized == "miro a1" or normalized == "a1", "target is not MIRO A1")
+    require(abi == "armeabi-v7a" and sdk == "34", "wrong A1 ABI/API")
+
+def android_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    report.update({"physical_miro_a1": "NOT_RUN", "scope": "local real subprocess collection fixtures; no physical transport acceptance"})
+    corpus ∈ list[object] ← cases(False)
+    selected ∈ list[object] ← corpus[100:102]
+    validate_target("fixturea1", "MIRO A1", "armeabi-v7a", "34")
+    program ∈ str ← endpoint(folder, log, "")
+    report.__setitem__("collection_fixture", collect([program, "schoolbook"], binary_payload(selected), selected, True, False, 10.0))
+    defects ∈ list[str] ← ["MB_ENDPOINT_CARRY", "MB_ENDPOINT_TRUNCATE", "MB_EXIT_AFTER_OUTPUT"]
+    diagnostics ∈ list[str] ← ["wrong endpoint product", "truncated", "99"]
+    one ∈ list[object] ← selected[:1]
+    mutants ∈ list[object] ← []
+    for defect_index in range(3):
+        defect ∈ str ← defects[defect_index]
+        bad ∈ str ← endpoint(folder, log, defect)
+        rejected ∈ bool ← False
+        try:
+            collect([bad, "schoolbook"], binary_payload(one), one, True, False, 10.0)
+        except ValueError as error:
+            require(contains(str(error), diagnostics[defect_index]), "wrong transport diagnostic")
+            mutants.append({"name": defect, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "transport defect accepted")
+    disconnected ∈ bool ← False
+    try:
+        collect([folder + "/disconnected-transport"], binary_payload(one), one, True, False, 10.0)
+    except FileNotFoundError:
+        disconnected ← True
+        mutants.append({"name": "disconnected transport", "status": "EXPECTED_REFUSAL"})
+    require(disconnected, "disconnected transport accepted")
+    serials ∈ list[str] ← ["", "c67", "tablet"]
+    models ∈ list[str] ← ["MIRO A1", "Miro C67", "TAB_P10"]
+    for device_index in range(3):
+        rejected ∈ bool ← False
+        try:
+            validate_target(serials[device_index], models[device_index], "armeabi-v7a", "34")
+        except ValueError as error:
+            mutants.append({"name": "wrong device/serial", "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "wrong device accepted")
+    report.__setitem__("mutants", mutants)
+
+def verify_power(wire ∈ str, unit ∈ str, library ∈ str, status ∈ int) → None:
+    require(wire == "67452301efcdab89", "wrong limb wire endianness")
+    require(unit == "ns", "wrong timer units")
+    require(library == "observed", "missing native library identity")
+    require(status == 0, "remote failure masked")
+
+def power_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    report.update({"native_aix": "BLOCKED_EXTERNAL: no authorized native AIX host", "scope": "Linux-compiled portability probe and evidence fixtures only"})
+    probe ∈ str ← compile_sources(folder, ["platforms/power/probe.c"], log, "", False, False)
+    result ∈ object ← checked([probe], log)
+    require(contains(str(result.stdout), "limb_wire\t67452301efcdab89"), "wire serialization differs")
+    report.__setitem__("probe_tsv", result.stdout)
+    verify_power("67452301efcdab89", "ns", "observed", 0)
+    mutants ∈ list[object] ← []
+    for defect_index in range(4):
+        wire ∈ str ← "67452301efcdab89"
+        unit ∈ str ← "ns"
+        library ∈ str ← "observed"
+        status ∈ int ← 0
+        if defect_index == 0:
+            wire ← "0123456789abcdef"
+        if defect_index == 1:
+            unit ← "ticks"
+        if defect_index == 2:
+            library ← "missing"
+        if defect_index == 3:
+            status ← 99
+        rejected ∈ bool ← False
+        try:
+            verify_power(wire, unit, library, status)
+        except ValueError as error:
+            mutants.append({"status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "portability evidence defect accepted")
+    report.__setitem__("mutants", mutants)
+
+def paper_gate(receipt ∈ object) → None:
+    require(str(receipt.get("mul5_acceptance")) == "PASS", "accepted MUL5 receipt missing")
+    require(str(receipt.get("fallback")) == "none", "forbidden whole-input fallback")
+    require(str(receipt.get("profile")) == "reduced-algebra", "unsupported published profile")
+    boolean_link ∈ bool ← isinstance(receipt.get("linked_multiply_exact"), bool)
+    linked ∈ bool ← bool(receipt.get("linked_multiply_exact"))
+    require(boolean_link and linked, "actual MUL5 symbol missing")
+    require(str(receipt.get("stage_contract")) == "PASS", "accepted stage/dimension contract missing")
+    require(str(receipt.get("independent_products")) == "PASS", "independent exact products missing")
+
+def paper_job(report ∈ object) → None:
+    report.update({"actual_adapter_build": "NOT_RUN", "actual_provider_acceptance": "BLOCKED: accepted MUL5 implementation and receipts unavailable",
+                   "scope": "synthetic gate controls; never paper execution evidence", "inspected_mul5_branch": "arithmetic/mul-5-composition",
+                   "inspected_mul5_sha": "696739c1ff786f918ae66ee509b8630b81145db7",
+                   "observed_blocker": "composition.h declarations have no multiply_exact/composition_prepare definitions under src"})
+    good ∈ object ← {"mul5_acceptance": "PASS", "fallback": "none", "profile": "reduced-algebra", "linked_multiply_exact": True, "stage_contract": "PASS", "independent_products": "PASS"}
+    paper_gate(good)
+    fields ∈ list[str] ← list(good.keys())
+    mutants ∈ list[object] ← []
+    for field in fields:
+        bad ∈ object ← good.copy()
+        bad.__setitem__(field, False)
+        rejected ∈ bool ← False
+        try:
+            paper_gate(bad)
+        except ValueError as error:
+            mutants.append({"field": field, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "missing gate field accepted: " + field)
+    report.update({"gate_controls": "PASS", "gate_mutants": mutants})

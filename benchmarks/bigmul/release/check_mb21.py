@@ -4,6 +4,7 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import subprocess
@@ -18,11 +19,11 @@ CHECKS={
     "MB01":"acceptance/check_mb01.py", "MB02":"abi/check_mb02.py",
     "MB03":"corpus/check_mb03.py", "MB04":"oracles/check_mb04.py",
     "MB05":"providers/check_mb05.py", "MB06":"timing/check_mb06.py",
-    "MB07":"modes/hot/check_mb07.py", "MB08":"modes/mixed/check_mb08.py",
-    "MB09":"modes/cache/check_mb09.py", "MB10":"modes/end_to_end/check_mb10.py",
-    "MB11":"memory/check_mb11.py", "MB12":"analysis/check_mb12.py",
-    "MB13":"platforms/native/check_mb13.py", "MB14":"platforms/android/check_mb14.py",
-    "MB15":"platforms/power/check_mb15.py", "MB16":"providers/openai2026/check_mb16.py",
+    "MB07":"modes/hot/check_mb07.pi", "MB08":"modes/mixed/check_mb08.pi",
+    "MB09":"modes/cache/check_mb09.pi", "MB10":"modes/end_to_end/check_mb10.pi",
+    "MB11":"memory/check_mb11.pi", "MB12":"analysis/check_mb12.pi",
+    "MB13":"platforms/native/check_mb13.pi", "MB14":"platforms/android/check_mb14.pi",
+    "MB15":"platforms/power/check_mb15.pi", "MB16":"providers/openai2026/check_mb16.pi",
     "MB17":"traces/check_mb17.py", "MB18":"structure/check_mb18.py",
     "MB19":"precision/check_mb19.py", "MB20":"cost_models/check_mb20.py",
 }
@@ -74,12 +75,18 @@ def gate_controls():
 
 
 def execute_control(job,path,optional_bc):
+    # This inherited Python dispatcher is named migration debt. New controls
+    # are Ithon and may execute only through the explicitly selected frontend.
     argv=[sys.executable,str(path)]
+    if path.suffix==".pi":
+        entry=Path(os.environ.get("ITHON",""))
+        require(entry.is_absolute() and entry.is_file() and os.access(entry,os.X_OK),"ITHON must name the verified absolute frontend")
+        argv=[str(entry),str(path),"--output",str(ROOT/"release/last-run"/(job.lower()+".json"))]
+    if job=="MB16":argv.append("--controls-only")
     if job=="MB04" and optional_bc:argv.append("--allow-missing-bc")
     if job=="MB05":
         # Local extracted headers remain an explicit host configuration;
         # hosted lanes install the pinned GMP development package instead.
-        import os
         for variable,option in (("MB05_GMP_INCLUDE","--gmp-include"),("MB05_GMP_LIBRARY","--gmp-library")):
             if os.environ.get(variable):argv.extend([option,os.environ[variable]])
     result=subprocess.run(argv,capture_output=True,text=True,timeout=180,cwd=REPOSITORY)
@@ -100,6 +107,7 @@ def main():
     parser.add_argument("--expected-arch",choices=("x86_64","aarch64"))
     parser.add_argument("--output",type=Path)
     args=parser.parse_args()
+    (ROOT/"release/last-run").mkdir(parents=True,exist_ok=True)
     architecture=platform.machine()
     require(not args.expected_arch or architecture==args.expected_arch,"wrong native architecture label")
     head=subprocess.run(["git","-C",str(REPOSITORY),"rev-parse","HEAD"],capture_output=True,text=True,check=True).stdout.strip()

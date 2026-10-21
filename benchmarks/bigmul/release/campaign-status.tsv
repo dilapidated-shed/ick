@@ -5,18 +5,18 @@ MB03	legacy corpus pinned verbatim; deterministic v2 bytes/schema/hash validator
 MB04	Python route checks exhaustive byte pairs and v2 smoke; independently executed bc route; required-bc refusal retained	paper-candidate comparison and broader full oracle-job acceptance remain separate
 MB05	bounded schoolbook/Karatsuba and pinned GMP controls; identical corpus and ABI guards; native versus adapter samples; repacking mutant	complete prerequisite-job acceptance; qualified ICK; original GMP build flags/internal algorithm UNKNOWN
 MB06	standalone raw timing engine; fake clocks; cap flags; optimized/LTO controls	shared-C integration and uninstrumented real-provider measurements
-MB07	NOT_IMPLEMENTED	accepted MB03/MB05/MB06; hot/square/workspace modes
-MB08	NOT_IMPLEMENTED	accepted MB03/MB05/MB06; mixed persistent-request mode
-MB09	NOT_IMPLEMENTED	accepted MB03/MB05/MB06; bounded cache/first-touch experiments
-MB10	NOT_IMPLEMENTED	accepted MB01/MB02/MB03/MB05/MB06; endpoint/conversion measurements
-MB11	NOT_IMPLEMENTED	accepted MB02/MB03/MB05/MB06; allocation/workspace accounting
-MB12	NOT_IMPLEMENTED	accepted corpus/timing plus real mode data from MB07-MB11
-MB13	existing native workflow now replays available controls and archives receipts	full independent bc/provider/hot-mode lanes; exact-head hosted results pending
-MB14	NOT_IMPLEMENTED	accepted host modules and explicit physical A1 serial/transport access
-MB15	NOT_IMPLEMENTED	accepted portability modules and already-authorized native POWER/AIX host
-MB16	NOT_IMPLEMENTED	accepted MUL5 implementation and component receipts; no substitute example
+MB07	checked Ithon host hot/rotating/equal-value controls; optional GMP adapters; negative providers	INCOMPLETE: accepted prerequisites; qualified ICK; uninstrumented timing; reused native workspace
+MB08	checked Ithon persistent mixed workloads; batches 1/8/64; exact response validators	INCOMPLETE: delay/quantile and mid-stream failure fixtures; timing overhead; isolated throughput
+MB09	checked Ithon hot/rotating/fresh-output/eviction controls and budget refusal	INCOMPLETE: cache-boundary sweeps; separate residency and coverage mutants; physical qualification
+MB10	checked Ithon binary process/persistent and persistent-hex endpoints; bounded collector; delay/exit/hang/frame controls	INCOMPLETE: internal conversion intervals; hex echo; decimal mode; prerequisites
+MB11	checked Ithon separately instrumented C heap controls; nested/aligned/realloc/failure/leak fixtures	INCOMPLETE: RSS; reuse tradeoffs; unit/saturation/error cleanup controls
+MB12	checked Ithon strict paired process-block analysis; bootstrap/order/slope and defective-data fixtures; actual MB07 controls	INCOMPLETE: accepted real mode; crossover; outlier/heteroscedastic/model sensitivity
+MB13	checked Ithon observed native host diagnostics; pinned frontend in existing native workflow; raw uploads	INCOMPLETE: exact-head hosted evidence; qualified ICK; adversarial upload/oracle/candidate controls; AICI
+MB14	checked Ithon real local process collection and A1 identity fixtures	INCOMPLETE: retained MUL6 explicit-serial integration; Cat Food artifacts; physical MIRO A1 NOT_RUN
+MB15	checked Ithon local wire portability probe and evidence validators	INCOMPLETE: authorized remote path; native AIX clock/compiler/LPAR facts and execution BLOCKED_EXTERNAL
+MB16	checked Ithon synthetic gate controls; domain manifest and uncompiled adapter draft	INCOMPLETE: actual accepted MUL5 API definitions; record budget; stage/dimension/provenance contracts and real products
 MB17	executed schoolbook trace schema, lifetimes, last-write edges, arithmetic checks	retained recursive trace and actual paper provider hooks
 MB18	executed schoolbook DAGs; checked permutations/layouts; finite-ring transform controls	recursive/paper provider structure; full integrated acceptance
 MB19	executed baseline carry statistics; exhaustive small-radix and exact certificate fixtures	paper precision/recovery contracts and signed-packing cases
 MB20	logical traffic; hand-checked bounded copy/tape schedules; explicit unresolved costs	accepted paper component transpose/permutation/network schedules
-MB21	available-control suite; strict refusal of full readiness; gate mutant checks	MB05/MB07-MB16 and full dependent stage receipts remain absent or partial
+MB21	available-control suite including checked Ithon MB07-MB16 slices; strict full-readiness refusal	MB05/MB07-MB16 and full dependent stage receipts remain partial; gate-fixture success is not candidate acceptance

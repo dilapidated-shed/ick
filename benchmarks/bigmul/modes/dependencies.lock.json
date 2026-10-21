@@ -1,0 +1,13 @@
+{
+  "schema": "bigmul-scoped-controls.v1",
+  "benchmark_parent": "6e48d9b8a0bcb5a418b25b96cb7b3a0a6340bf80",
+  "merge_base": "c61e448251744a2f40ad743ebef1a027bdcd2f9d",
+  "observed_main": "8a7aac0e42bc8af4550577bbc87e2a5a15eb9db7",
+  "main_reconciliation": "new MUL2-4 and compiler work preserved on main; no changes overlap the benchmark paths; no history rewrite or merge performed",
+  "ithon": {"repository": "dilapidated-shed/ithon", "sha": "74ab6d6044b07b76a910978437a34a6b5ac6acda", "qualification": "tests/qualify-host-control.pi"},
+  "flexible_pipes": {"repository": "isomorphisms/flexible-pipes", "sha": "24235bd2c86ff01f121a318c209b479943805a0f", "kind": "local diagnostic control plane; not independent acceptance"},
+  "mul5": {"branch": "arithmetic/mul-5-composition", "sha": "696739c1ff786f918ae66ee509b8630b81145db7", "status": "BLOCKED: API declarations lack definitions; no accepted stage contracts"},
+  "gmp": "6.3.0 headers/runtime when available; original build flags/internal algorithm UNKNOWN",
+  "source_provenance": "new reconstruction after unpublished workspace loss; old local commit hashes and lost raw receipts do not qualify this tree",
+  "acceptance": "partial; no full predecessor acceptance, qualified ICK, Kitchen/Ike production receipt, independent AICI, physical MIRO A1 or native AIX"
+}

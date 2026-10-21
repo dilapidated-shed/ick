@@ -1,0 +1,41 @@
+"""Check actual integration refusals; not independent AICI acceptance."""
+import os
+import sys
+import tempfile
+from pathlib import Path
+from builtins import ValueError
+import benchmark_controls
+root ∈ str ← benchmark_controls.ROOT
+sys.path.insert(0, root + "/release")
+# Existing Python integration dispatcher is retained migration debt.
+import check_mb21
+log ∈ list[object] ← []
+report ∈ object ← {"job": "MB07-16-integration", "status": "FAIL", "commands": log}
+selected_ithon ∈ str ← str(os.environ.get("ITHON", ""))
+os.environ.__setitem__("ITHON", "")
+rejected ∈ bool ← False
+try:
+    check_mb21.execute_control("MB07", Path(root + "/modes/hot/check_mb07.pi"), False)
+except ValueError as error:
+    benchmark_controls.require(benchmark_controls.contains(str(error), "ITHON must name"), "wrong missing-frontend refusal")
+    rejected ← True
+finally:
+    os.environ.__setitem__("ITHON", selected_ithon)
+benchmark_controls.require(rejected, "missing Ithon frontend accepted")
+with tempfile.TemporaryDirectory() as temporary:
+    folder ∈ str ← str(temporary)
+    header ∈ str ← "pattern,bits_a,bits_b,median_ns,implementation\n"
+    Path(folder + "/base.csv").write_text(header + "0,32,32,10,baseline\n1,64,64,20,baseline\n")
+    Path(folder + "/good.csv").write_text(header + "0,32,32,5,candidate\n1,64,64,10,candidate\n")
+    Path(folder + "/partial.csv").write_text(header + "0,32,32,5,candidate\n")
+    good ∈ object ← benchmark_controls.command([str(sys.executable), root + "/compare.py", folder + "/base.csv", folder + "/good.csv"], log, "")
+    benchmark_controls.require(int(good.returncode) == 0, "paired compare CLI failed")
+    bad ∈ object ← benchmark_controls.command([str(sys.executable), root + "/compare.py", folder + "/base.csv", folder + "/partial.csv"], log, "")
+    benchmark_controls.require(int(bad.returncode) != 0 and benchmark_controls.contains(str(bad.stderr), "unpaired cases"), "compare CLI silently intersected partial suites")
+benchmark_controls.require(len(selected_ithon) > 0, "explicit Ithon frontend needed for integration tests")
+blocked ∈ object ← benchmark_controls.command([selected_ithon, root + "/providers/openai2026/check_mb16.pi"], log, "")
+benchmark_controls.require(int(blocked.returncode) == 2 and benchmark_controls.contains(str(blocked.stdout), '"status": "BLOCKED"'), "actual MB16 gate admitted missing candidate")
+ready ∈ object ← benchmark_controls.command([str(sys.executable), root + "/release/check_mb21.py", "--require-ready"], log, "")
+benchmark_controls.require(int(ready.returncode) != 0 and benchmark_controls.contains(str(ready.stdout), '"benchmark_readiness": "BLOCKED"'), "full readiness admitted partial package")
+report.__setitem__("status", "PASS_SCOPED_INTEGRATION_CONTROLS")
+benchmark_controls.emit(report, root + "/release/last-run/integration.json")
