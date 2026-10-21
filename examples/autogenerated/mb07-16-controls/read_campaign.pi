@@ -1,0 +1,13 @@
+"""Render the recorded campaign stage outcomes without upgrading their scope."""
+import json
+import sys
+from pathlib import Path
+source ∈ str ← str(sys.argv.__getitem__(1))
+report ∈ object ← json.loads(Path(source).read_text())
+print("campaign", str(report.get("controls_status")), "readiness", str(report.get("benchmark_readiness")))
+controls ∈ list[object] ← report.get("controls")
+for control in controls:
+    print(str(control.get("job")), str(control.get("status")), str(control.get("exit_status")))
+    if int(control.get("exit_status")) != 0:
+        print("stderr", str(control.get("stderr"))[:4000])
+        print("stdout tail", str(control.get("stdout"))[-4000:])

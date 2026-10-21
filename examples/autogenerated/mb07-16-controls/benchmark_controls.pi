@@ -1,0 +1,2074 @@
+"""Checked controls: bounded host evidence, never full campaign acceptance."""
+import argparse
+import csv
+import hashlib
+import io
+import json
+import math
+import os
+import platform
+import random
+import selectors
+import shutil
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+from builtins import list, bytes, bytearray, format, isinstance, ValueError, TypeError, OSError, FileNotFoundError, BaseException
+from pathlib import Path
+
+REPOSITORY ∈ str ← str(Path(__file__).resolve().parent.parent.parent.parent)
+ROOT ∈ str ← REPOSITORY + "/benchmarks/bigmul"
+ENDPOINT_RECEIPTS ∈ list[object] ← []
+sys.path.insert(0, ROOT + "/acceptance")
+sys.path.insert(0, ROOT + "/corpus")
+sys.path.insert(0, ROOT + "/providers")
+# Existing foreign Python modules are explicitly retained migration debt.
+from runner import resolve_executable
+from corpus import generate, value, validate_legacy
+from check_mb05 import words, FLAGS
+
+def require(condition ∈ bool, message ∈ str) → None:
+    if not condition:
+        raise ValueError(message)
+
+def contains(text ∈ str, fragment ∈ str) → bool:
+    offset ∈ int ← text.find(fragment)
+    return offset >= 0
+
+def digest(path ∈ str) → str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def command(argv ∈ list[str], log ∈ list[object], payload ∈ str) → object:
+    try:
+        result ∈ object ← subprocess.run(argv, input=payload, text=True, capture_output=True, timeout=120)
+    except subprocess.TimeoutExpired as error:
+        log.append({"argv": argv, "exit_status": "TIMEOUT", "stdout": str(error.stdout), "stderr": str(error.stderr)})
+        raise ValueError("command deadline exceeded")
+    log.append({"argv": argv, "exit_status": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
+    return result
+
+def checked(argv ∈ list[str], log ∈ list[object]) → object:
+    result ∈ object ← command(argv, log, "")
+    require(int(result.returncode) == 0, "command failed: " + str(result.stderr))
+    return result
+
+def compile_sources(folder ∈ str, sources ∈ list[str], log ∈ list[object], defect ∈ str, profile ∈ bool, gmp ∈ bool) → str:
+    return compile_sources_options(folder, sources, log, defect, profile, gmp, [])
+
+def compile_sources_options(folder ∈ str, sources ∈ list[str], log ∈ list[object], defect ∈ str, profile ∈ bool, gmp ∈ bool, extra_flags ∈ list[str]) → str:
+    Path(folder).mkdir(parents=True, exist_ok=True)
+    compiler ∈ str ← str(resolve_executable(os.environ.get("CC", "cc")))
+    objects ∈ list[str] ← []
+    for source_index in range(len(sources)):
+        source ∈ str ← sources[source_index]
+        output ∈ str ← folder + "/object-" + str(source_index) + ".o"
+        argv ∈ list[str] ← [compiler]
+        argv.extend(FLAGS)
+        argv.extend(extra_flags)
+        argv.append("-fno-lto")
+        if source == "mulbench.c":
+            argv.append("-Dmain=mb_unused_main")
+        if gmp and source == "modes/workload.c":
+            argv.append("-DMB_WITH_GMP")
+        if profile and (source == "mulbench.c" or source == "providers/karatsuba.c" or source == "providers/gmp.c" or source == "modes/end_to_end/text_endpoint.c"):
+            argv.extend(["-include", ROOT + "/memory/tracker.h", "-Dmalloc=mb_malloc", "-Dcalloc=mb_calloc", "-Dfree=mb_free"])
+        if len(defect) > 0:
+            argv.append("-D" + defect)
+        argv.extend(["-c", ROOT + "/" + source, "-o", output])
+        checked(argv, log)
+        objects.append(output)
+    program ∈ str ← folder + "/program"
+    link ∈ list[str] ← [compiler]
+    link.extend(extra_flags)
+    link.extend(objects)
+    if gmp:
+        link.append("-lgmp")
+    link.extend(["-o", program])
+    checked(link, log)
+    return program
+
+def build(folder ∈ str, log ∈ list[object], defect ∈ str, profile ∈ bool, gmp ∈ bool) → str:
+    sources ∈ list[str] ← ["mulbench.c", "providers/karatsuba.c", "timing/engine.c", "memory/tracker.c", "modes/workload.c"]
+    if gmp:
+        sources.append("providers/gmp.c")
+    return compile_sources(folder, sources, log, defect, profile, gmp)
+
+def endpoint(folder ∈ str, log ∈ list[object], defect ∈ str) → str:
+    return compile_sources(folder, ["mulbench.c", "providers/karatsuba.c", "modes/end_to_end/binary_endpoint.c"], log, defect, False, False)
+
+def integer_value(limbs ∈ list[int]) → int:
+    result ∈ int ← 0
+    shift ∈ int ← 0
+    for word in limbs:
+        require(word >= 0 and word <= 4294967295, "invalid limb")
+        result ← result + (word << shift)
+        shift ← shift + 32
+    return result
+
+def cases(square ∈ bool) → list[object]:
+    generated ∈ list[object] ← generate("medium")
+    selected ∈ list[object] ← []
+    for row in generated:
+        if str(row.get("semantics")) == "unsigned-kernel" and int(row.get("left_limbs")) <= 129 and int(row.get("right_limbs")) <= 129:
+            left ∈ list[int] ← words(value(row, "left"), int(row.get("left_limbs")))
+            right ∈ list[int] ← words(value(row, "right"), int(row.get("right_limbs")))
+            if square:
+                right ← list(left)
+            combined ∈ list[int] ← list(left)
+            combined.extend(right)
+            fields ∈ list[str] ← [str(len(left)), str(len(right))]
+            encoded ∈ bytes ← len(left).to_bytes(4, "little")
+            count_bytes ∈ bytes ← len(right).to_bytes(4, "little")
+            encoded ← encoded + count_bytes
+            for word in combined:
+                field ∈ str ← format(word, "08x")
+                fields.append(field)
+                word_bytes ∈ bytes ← word.to_bytes(4, "little")
+                encoded ← encoded + word_bytes
+            case_hash ∈ str ← hashlib.sha256(encoded).hexdigest()
+            wire ∈ str ← " ".join(fields)
+            selected.append({"left": left, "right": right, "wire": wire, "case_sha256": case_hash,
+                             "source_case_sha256": row.get("case_sha256"), "product": integer_value(left) * integer_value(right)})
+    return selected
+
+def payload(corpus ∈ list[object]) → str:
+    text ∈ str ← ""
+    for case in corpus:
+        text ← text + str(case.get("wire")) + "\n"
+    return text
+
+def run_mode(program ∈ str, mode ∈ str, provider ∈ str, corpus ∈ list[object], log ∈ list[object], trials ∈ int, batch ∈ int, eviction ∈ int) → object:
+    return run_mode_configured(program, mode, provider, corpus, log, trials, batch, eviction, "fresh", "call-counted")
+
+def event_rows(text ∈ str, kind ∈ str) → list[list[str]]:
+    lines ∈ list[str] ← list(text.splitlines())
+    selected ∈ list[list[str]] ← []
+    for line in lines:
+        fields ∈ list[str] ← list(line.split("\t"))
+        if len(fields) > 0 and fields[0] == kind:
+            selected.append(fields)
+    return selected
+
+def rss_details(text ∈ str) → object:
+    events ∈ list[list[str]] ← event_rows(text, "rss_max")
+    require(len(events) == 1, "missing process RSS observation")
+    fields ∈ list[str] ← events[0]
+    if len(fields) == 2 and fields[1] == "NOT_AVAILABLE":
+        return {"status": "NOT_AVAILABLE"}
+    require(len(fields) == 5 and fields[2] == "KiB" and fields[4] == "bytes", "unknown RSS units")
+    raw ∈ int ← int(fields[1])
+    normalized ∈ int ← int(fields[3])
+    require(raw > 0 and normalized == raw * 1024, "RSS unit conversion differs")
+    return {"status": "OBSERVED", "raw": raw, "raw_unit": "KiB", "peak_bytes": normalized,
+            "scope": "Linux RUSAGE_SELF process high-water mark; includes corpus/oracle/I/O; not provider-owned heap"}
+
+def kernel_batches(stderr ∈ str, rows ∈ list[object], trials ∈ int, case_count ∈ int, batch ∈ int) → list[object]:
+    events ∈ list[list[str]] ← event_rows(stderr, "kernel_batch")
+    per_trial ∈ int ← (case_count + batch - 1) // batch
+    require(len(events) == trials * per_trial, "missing arithmetic batch spans")
+    spans ∈ list[object] ← []
+    for event_index in range(len(events)):
+        fields ∈ list[str] ← events[event_index]
+        trial ∈ int ← event_index // per_trial
+        first ∈ int ← event_index % per_trial * batch
+        count ∈ int ← batch
+        if first + count > case_count:
+            count ← case_count - first
+        require(len(fields) == 5 and int(fields[1]) == trial and int(fields[2]) == first and int(fields[3]) == count, "wrong arithmetic batch identity")
+        elapsed ∈ int ← int(fields[4])
+        require(elapsed > 0, "invalid arithmetic batch duration")
+        for offset in range(count):
+            row ∈ object ← rows[trial * case_count + first + offset]
+            require(int(row.get("elapsed_ns")) == elapsed and int(row.get("repetitions")) == count, "arithmetic batch span/response mismatch")
+            row.__setitem__("batch_id", event_index)
+        spans.append({"trial": trial, "first_request": first, "request_count": count, "elapsed_ns": elapsed})
+    return spans
+
+def run_mode_configured(program ∈ str, mode ∈ str, provider ∈ str, corpus ∈ list[object], log ∈ list[object], trials ∈ int, batch ∈ int, eviction ∈ int, workspace ∈ str, measurement ∈ str) → object:
+    text ∈ str ← payload(corpus)
+    result ∈ object ← command([program, mode, provider, str(trials), "4096", str(batch), "8388608", str(eviction), workspace], log, text)
+    require(int(result.returncode) == 0, "workload failed: " + str(result.stderr))
+    stderr ∈ str ← str(result.stderr)
+    require(contains(stderr, "measurement\t" + measurement + "\n"), "wrong measurement identity")
+    require(contains(stderr, "workspace\t" + workspace + "\n"), "wrong workspace identity")
+    require(contains(stderr, "final_live_bytes\t0\n"), "workspace leaked at process cleanup")
+    rows ∈ list[object] ← list(csv.DictReader(io.StringIO(result.stdout), delimiter="\t"))
+    require(len(rows) == trials * len(corpus), "missing or extra response")
+    for row_index in range(len(rows)):
+        row ∈ object ← rows[row_index]
+        case ∈ object ← corpus[row_index % len(corpus)]
+        require(int(row.get("trial")) == row_index // len(corpus) and int(row.get("request")) == row_index % len(corpus), "duplicate/reordered response")
+        calls ∈ int ← int(row.get("calls"))
+        repetitions ∈ int ← int(row.get("repetitions"))
+        require(int(row.get("elapsed_ns")) > 0 and repetitions > 0, "invalid time/call coverage")
+        if measurement == "call-counted":
+            require(calls == repetitions, "invalid time/call coverage")
+        else:
+            require(measurement == "uninstrumented" and calls == 0, "unexpected call instrumentation")
+        if mode == "mixed" or mode == "first-touch" or mode == "eviction-preconditioned" or mode == "profile":
+            require(repetitions == 1, "first call warmed by repetition")
+        if mode == "rotating" or mode == "rotating-pool":
+            require(repetitions >= len(corpus), "rotating pool not covered")
+        if mode == "eviction-preconditioned":
+            require(int(row.get("precondition_bytes")) == (eviction + 63) // 64, "preconditioning was skipped")
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        product_hex ∈ str ← str(row.get("product_hex"))
+        require(len(product_hex) == 8 * (len(left) + len(right)), "truncated result")
+        require(int(product_hex, 16) == int(case.get("product")), "wrong exact product")
+        row.update({"case_sha256": case.get("case_sha256"), "source_case_sha256": case.get("source_case_sha256"),
+                    "left_stored_limbs": len(left), "right_stored_limbs": len(right)})
+    operation ∈ str ← "multiply"
+    if provider == "gmp-mpn-sqr":
+        operation ← "specialized-square"
+    request_hash ∈ str ← hashlib.sha256(text.encode()).hexdigest()
+    boundary ∈ str ← "complete-limb32-adapter"
+    workspace_kind ∈ str ← "provider-owned-fresh"
+    if workspace == "reused-native":
+        boundary ← "native-prepared-kernel; import/allocation/export excluded"
+        workspace_kind ← "prepared native context reused for identical operands"
+    warmup ∈ list[list[str]] ← event_rows(stderr, "warmup")
+    allocation_events ∈ list[list[str]] ← event_rows(stderr, "output_allocation")
+    if mode == "first-touch":
+        require(len(allocation_events) == trials * len(corpus), "missing fresh-output allocation coverage")
+        for allocation_index in range(len(allocation_events)):
+            allocation_event ∈ list[str] ← allocation_events[allocation_index]
+            require(len(allocation_event) == 4 and int(allocation_event[1]) == allocation_index // len(corpus) and int(allocation_event[2]) == allocation_index % len(corpus) and allocation_event[3] == "1", "fresh output buffer was reused")
+    else:
+        require(len(allocation_events) == 0, "unexpected fresh-output allocation identity")
+    if mode == "hot" or mode == "rotating" or mode == "rotating-pool":
+        warmup_cases ∈ int ← len(corpus)
+        if mode == "rotating-pool":
+            warmup_cases ← 1
+        require(len(warmup) == trials * warmup_cases, "missing warmup coverage")
+        calibration ∈ list[list[str]] ← event_rows(stderr, "calibration")
+        require(len(calibration) == len(warmup), "missing calibration coverage")
+        for warmup_index in range(len(warmup)):
+            event ∈ list[str] ← warmup[warmup_index]
+            calibrated ∈ list[str] ← calibration[warmup_index]
+            require(len(event) == 4 and int(event[1]) == warmup_index // warmup_cases and int(event[2]) == warmup_index % warmup_cases and event[3] == "2", "wrong warmup identity")
+            require(len(calibrated) == 5 and calibrated[1] == event[1] and calibrated[2] == event[2], "wrong calibration identity")
+            require((calibrated[3] == "0" or calibrated[3] == "1") and (calibrated[4] == "0" or calibrated[4] == "1") and (calibrated[3] == "1" or calibrated[4] == "1"), "unbounded calibration")
+    else:
+        require(len(warmup) == 0 and len(event_rows(stderr, "calibration")) == 0, "unexpected warming of a single-pass workload")
+    batch_samples ∈ list[object] ← []
+    units ∈ str ← "ns per measured batch"
+    repetition_field ∈ str ← "provider calls in this measured batch"
+    warmup_policy ∈ str ← "two explicit calls before calibration for each hot/rotating case; neither warmup nor calibration enters measured batches"
+    call_field ∈ str ← "observed calls"
+    if measurement == "uninstrumented":
+        call_field ← "NOT_MEASURED; raw zero is a sentinel, coverage comes from the matched counted build"
+    if mode == "mixed-throughput":
+        batch_samples ← kernel_batches(stderr, rows, trials, len(corpus), batch)
+        units ← "ns per whole arithmetic batch; response rows reference a shared batch sample, never per-request latency"
+        repetition_field ← "total requests in the shared arithmetic batch; one provider call per request; count once by batch_id"
+        if measurement == "call-counted":
+            call_field ← "observed calls in the shared arithmetic batch; repeated per response row; count once by batch_id"
+    if mode == "rotating-pool":
+        warmup_policy ← "two calls at the start of each pool trial before bounded calibration; measured repetitions cover the full pool; residency unproven"
+        pool_events ∈ list[list[str]] ← event_rows(stderr, "pool_batch")
+        require(len(pool_events) == trials, "missing rotating-pool spans")
+        for pool_trial in range(trials):
+            pool_event ∈ list[str] ← pool_events[pool_trial]
+            require(len(pool_event) == 5 and int(pool_event[1]) == pool_trial and int(pool_event[2]) == len(corpus), "wrong rotating-pool identity")
+            pool_repetitions ∈ int ← int(pool_event[3])
+            pool_elapsed ∈ int ← int(pool_event[4])
+            for pool_index in range(len(corpus)):
+                pool_row ∈ object ← rows[pool_trial * len(corpus) + pool_index]
+                require(int(pool_row.get("elapsed_ns")) == pool_elapsed and int(pool_row.get("repetitions")) == pool_repetitions, "rotating-pool span/response mismatch")
+                pool_row.__setitem__("batch_id", pool_trial)
+            batch_samples.append({"trial": pool_trial, "pool_size": len(corpus), "provider_calls": pool_repetitions, "elapsed_ns": pool_elapsed})
+        units ← "ns per whole rotating-pool batch; response rows reference a shared sample, never per-request latency"
+        repetition_field ← "total provider calls cycling through the pool; count once per trial/batch_id"
+        if measurement == "call-counted":
+            call_field ← "observed calls in shared rotating-pool batch; count once per trial/batch_id"
+    return {"mode": mode, "provider": provider, "operation": operation, "request_sha256": request_hash,
+            "raw_samples": rows, "events_tsv": result.stderr, "binary_sha256": digest(program), "trials": trials,
+            "arithmetic_batches": batch_samples,
+            "batch_size": batch, "eviction_span_bytes": eviction, "cost_boundary": boundary, "measurement": measurement,
+            "workspace": workspace_kind, "timer": "CLOCK_MONOTONIC", "units": units, "rss": rss_details(stderr),
+            "warmup": warmup_policy,
+            "call_field": call_field, "repetition_field": repetition_field,
+            "residency_components": {"input": "pregenerated, copied and read before timing; physical residency unproven",
+                                     "output": "new malloc lifetime with guard write for first-touch; otherwise existing output prefilled before timing",
+                                     "scratch": workspace_kind + "; provider-owned allocation is inside complete-adapter timing",
+                                     "code": "no instruction-cache flush; process startup excluded from kernel timing; residency unproven"},
+            "precondition_bytes_meaning": "one byte per 64-byte stride; no proven cache state",
+            "scope": "host comparison; callback/dispatch and complete provider work at the stated boundary; no overhead subtraction or universal speed claim"}
+
+def binary_payload(corpus ∈ list[object]) → bytes:
+    result ∈ bytes ← b""
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        header ∈ bytes ← len(left).to_bytes(4, "little")
+        tail ∈ bytes ← len(right).to_bytes(4, "little")
+        result ← result + header + tail
+        combined ∈ list[int] ← list(left)
+        combined.extend(right)
+        for word in combined:
+            encoded ∈ bytes ← word.to_bytes(4, "little")
+            result ← result + encoded
+    return result
+
+def validate_binary(output ∈ bytes, corpus ∈ list[object], echo ∈ bool) → None:
+    offset ∈ int ← 0
+    for case in corpus:
+        require(offset + 4 <= len(output), "truncated frame header")
+        count ∈ int ← int.from_bytes(output[offset:offset + 4], "little")
+        offset ← offset + 4
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        require(count == len(left) + len(right), "wrong word count")
+        require(offset + 4 * count <= len(output), "truncated product")
+        product ∈ int ← int.from_bytes(output[offset:offset + 4 * count], "little")
+        offset ← offset + 4 * count
+        expected ∈ int ← int(case.get("product"))
+        if echo:
+            expected ← 0
+        require(product == expected, "wrong endpoint product")
+    require(offset == len(output), "surplus output")
+
+def collect(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], binary ∈ bool, echo ∈ bool, timeout ∈ float) → object:
+    return collect_configured(argv, data, corpus, binary, echo, 16, False, timeout)
+
+def collect_text(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], base ∈ int, echo ∈ bool, timeout ∈ float) → object:
+    return collect_configured(argv, data, corpus, False, echo, base, True, timeout)
+
+def collect_configured(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], binary ∈ bool, echo ∈ bool, base ∈ int, padded ∈ bool, timeout ∈ float) → object:
+    require(len(data) < 4096, "request exceeds bounded pipe envelope")
+    start ∈ int ← time.monotonic_ns()
+    deadline ∈ int ← start + int(timeout * 1000000000.0)
+    process ∈ object ← subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+    output ∈ object ← bytearray()
+    errors ∈ object ← bytearray()
+    first ∈ int ← 0
+    try:
+        written ∈ int ← process.stdin.write(data)
+        require(written == len(data), "incomplete request write")
+        process.stdin.close()
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+            selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+            pending ∈ int ← len(selector.get_map())
+            while pending > 0:
+                remaining ∈ float ← (deadline - int(time.monotonic_ns())) / 1000000000.0
+                require(remaining > 0.0, "endpoint deadline exceeded")
+                events ∈ list[object] ← list(selector.select(remaining))
+                require(len(events) > 0, "endpoint deadline exceeded")
+                for event in events:
+                    key ∈ object ← event.__getitem__(0)
+                    chunk ∈ bytes ← os.read(key.fileobj.fileno(), 65536)
+                    if len(chunk) == 0:
+                        selector.unregister(key.fileobj)
+                        continue
+                    if str(key.data) == "stdout":
+                        output.extend(chunk)
+                        require(len(output) <= 65536, "output limit exceeded")
+                        captured ∈ bytes ← bytes(output)
+                        if first == 0:
+                            if binary and len(captured) >= 4:
+                                count ∈ int ← int.from_bytes(captured[:4], "little")
+                                require(count <= 4096, "oversized result header")
+                                if len(captured) >= 4 + 4 * count:
+                                    first ← int(time.monotonic_ns())
+                            if not binary:
+                                newline ∈ int ← captured.find(b"\n")
+                                if newline >= 0:
+                                    first ← int(time.monotonic_ns())
+                    else:
+                        errors.extend(chunk)
+                        require(len(errors) <= 65536, "stderr limit exceeded")
+                pending ← len(selector.get_map())
+        remaining ∈ float ← (deadline - int(time.monotonic_ns())) / 1000000000.0
+        require(remaining > 0.0, "endpoint deadline exceeded")
+        try:
+            process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            raise ValueError("endpoint deadline exceeded")
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        if not process.stdin.closed:
+            process.stdin.close()
+        process.stdout.close()
+        process.stderr.close()
+        observed_exit ∈ int ← time.monotonic_ns()
+        process_record ∈ object ← {"argv": argv, "input_hex": data.hex(), "stdout_hex": bytes(output).hex(),
+                                   "stderr_hex": bytes(errors).hex(), "exit_status": process.returncode,
+                                   "launch_to_collection_end_ns": observed_exit - start,
+                                   "validation": "UNVERIFIED; outer negative control may expect refusal"}
+        ENDPOINT_RECEIPTS.append(process_record)
+    end ∈ int ← observed_exit
+    require(int(process.returncode) == 0, "endpoint failed after output: " + str(process.returncode))
+    captured ∈ bytes ← bytes(output)
+    if binary:
+        validate_binary(captured, corpus, echo)
+    else:
+        lines ∈ list[bytes] ← list(captured.splitlines())
+        require(len(lines) == len(corpus), "text output count differs")
+        for line_index in range(len(lines)):
+            case ∈ object ← corpus[line_index]
+            expected ∈ int ← int(case.get("product"))
+            if echo:
+                expected ← 0
+            require(int(lines[line_index], base) == expected, "text product differs")
+            if padded:
+                left ∈ list[int] ← case.get("left")
+                right ∈ list[int] ← case.get("right")
+                digits_per_word ∈ int ← 8
+                if base == 10:
+                    digits_per_word ← 10
+                require(len(lines[line_index]) == digits_per_word * (len(left) + len(right)), "text output width differs")
+                for digit_index in range(len(lines[line_index])):
+                    digit ∈ int ← int(lines[line_index].__getitem__(digit_index))
+                    require((digit >= 48 and digit <= 57) or (base == 16 and digit >= 97 and digit <= 102), "invalid output digit")
+    require(first > 0, "no complete first result")
+    input_hash ∈ str ← hashlib.sha256(data).hexdigest()
+    output_hash ∈ str ← hashlib.sha256(captured).hexdigest()
+    error_text ∈ str ← bytes(errors).decode()
+    process_record.__setitem__("validation", "PASS_EXACT_OUTPUT")
+    return {"argv": argv, "exit_status": process.returncode, "binary_sha256": digest(argv[0]),
+            "launch_to_first_result_ns": first - start, "launch_to_exit_ns": end - start,
+            "input_bytes": len(data), "output_bytes": len(captured), "input_sha256": input_hash,
+            "output_sha256": output_hash, "stderr": error_text,
+            "includes": "launch, import/allocation/arithmetic/export, I/O and observed first complete frame; validation excluded"}
+
+def emit(report ∈ object, output ∈ str) → None:
+    report.__setitem__("endpoint_processes", ENDPOINT_RECEIPTS)
+    revision ∈ object ← subprocess.run(["git", "-C", REPOSITORY, "rev-parse", "HEAD"], text=True, capture_output=True, check=True)
+    changes ∈ object ← subprocess.run(["git", "-C", REPOSITORY, "status", "--porcelain"], text=True, capture_output=True, check=True)
+    environment ∈ object ← {}
+    names ∈ list[str] ← ["CC", "CPATH", "LIBRARY_PATH", "LD_LIBRARY_PATH", "PATH", "PYTHONOPTIMIZE", "ITHON", "ITHON_PYTHON"]
+    for name in names:
+        environment.__setitem__(name, str(os.environ.get(name, "UNSET")))
+    report.update({"source_sha": str(revision.stdout).strip(), "worktree_status": str(changes.stdout), "environment": environment,
+                   "architecture": platform.machine(), "system": platform.uname()._asdict(),
+                   "host_python": {"path": sys.executable, "sha256": digest(str(sys.executable)), "version": sys.version},
+                   "ithon_core_sha256": digest(str(__file__)), "ithon_check_receipt": os.environ.get("ITHON_CHECK_RECEIPT", "NOT_CONFIGURED")})
+    hashes ∈ object ← {}
+    files ∈ list[object] ← list(Path(ROOT).rglob("*"))
+    for file in files:
+        suffix ∈ str ← str(file.suffix)
+        if file.is_file():
+            if suffix == ".c" or suffix == ".h" or suffix == ".pi" or suffix == ".py":
+                hashes.__setitem__(str(file.relative_to(ROOT)), digest(str(file)))
+    report.__setitem__("source_hashes", hashes)
+    if str(report.get("job")) == "MB12" and str(report.get("status")) == "PASS_SCOPED_HOST_CONTROLS" and len(output) > 0:
+        readable ∈ str ← str(Path(output).with_suffix(".md"))
+        Path(readable).parent.mkdir(parents=True, exist_ok=True)
+        Path(readable).write_text(analysis_markdown(report))
+        report.__setitem__("readable_report", readable)
+    text ∈ str ← json.dumps(report, sort_keys=True)
+    if len(output) > 0:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_text(text + "\n")
+    print(text)
+
+def overhead_control(folder ∈ str, log ∈ list[object], uninstrumented ∈ bool) → object:
+    defect ∈ str ← ""
+    measurement ∈ str ← "call-counted"
+    if uninstrumented:
+        defect ← "MB_UNINSTRUMENTED"
+        measurement ← "uninstrumented"
+    program ∈ str ← compile_sources(folder, ["timing/engine.c", "modes/overhead.c"], log, defect, False, False)
+    result ∈ object ← checked([program], log)
+    rows ∈ list[object] ← list(csv.DictReader(io.StringIO(result.stdout), delimiter="\t"))
+    require(len(rows) == 60, "missing overhead observations")
+    for row_index in range(len(rows)):
+        row ∈ object ← rows[row_index]
+        require(int(row.get("trial")) == row_index // 3, "overhead trial order")
+        elapsed ∈ int ← int(row.get("elapsed_ns"))
+        calls ∈ int ← int(row.get("calls"))
+        repetitions ∈ int ← int(row.get("repetitions"))
+        if row_index % 3 == 0:
+            require(str(row.get("kind")) == "clock-pair" and repetitions == 1 and calls == 0 and elapsed >= 0, "invalid clock pair")
+        else:
+            expected ∈ int ← 1
+            if row_index % 3 == 2:
+                expected ← 4096
+            require(str(row.get("kind")) == "callback-volatile" and repetitions == expected and elapsed > 0, "invalid callback observation")
+            if uninstrumented:
+                require(calls == 0, "overhead counter not disabled")
+            else:
+                require(calls == repetitions, "overhead call coverage")
+    return {"measurement": measurement, "raw_samples": rows, "binary_sha256": digest(program),
+            "interpretation": "clock-pair and observable volatile callback distributions; callback includes dispatch/loop work; no subtraction from provider measurements"}
+
+def quantile(samples ∈ list[float], probability ∈ float) → float:
+    require(len(samples) > 0 and probability >= 0.0 and probability <= 1.0, "invalid quantile input")
+    ordered ∈ list[float] ← list(samples)
+    for sample in ordered:
+        finite ∈ bool ← math.isfinite(sample)
+        require(finite, "nonfinite quantile input")
+    ordered.sort()
+    position ∈ float ← (len(ordered) - 1) * probability
+    lower ∈ int ← int(position)
+    upper ∈ int ← lower
+    if lower + 1 < len(ordered):
+        upper ← lower + 1
+    fraction ∈ float ← position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+def hot_job(folder ∈ str, report ∈ object, log ∈ list[object], require_gmp ∈ bool) → None:
+    validate_legacy()
+    compiler ∈ str ← str(resolve_executable(os.environ.get("CC", "cc")))
+    calibration_fixture ∈ str ← folder + "/calibration-cap-controls"
+    calibration_arguments ∈ list[str] ← [compiler]
+    calibration_arguments.extend(FLAGS)
+    calibration_arguments.extend([ROOT + "/timing/engine.c", ROOT + "/timing/fake_clock.c", "-o", calibration_fixture])
+    checked(calibration_arguments, log)
+    checked([calibration_fixture], log)
+    report.__setitem__("calibration_cap_control", "PASS: deterministic 4096-call cap retains the 2048-call batch; six-call and one-call limits remain bounded")
+    probe ∈ object ← command([compiler, "-M", ROOT + "/providers/gmp.c"], log, "")
+    has_gmp ∈ bool ← int(probe.returncode) == 0
+    require(not require_gmp or has_gmp, "required GMP header absent")
+    report.__setitem__("gmp", "NOT_RUN: development header absent")
+    if has_gmp:
+        metadata ∈ str ← folder + "/gmp-metadata"
+        arguments ∈ list[str] ← [compiler]
+        arguments.extend(FLAGS)
+        arguments.extend([ROOT + "/providers/gmp.c", ROOT + "/providers/gmp_fixture.c", ROOT + "/timing/engine.c", "-lgmp", "-o", metadata])
+        checked(arguments, log)
+        observed ∈ object ← checked([metadata, "--metadata"], log)
+        config ∈ object ← json.loads(observed.stdout)
+        require(str(config.get("gmp_version")) == "6.3.0" and str(config.get("header_version")) == "6.3.0", "GMP header/runtime pin mismatch")
+        report.__setitem__("gmp", config)
+        checked(["ldd", metadata], log)
+    report.__setitem__("compiler", {"path": compiler, "sha256": digest(compiler), "flags": FLAGS})
+    identity ∈ str ← str(platform.uname())
+    if Path("/proc/cpuinfo").is_file():
+        identity ← identity + str(Path("/proc/cpuinfo").read_text())
+    fingerprint ∈ str ← hashlib.sha256(identity.encode()).hexdigest()
+    report.__setitem__("machine_identity", fingerprint)
+    program ∈ str ← build(folder, log, "", False, has_gmp)
+    corpus ∈ list[object] ← cases(False)
+    equal ∈ list[object] ← cases(True)
+    modes ∈ list[str] ← ["hot", "rotating", "hot"]
+    groups ∈ list[list[object]] ← [corpus, corpus[:8], equal]
+    runs ∈ list[object] ← []
+    for block in range(3):
+        order ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+        if has_gmp:
+            order.extend(["gmp-mpn-mul", "gmp-mpn-sqr"])
+        random.Random(704 + block).shuffle(order)
+        for provider_index in range(len(order)):
+            provider ∈ str ← order[provider_index]
+            for mode_index in range(3):
+                if provider == "gmp-mpn-sqr" and mode_index != 2:
+                    continue
+                run ∈ object ← run_mode(program, modes[mode_index], provider, groups[mode_index], log, 1, 1, 0)
+                operation ∈ str ← "multiply"
+                if mode_index == 2:
+                    operation ← "generic-equal-values"
+                if provider == "gmp-mpn-sqr":
+                    operation ← "specialized-square"
+                run.update({"process_block": block, "provider_order": provider_index, "seed": 704 + block, "operation": operation})
+                runs.append(run)
+    plain ∈ str ← build(folder + "/uninstrumented", log, "MB_UNINSTRUMENTED", False, has_gmp)
+    for plain_block in range(7):
+        plain_order ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+        if has_gmp:
+            plain_order.append("gmp-mpn-mul")
+        random.Random(1704 + plain_block).shuffle(plain_order)
+        for plain_index in range(len(plain_order)):
+            plain_provider ∈ str ← plain_order[plain_index]
+            plain_run ∈ object ← run_mode_configured(plain, "hot", plain_provider, corpus, log, 1, 1, 0, "fresh", "uninstrumented")
+            plain_run.update({"process_block": plain_block, "provider_order": plain_index, "seed": 1704 + plain_block})
+            runs.append(plain_run)
+            if plain_block < 3:
+                plain_rotating ∈ object ← run_mode_configured(plain, "rotating", plain_provider, corpus[:8], log, 1, 1, 0, "fresh", "uninstrumented")
+                plain_rotating.update({"process_block": plain_block, "provider_order": plain_index, "seed": 1704 + plain_block})
+                runs.append(plain_rotating)
+                plain_equal ∈ object ← run_mode_configured(plain, "hot", plain_provider, equal, log, 1, 1, 0, "fresh", "uninstrumented")
+                plain_equal.update({"process_block": plain_block, "provider_order": plain_index, "seed": 1704 + plain_block, "operation": "generic-equal-values"})
+                runs.append(plain_equal)
+    if has_gmp:
+        native_programs ∈ list[str] ← [program, plain]
+        measurements ∈ list[str] ← ["call-counted", "uninstrumented"]
+        native_providers ∈ list[str] ← ["gmp-mpn-mul", "gmp-mpn-sqr"]
+        native_groups ∈ list[list[object]] ← [corpus, equal]
+        native_workspaces ∈ list[str] ← ["fresh", "reused-native"]
+        for native_block in range(3):
+            configuration_order ∈ list[int] ← list(range(8))
+            random.Random(2704 + native_block).shuffle(configuration_order)
+            for native_order in range(len(configuration_order)):
+                configuration ∈ int ← configuration_order[native_order]
+                native_index ∈ int ← configuration // 4
+                build_index ∈ int ← configuration % 4 // 2
+                workspace_index ∈ int ← configuration % 2
+                native_run ∈ object ← run_mode_configured(native_programs[build_index], "hot", native_providers[native_index], native_groups[native_index], log, 1, 1, 0, native_workspaces[workspace_index], measurements[build_index])
+                native_run.update({"process_block": native_block, "provider_order": native_order, "seed": 2704 + native_block, "experiment": "GMP workspace/build/operation boundary comparison"})
+                runs.append(native_run)
+    report.__setitem__("overhead_controls", [overhead_control(folder + "/overhead-counted", log, False), overhead_control(folder + "/overhead-plain", log, True)])
+    identity_rejected ∈ bool ← False
+    try:
+        run_mode_configured(plain, "hot", "schoolbook", corpus[:1], log, 1, 1, 0, "fresh", "call-counted")
+    except ValueError as error:
+        require(str(error) == "wrong measurement identity", "unexpected instrumentation refusal")
+        identity_rejected ← True
+    require(identity_rejected, "uninstrumented samples mislabeled as counted")
+    report.__setitem__("instrumentation_identity_control", "EXPECTED_REFUSAL: uninstrumented result cannot enter counted analysis")
+    covered ∈ object ← {}
+    for counted_run in runs:
+        if str(counted_run.get("measurement")) == "call-counted":
+            coverage_key ∈ str ← str(counted_run.get("mode")) + ":" + str(counted_run.get("provider")) + ":" + str(counted_run.get("operation")) + ":" + str(counted_run.get("workspace")) + ":" + str(counted_run.get("request_sha256"))
+            covered.__setitem__(coverage_key, True)
+    for measured_run in runs:
+        if str(measured_run.get("measurement")) == "uninstrumented":
+            measured_key ∈ str ← str(measured_run.get("mode")) + ":" + str(measured_run.get("provider")) + ":" + str(measured_run.get("operation")) + ":" + str(measured_run.get("workspace")) + ":" + str(measured_run.get("request_sha256"))
+            has_coverage ∈ bool ← covered.__contains__(measured_key)
+            require(has_coverage, "uninstrumented workload lacks matched counted coverage")
+    report.__setitem__("call_coverage", "every uninstrumented mode/provider/operation/workspace/input digest has a counted counterpart; raw uninstrumented calls=0 means NOT_MEASURED")
+    report.__setitem__("runs", runs)
+    report.__setitem__("case_count", len(corpus))
+    report.__setitem__("operation_case_counts", {"multiply": len(corpus), "generic_equal_values": len(equal), "specialized_square": len(equal) if has_gmp else "NOT_RUN"})
+    defects ∈ list[str] ← ["MB_MUTANT_SKIP_CALL", "MB_MUTANT_CACHED", "MB_MUTANT_CARRY"]
+    mutants ∈ list[object] ← []
+    for defect in defects:
+        bad ∈ str ← build(folder, log, defect, False, False)
+        result ∈ object ← command([bad, "hot", "schoolbook", "1", "32", "1", "8388608", "0"], log, payload(corpus))
+        require(int(result.returncode) != 0 and contains(str(result.stderr), "workload failed: 3"), "provider defect accepted")
+        mutants.append({"name": defect, "status": "EXPECTED_REFUSAL", "exit_status": result.returncode})
+    report.__setitem__("mutants", mutants)
+
+def same_responses(observed ∈ list[object], expected ∈ list[object]) → bool:
+    if len(observed) != len(expected):
+        return False
+    fields ∈ list[str] ← ["trial", "request", "case_sha256", "product_hex"]
+    for response_index in range(len(observed)):
+        actual ∈ object ← observed[response_index]
+        wanted ∈ object ← expected[response_index]
+        for field in fields:
+            if str(actual.get(field)) != str(wanted.get(field)):
+                return False
+    return True
+
+def mixed_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    program ∈ str ← build(folder, log, "", False, False)
+    plain ∈ str ← build(folder + "/uninstrumented", log, "MB_UNINSTRUMENTED", False, False)
+    report.__setitem__("timestamp_controls", [overhead_control(folder + "/overhead-counted", log, False), overhead_control(folder + "/overhead-plain", log, True)])
+    corpus ∈ list[object] ← cases(False)
+    small ∈ list[object] ← []
+    large ∈ list[object] ← []
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        if len(left) <= 2 and len(right) <= 2:
+            small.append(case)
+        if len(left) >= 32:
+            large.append(case)
+    heavy ∈ list[object] ← []
+    alternate ∈ list[object] ← []
+    for request_index in range(128):
+        if request_index % 16 == 0:
+            heavy.append(large[request_index % len(large)])
+        else:
+            heavy.append(small[request_index % len(small)])
+    for alternate_index in range(64):
+        alternate.append(large[alternate_index % len(large)])
+        alternate.append(small[alternate_index % len(small)])
+    change ∈ list[object] ← list(small[:64])
+    change.extend(large[:32])
+    change.extend(small[:32])
+    groups ∈ list[list[object]] ← [small[:64], heavy, alternate, change]
+    names ∈ list[str] ← ["varied-small", "small-heavy", "alternating", "size-change"]
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+    batches ∈ list[int] ← [1, 8, 64]
+    runs ∈ list[object] ← []
+    throughput_runs ∈ list[object] ← []
+    throughput_programs ∈ list[str] ← [program, plain]
+    measurements ∈ list[str] ← ["call-counted", "uninstrumented"]
+    for schedule_index in range(4):
+        for batch in batches:
+            for provider in providers:
+                run ∈ object ← run_mode(program, "mixed", provider, groups[schedule_index], log, 2, batch, 0)
+                spans ∈ list[int] ← []
+                service ∈ list[float] ← []
+                batch_lines ∈ list[str] ← list(str(run.get("events_tsv")).splitlines())
+                for line in batch_lines:
+                    fields ∈ list[str] ← list(line.split("\t"))
+                    if len(fields) == 5 and fields[0] == "batch":
+                        spans.append(int(fields[4]))
+                rows ∈ list[object] ← run.get("raw_samples")
+                for row in rows:
+                    service.append(float(row.get("elapsed_ns")))
+                total_span ∈ int ← 0
+                for span in spans:
+                    total_span ← total_span + span
+                require(total_span > 0, "missing batch spans")
+                median ∈ float ← statistics.median(service)
+                run.update({"schedule": names[schedule_index], "arrival_policy": "closed-loop; one worker; no exogenous queue",
+                            "queue_time": "NOT_MEASURED", "service_median_ns": median, "sample_count": len(service),
+                            "service_p50_ns": quantile(service, 0.5), "service_p90_ns": quantile(service, 0.9),
+                            "quantile_convention": "linear interpolation at (sample_count-1)*p over individual request service observations",
+                            "throughput_requests_per_second": len(rows) * 1000000000.0 / total_span,
+                            "batch_wall_ns": spans, "batch_wall_includes": "validation and TSV output; no isolated arithmetic throughput claim"})
+                runs.append(run)
+                for throughput_build in range(2):
+                    throughput_run ∈ object ← run_mode_configured(throughput_programs[throughput_build], "mixed-throughput", provider, groups[schedule_index], log, 2, batch, 0, "fresh", measurements[throughput_build])
+                    batch_samples ∈ list[object] ← throughput_run.get("arithmetic_batches")
+                    arithmetic_ns ∈ int ← 0
+                    request_count ∈ int ← 0
+                    durations ∈ list[float] ← []
+                    for batch_sample in batch_samples:
+                        arithmetic_ns ← arithmetic_ns + int(batch_sample.get("elapsed_ns"))
+                        request_count ← request_count + int(batch_sample.get("request_count"))
+                        durations.append(float(batch_sample.get("elapsed_ns")))
+                    require(arithmetic_ns > 0 and request_count == 2 * len(groups[schedule_index]), "arithmetic throughput coverage")
+                    require(str(throughput_run.get("request_sha256")) == str(run.get("request_sha256")), "batch/service input identity differs")
+                    throughput_run.update({"schedule": names[schedule_index], "total_requests": request_count,
+                                           "arithmetic_batch_count": len(batch_samples), "arithmetic_elapsed_ns": arithmetic_ns,
+                                           "throughput_requests_per_second": request_count * 1000000000.0 / arithmetic_ns,
+                                           "batch_duration_p50_ns": quantile(durations, 0.5),
+                                           "arrival_policy": "closed-loop single worker; pregenerated requests; no exogenous queue",
+                                           "timed_boundary": "opaque dispatch and provider calls, including provider-owned fresh adaptation/allocation; excludes pregeneration, prefill, validation and output",
+                                           "latency": "NOT_MEASURED: only one clock pair per arithmetic batch",
+                                           "warmup_policy": "no separate warmup; trial/order retained; process and earlier batches may warm later calls"})
+                    throughput_runs.append(throughput_run)
+    report.__setitem__("runs", runs)
+    report.__setitem__("arithmetic_throughput_runs", throughput_runs)
+    first_run ∈ object ← runs[0]
+    original ∈ list[object] ← first_run.get("raw_samples")
+    mutants ∈ list[object] ← []
+    for kind in range(4):
+        bad ∈ list[object] ← list(original)
+        if kind == 0:
+            bad.pop()
+        if kind == 1:
+            bad.append(original[0])
+        if kind == 2:
+            bad.__setitem__(0, original[1])
+            bad.__setitem__(1, original[0])
+        if kind == 3:
+            source_row ∈ object ← original[1]
+            changed ∈ object ← source_row.copy()
+            changed.__setitem__("product_hex", "wrong")
+            bad.__setitem__(1, changed)
+        require(not same_responses(bad, original), "response defect accepted")
+        mutants.append({"kind": kind, "status": "EXPECTED_REFUSAL"})
+    require(quantile([4.0, 1.0, 3.0, 2.0], 0.5) == 2.5 and quantile([4.0, 1.0, 3.0, 2.0], 0.25) == 1.75, "analytic quantile fixture")
+    distinct ∈ list[object] ← []
+    seen ∈ object ← {}
+    for fixture_case in corpus:
+        fixture_left ∈ list[int] ← fixture_case.get("left")
+        fixture_right ∈ list[int] ← fixture_case.get("right")
+        product_key ∈ str ← str(fixture_case.get("product"))
+        exists ∈ bool ← seen.__contains__(product_key)
+        if len(fixture_left) == 1 and len(fixture_right) == 1 and not exists:
+            distinct.append(fixture_case)
+            seen.__setitem__(product_key, True)
+    require(len(distinct) >= 8, "response fixture lacks distinct equal-width products")
+    fixture_cases ∈ list[object] ← distinct[:8]
+    process_defects ∈ list[str] ← ["MB_DROP_RESPONSE", "MB_DUPLICATE_RESPONSE", "MB_REORDER_RESPONSE", "MB_STALE_RESPONSE"]
+    reasons ∈ list[str] ← ["missing or extra response", "missing or extra response", "duplicate/reordered response", "wrong exact product"]
+    for defect_index in range(len(process_defects)):
+        defect ∈ str ← process_defects[defect_index]
+        faulty ∈ str ← build(folder + "/" + defect, log, defect, False, False)
+        fault_modes ∈ list[str] ← ["mixed", "mixed-throughput"]
+        for fault_mode in fault_modes:
+            refused ∈ bool ← False
+            try:
+                run_mode(faulty, fault_mode, "schoolbook", fixture_cases, log, 1, 8, 0)
+            except ValueError as error:
+                require(str(error) == reasons[defect_index], "wrong process defect diagnosis: " + str(error))
+                mutants.append({"kind": defect, "mode": fault_mode, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+                refused ← True
+            require(refused, "workload process response defect accepted")
+    delayed ∈ str ← build(folder + "/delay", log, "MB_MIXED_DELAY", False, False)
+    delay_run ∈ object ← run_mode(delayed, "mixed", "schoolbook", fixture_cases, log, 1, 8, 0)
+    delay_rows ∈ list[object] ← delay_run.get("raw_samples")
+    delay_row ∈ object ← delay_rows[3]
+    require(int(delay_row.get("elapsed_ns")) >= 15000000, "injected service delay disappeared")
+    delay_samples ∈ list[float] ← []
+    for delay_sample in delay_rows:
+        delay_samples.append(float(delay_sample.get("elapsed_ns")))
+    delay_run.update({"status": "OBSERVED_INJECTED_DELAY", "delay_request": 3, "minimum_expected_ns": 15000000,
+                      "service_p50_ns": quantile(delay_samples, 0.5), "service_p90_ns": quantile(delay_samples, 0.9)})
+    report.__setitem__("delay_control", delay_run)
+    failed ∈ str ← build(folder + "/failure", log, "MB_MIXED_FAIL", False, False)
+    failure ∈ object ← command([failed, "mixed", "schoolbook", "1", "4096", "8", "8388608", "0"], log, payload(fixture_cases))
+    partial ∈ list[object] ← list(csv.DictReader(io.StringIO(failure.stdout), delimiter="\t"))
+    require(int(failure.returncode) == 3 and len(partial) == 3 and contains(str(failure.stderr), "workload failed: 3"), "failed request hidden or partial responses lost")
+    failure_rejected ∈ bool ← False
+    try:
+        run_mode(failed, "mixed", "schoolbook", fixture_cases, log, 1, 8, 0)
+    except ValueError as error:
+        require(contains(str(error), "workload failed:"), "wrong failed-request diagnosis")
+        failure_rejected ← True
+    require(failure_rejected, "failed request entered successful summary")
+    throughput_failure_rejected ∈ bool ← False
+    try:
+        run_mode(failed, "mixed-throughput", "schoolbook", fixture_cases, log, 1, 8, 0)
+    except ValueError as error:
+        require(contains(str(error), "workload failed:"), "wrong failed-batch diagnosis")
+        throughput_failure_rejected ← True
+    require(throughput_failure_rejected, "failed batch entered successful throughput summary")
+    batch_defects ∈ list[str] ← ["MB_BATCH_TIME_MISMATCH", "MB_BATCH_COUNT_MISMATCH"]
+    for batch_defect in batch_defects:
+        faulty_batch ∈ str ← build(folder + "/" + batch_defect, log, batch_defect, False, False)
+        batch_rejected ∈ bool ← False
+        try:
+            run_mode(faulty_batch, "mixed-throughput", "schoolbook", fixture_cases, log, 1, 8, 0)
+        except ValueError as error:
+            require(contains(str(error), "arithmetic batch"), "wrong batch metadata defect diagnosis")
+            mutants.append({"kind": batch_defect, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            batch_rejected ← True
+        require(batch_rejected, "bad arithmetic batch metadata accepted")
+    tails ∈ list[object] ← []
+    for tail_build in range(2):
+        tail ∈ object ← run_mode_configured(throughput_programs[tail_build], "mixed-throughput", "schoolbook", fixture_cases[:7], log, 2, 64, 0, "fresh", measurements[tail_build])
+        tail_batches ∈ list[object] ← tail.get("arithmetic_batches")
+        require(len(tail_batches) == 2, "short final batch lost")
+        tails.append(tail)
+    report.__setitem__("short_batch_control", tails)
+    report.__setitem__("failure_control", {"status": "EXPECTED_REFUSAL", "failed_request": 3, "partial_responses": partial,
+                                           "scope": "partial stdout/stderr retained; failed run excluded from successful throughput summaries"})
+    report.__setitem__("mutants", mutants)
+
+def cache_size_bytes(text ∈ str) → int:
+    stripped ∈ str ← text.strip()
+    require(len(stripped) > 0, "empty cache size")
+    suffix ∈ str ← stripped[-1]
+    if suffix == "K":
+        return int(stripped[:-1]) * 1024
+    if suffix == "M":
+        return int(stripped[:-1]) * 1048576
+    return int(stripped)
+
+def derived_pool(count ∈ int) → list[object]:
+    require(count > 0 and count <= 1024, "derived pool count exceeds budget")
+    pool ∈ list[object] ← []
+    for case_index in range(count):
+        left ∈ list[int] ← []
+        right ∈ list[int] ← []
+        for word_index in range(128):
+            left.append(4294967295)
+            right.append(2863311530)
+        left.__setitem__(0, left[0] ^ case_index)
+        right.__setitem__(0, right[0] ^ ((case_index + 1) * 65537))
+        combined ∈ list[int] ← list(left)
+        combined.extend(right)
+        fields ∈ list[str] ← ["128", "128"]
+        encoded ∈ bytes ← len(left).to_bytes(4, "little")
+        right_count ∈ bytes ← len(right).to_bytes(4, "little")
+        encoded ← encoded + right_count
+        for word in combined:
+            fields.append(format(word, "08x"))
+            word_bytes ∈ bytes ← word.to_bytes(4, "little")
+            encoded ← encoded + word_bytes
+        identity ∈ str ← hashlib.sha256(encoded).hexdigest()
+        wire ∈ str ← " ".join(fields)
+        pool.append({"left": left, "right": right, "wire": wire, "case_sha256": identity, "source_case_sha256": identity,
+                     "product": integer_value(left) * integer_value(right), "family": "MB09-derived-pool-v1", "variant": case_index})
+    return pool
+
+def cache_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    report.__setitem__("page_size", int(os.sysconf("SC_PAGE_SIZE")))
+    report.__setitem__("hardware_counters", "NOT_AVAILABLE: no counter access requested")
+    cache_metadata ∈ object ← {}
+    cache_paths ∈ list[object] ← list(Path("/sys/devices/system/cpu/cpu0/cache").glob("index*"))
+    fields ∈ list[str] ← ["level", "type", "size", "coherency_line_size"]
+    for cache_path in cache_paths:
+        values ∈ object ← {}
+        for field in fields:
+            path ∈ str ← str(cache_path) + "/" + field
+            if Path(path).is_file():
+                values.__setitem__(field, str(Path(path).read_text()).strip())
+        cache_metadata.__setitem__(str(cache_path.name), values)
+    report.__setitem__("observable_caches", cache_metadata)
+    if Path("/sys/fs/cgroup/memory.max").is_file():
+        report.__setitem__("cgroup_memory_limit", str(Path("/sys/fs/cgroup/memory.max").read_text()).strip())
+    corpus ∈ list[object] ← cases(False)
+    program ∈ str ← build(folder, log, "", False, False)
+    modes ∈ list[str] ← ["hot", "rotating", "first-touch", "eviction-preconditioned", "eviction-preconditioned"]
+    groups ∈ list[list[object]] ← [corpus[:8], corpus[:64], corpus[-32:], corpus[-32:], corpus[-32:]]
+    evictions ∈ list[int] ← [0, 0, 0, 65536, 1048576]
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+    runs ∈ list[object] ← []
+    for provider in providers:
+        for mode_index in range(5):
+            run ∈ object ← run_mode(program, modes[mode_index], provider, groups[mode_index], log, 2, 1, evictions[mode_index])
+            run.update({"operational_condition": modes[mode_index] + "; malloc may reuse OS pages; residency unproven",
+                        "precondition": "outside kernel interval; output first-write faults may remain inside"})
+            runs.append(run)
+    sweep_controls ∈ list[object] ← []
+    swept ∈ object ← {}
+    for boundary_path in cache_paths:
+        size_path ∈ str ← str(boundary_path) + "/size"
+        if Path(size_path).is_file():
+            boundary ∈ int ← cache_size_bytes(str(Path(size_path).read_text()))
+            spans ∈ list[int] ← [boundary // 2, boundary, boundary * 2]
+            for requested_span in spans:
+                span ∈ int ← (requested_span + 63) // 64 * 64
+                key ∈ str ← str(span)
+                exists ∈ bool ← swept.__contains__(key)
+                if exists:
+                    continue
+                swept.__setitem__(key, True)
+                if span <= 0 or span > 6291456:
+                    sweep_controls.append({"cache": str(boundary_path.name), "reported_boundary_bytes": boundary,
+                                           "attempt_span_bytes": span, "status": "NOT_RUN_RESOURCE_LIMIT",
+                                           "reason": "6 MiB sweep cap leaves room inside the configured 8 MiB C pool budget"})
+                    continue
+                for sweep_provider in providers:
+                    sweep_run ∈ object ← run_mode(program, "eviction-preconditioned", sweep_provider, corpus[-8:], log, 2, 1, span)
+                    sweep_run.update({"cache": str(boundary_path.name), "reported_boundary_bytes": boundary,
+                                      "attempt_span_bytes": span, "status": "OBSERVED_ATTEMPT",
+                                      "residency": "input snapshots, outputs, native scratch and OS pages are not independently resident-qualified; span is not proof of eviction"})
+                    sweep_controls.append(sweep_run)
+    report.__setitem__("cache_boundary_sweeps", sweep_controls)
+    plain ∈ str ← build(folder + "/uninstrumented", log, "MB_UNINSTRUMENTED", False, False)
+    pool_controls ∈ list[object] ← []
+    pool_seen ∈ object ← {}
+    pool_programs ∈ list[str] ← [program, plain]
+    pool_measurements ∈ list[str] ← ["call-counted", "uninstrumented"]
+    for pool_path in cache_paths:
+        pool_size_path ∈ str ← str(pool_path) + "/size"
+        pool_type_path ∈ str ← str(pool_path) + "/type"
+        if not Path(pool_size_path).is_file() or not Path(pool_type_path).is_file():
+            continue
+        pool_type ∈ str ← str(Path(pool_type_path).read_text()).strip()
+        if pool_type != "Data" and pool_type != "Unified":
+            continue
+        pool_boundary ∈ int ← cache_size_bytes(str(Path(pool_size_path).read_text()))
+        pool_targets ∈ list[int] ← [pool_boundary // 2, pool_boundary, pool_boundary * 2]
+        for pool_target in pool_targets:
+            pool_count ∈ int ← (pool_target + 1023) // 1024
+            pool_key ∈ str ← str(pool_count)
+            pool_exists ∈ bool ← pool_seen.__contains__(pool_key)
+            if pool_exists:
+                continue
+            pool_seen.__setitem__(pool_key, True)
+            if pool_count <= 0 or pool_count > 1024:
+                pool_controls.append({"cache": str(pool_path.name), "reported_boundary_bytes": pool_boundary,
+                                      "target_input_bytes": pool_target, "status": "NOT_RUN_RESOURCE_LIMIT",
+                                      "reason": "1024 unique pairs / 1 MiB operand-payload cap; snapshots, outputs, descriptors and scratch remain inside 8 MiB C budget"})
+                continue
+            pool ∈ list[object] ← derived_pool(pool_count)
+            pool_order ∈ list[int] ← [0, 1, 2, 3]
+            random.Random(909 + pool_count).shuffle(pool_order)
+            for pool_order_index in range(len(pool_order)):
+                configuration ∈ int ← pool_order[pool_order_index]
+                pool_provider ∈ str ← providers[configuration // 2]
+                pool_build ∈ int ← configuration % 2
+                pool_run ∈ object ← run_mode_configured(pool_programs[pool_build], "rotating-pool", pool_provider, pool, log, 2, 1, 0, "fresh", pool_measurements[pool_build])
+                pool_run.update({"cache": str(pool_path.name), "reported_boundary_bytes": pool_boundary,
+                                 "target_input_bytes": pool_target, "actual_operand_payload_bytes": pool_count * 1024,
+                                 "actual_output_payload_bytes": pool_count * 1024, "unique_pairs": pool_count,
+                                 "seed": 909 + pool_count, "configuration_order": pool_order_index,
+                                 "corpus_profile": "MB09-derived-pool-v1; separate unadmitted diagnostic family, never substituted for pinned MB03 cases",
+                                 "generator": "128 words per operand; left all 0xffffffff with low word XOR variant; right all 0xaaaaaaaa with low word XOR ((variant+1)*65537)",
+                                 "cache_observation": "cpu0 sysfs Data/Unified cache; affinity unchanged; executing-CPU topology/residency unproven"})
+                pool_controls.append(pool_run)
+    report.__setitem__("operand_working_set_sweeps", pool_controls)
+    report.__setitem__("runs", runs)
+    single ∈ str ← build(folder + "/single-operand", log, "MB_SINGLE_OPERAND", False, False)
+    single_rejected ∈ bool ← False
+    try:
+        run_mode(single, "rotating", "schoolbook", corpus[:8], log, 1, 1, 0)
+    except ValueError as error:
+        require(contains(str(error), "workload failed: 3"), "wrong rotating-pool defect diagnosis")
+        single_rejected ← True
+    require(single_rejected, "rotating schedule reduced to one operand without refusal")
+    pool_rejected ∈ bool ← False
+    try:
+        run_mode(single, "rotating-pool", "schoolbook", corpus[:8], log, 1, 1, 0)
+    except ValueError as error:
+        require(contains(str(error), "workload failed: 3"), "wrong whole-pool coverage defect diagnosis")
+        pool_rejected ← True
+    require(pool_rejected, "whole-pool timing accepted one repeated operand")
+    report.__setitem__("single_operand_control", "EXPECTED_REFUSAL: output poison exposes untouched rotating requests")
+    reused ∈ str ← build(folder + "/reused-fresh", log, "MB_REUSED_FRESH", False, False)
+    reused_rejected ∈ bool ← False
+    try:
+        run_mode(reused, "first-touch", "schoolbook", corpus[:8], log, 2, 1, 0)
+    except ValueError as error:
+        require(str(error) == "fresh output buffer was reused", "wrong fresh-lifetime defect diagnosis")
+        reused_rejected ← True
+    require(reused_rejected, "reused output claimed a fresh allocation lifetime")
+    report.__setitem__("fresh_output_control", "EXPECTED_REFUSAL: actual malloc-lifetime counter detects retained output; new allocation does not prove new OS pages")
+    bad ∈ str ← build(folder, log, "MB_MUTANT_SKIP_PRECONDITION", False, False)
+    rejected ∈ bool ← False
+    try:
+        run_mode(bad, "eviction-preconditioned", "schoolbook", corpus[:8], log, 1, 1, 65536)
+    except ValueError as error:
+        require(contains(str(error), "preconditioning was skipped"), "wrong precondition diagnostic")
+        report.__setitem__("mutant", {"status": "EXPECTED_REFUSAL", "reason": str(error)})
+        rejected ← True
+    require(rejected, "skipped precondition accepted")
+    over ∈ object ← command([program, "hot", "schoolbook", "1", "8", "1", "4096", "0"], log, payload(corpus))
+    require(int(over.returncode) == 2, "working-set budget not enforced")
+    report.__setitem__("budget_refusal", {"status": "EXPECTED_REFUSAL", "exit_status": over.returncode})
+
+def expected_binary(corpus ∈ list[object]) → bytes:
+    output ∈ bytes ← b""
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        count ∈ int ← len(left) + len(right)
+        header ∈ bytes ← count.to_bytes(4, "little")
+        product ∈ int ← int(case.get("product"))
+        encoded ∈ bytes ← product.to_bytes(4 * count, "little")
+        output ← output + header + encoded
+    return output
+
+def text_endpoint(folder ∈ str, log ∈ list[object], defect ∈ str) → str:
+    return compile_sources(folder, ["mulbench.c", "providers/karatsuba.c", "timing/engine.c", "modes/end_to_end/text_endpoint.c"], log, defect, False, True)
+
+def text_payload(corpus ∈ list[object], base ∈ int) → bytes:
+    require(base == 10 or base == 16, "unsupported text base")
+    text ∈ str ← ""
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        left_digits ∈ str ← str(integer_value(left))
+        right_digits ∈ str ← str(integer_value(right))
+        if base == 16:
+            left_digits ← format(integer_value(left), "x")
+            right_digits ← format(integer_value(right), "x")
+        text ← text + str(len(left)) + " " + str(len(right)) + " " + left_digits + " " + right_digits + "\n"
+    return text.encode()
+
+def text_parser_controls(folder ∈ str, report ∈ object, log ∈ list[object], allow_unavailable_lsan ∈ bool) → None:
+    sources ∈ list[str] ← ["mulbench.c", "providers/karatsuba.c", "timing/engine.c", "modes/end_to_end/text_endpoint.c"]
+    flags ∈ list[str] ← ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
+    program ∈ str ← compile_sources_options(folder + "/sanitized", sources, log, "", False, True, flags)
+    environment ∈ str ← str(resolve_executable("env"))
+    prefix ∈ list[str] ← [environment, "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1", "LSAN_OPTIONS=exitcode=86"]
+    bases ∈ list[str] ← ["hex", "decimal"]
+    overlong_digits ∈ str ← "9".ljust(50000, "9")
+    bad ∈ list[str] ← ["0 1 0 0\n", "-1 1 0 0\n", "+1 1 0 0\n", "18446744073709551616 1 0 0\n", "1 1 +1 0\n", "1 1 -1 0\n", "1 1 1_0 0\n", "1 1 g 0\n", "1 1 0 0 extra\n", "1 1 0\n", "1 1 0 0", "1 1 0\x00 0\n", "1 1 " + overlong_digits + " 0\n"]
+    controls ∈ list[object] ← []
+    lsan_available ∈ bool ← True
+    report.__setitem__("allow_unavailable_lsan", allow_unavailable_lsan)
+    for base in bases:
+        argv ∈ list[str] ← list(prefix)
+        argv.extend([program, base, "schoolbook"])
+        valid ∈ object ← command(argv, log, "1 1 3 7\n")
+        if int(valid.returncode) != 0 and contains(str(valid.stderr), "LeakSanitizer has encountered a fatal error"):
+            require(allow_unavailable_lsan, "LeakSanitizer unavailable; mandatory lane refuses: " + str(valid.stderr))
+            lsan_available ← False
+            report.__setitem__("LeakSanitizer", {"status": "NOT_AVAILABLE", "observed_stderr": valid.stderr,
+                                                "scope": "explicit reduced local lane; hosted lane must not enable this allowance"})
+            prefix ← [environment, "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1", "LSAN_OPTIONS=exitcode=86"]
+            argv ← list(prefix)
+            argv.extend([program, base, "schoolbook"])
+            valid ← command(argv, log, "1 1 3 7\n")
+        require(int(valid.returncode) == 0 and not contains(str(valid.stderr), "Sanitizer") and not contains(str(valid.stderr), "runtime error:"), "sanitized text endpoint cannot execute cleanly")
+        expected ∈ int ← 21
+        output ∈ str ← str(valid.stdout).strip()
+        numeric_base ∈ int ← 16
+        if base == "decimal":
+            numeric_base ← 10
+        require(int(output, numeric_base) == expected, "sanitized endpoint exact product differs")
+        for bad_index in range(len(bad)):
+            result ∈ object ← command(argv, log, bad[bad_index])
+            require(int(result.returncode) == 2 and str(result.stdout) == "", "malformed text input admitted")
+            require(not contains(str(result.stderr), "Sanitizer") and not contains(str(result.stderr), "runtime error:"), "malformed input caused sanitizer/error-cleanup failure")
+            controls.append({"base": base, "invalid_case": bad_index, "status": "EXPECTED_REFUSAL"})
+        oversized ∈ str ← "1 1 100000000 0\n"
+        if base == "decimal":
+            oversized ← "1 1 4294967296 0\n"
+        overflow ∈ object ← command(argv, log, oversized)
+        require(int(overflow.returncode) == 2 and str(overflow.stdout) == "" and not contains(str(overflow.stderr), "Sanitizer"), "stored-width overflow crossed the conversion boundary")
+        controls.append({"base": base, "invalid_case": "operand exceeds declared stored width", "status": "EXPECTED_REFUSAL"})
+        after_output ∈ object ← command(argv, log, "1 1 3 7\n" + oversized)
+        require(int(after_output.returncode) == 2 and contains(str(after_output.stdout), "\n") and not contains(str(after_output.stderr), "Sanitizer"), "mid-stream parser failure lost output or leaked")
+        request_frames ∈ list[str] ← []
+        for frame_index in range(1025):
+            request_frames.append("1 1 3 7\n")
+        repeated ∈ str ← "".join(request_frames)
+        over_budget ∈ object ← command(argv, log, repeated)
+        completed ∈ list[str] ← list(str(over_budget.stdout).splitlines())
+        require(int(over_budget.returncode) == 2 and len(completed) == 1024 and not contains(str(over_budget.stderr), "Sanitizer"), "request-count budget was not enforced cleanly")
+        controls.append({"base": base, "invalid_case": "1025th request exceeds 1024-frame budget", "status": "EXPECTED_REFUSAL"})
+    tracked_sources ∈ list[str] ← list(sources)
+    tracked_sources.append("memory/tracker.c")
+    tracked_flags ∈ list[str] ← list(flags)
+    tracked_flags.append("-DMB_TEXT_TRACKED")
+    tracked ∈ str ← compile_sources_options(folder + "/tracked-cleanup", tracked_sources, log, "", True, True, tracked_flags)
+    tracked_prefix ∈ list[str] ← [environment, "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1", "LSAN_OPTIONS=exitcode=86"]
+    tracked_argv ∈ list[str] ← list(tracked_prefix)
+    tracked_argv.extend([tracked, "hex", "schoolbook"])
+    cleanup ∈ object ← command(tracked_argv, log, "1 1 100000000 0\n")
+    require(int(cleanup.returncode) == 2 and contains(str(cleanup.stderr), "tracked_live_bytes\t0\n"), "text error cleanup retained owned C payload")
+    tracked_leaky ∈ str ← compile_sources_options(folder + "/tracked-leak", tracked_sources, log, "MB_TEXT_ERROR_LEAK", True, True, tracked_flags)
+    tracked_leak_argv ∈ list[str] ← list(tracked_prefix)
+    tracked_leak_argv.extend([tracked_leaky, "hex", "schoolbook"])
+    tracked_leak ∈ object ← command(tracked_leak_argv, log, "1 1 100000000 0\n")
+    require(int(tracked_leak.returncode) == 87 and contains(str(tracked_leak.stderr), "tracked text endpoint leak"), "owned-payload error leak mutant accepted")
+    if lsan_available:
+        leaky ∈ str ← compile_sources_options(folder + "/leak", sources, log, "MB_TEXT_ERROR_LEAK", False, True, flags)
+        leak_argv ∈ list[str] ← list(prefix)
+        leak_argv.extend([leaky, "hex", "schoolbook"])
+        leak ∈ object ← command(leak_argv, log, "1 1 100000000 0\n")
+        require(int(leak.returncode) == 86 and contains(str(leak.stderr), "detected memory leaks"), "error-cleanup leak mutant was not observed by LeakSanitizer")
+        report.__setitem__("LeakSanitizer", {"status": "PASS_EXPECTED_LEAK_DETECTED", "exit_status": leak.returncode})
+    report.update({"text_parser_controls": controls, "owned_C_error_cleanup": "zero live payload on real error path; actual retained-allocation mutant refused; GMP internal heap excluded from this counter",
+                   "scope": "address/undefined-behavior text parser/conversion controls and separately tracked C error cleanup; LeakSanitizer status is separate; no speed result"})
+
+def phase_samples(run ∈ object, count ∈ int, echo ∈ bool) → list[object]:
+    stderr ∈ str ← str(run.get("stderr"))
+    require(contains(stderr, "measurement\tphase-instrumented\n"), "wrong phase build identity")
+    phases ∈ list[list[str]] ← event_rows(stderr, "phase")
+    require(len(phases) == count * 8, "missing endpoint phase samples")
+    names ∈ list[str] ← ["read", "parse", "allocation", "import", "arithmetic", "export-format", "write-flush", "cleanup"]
+    samples ∈ list[object] ← []
+    total ∈ int ← 0
+    for phase_index in range(len(phases)):
+        fields ∈ list[str] ← phases[phase_index]
+        require(len(fields) == 5 and int(fields[1]) == phase_index // 8 and fields[2] == names[phase_index % 8], "wrong endpoint phase identity")
+        require(fields[4] == "ns", "wrong endpoint phase units")
+        elapsed ∈ int ← int(fields[3])
+        require(elapsed >= 0, "negative endpoint phase duration")
+        total ← total + elapsed
+        samples.append({"request": phase_index // 8, "phase": fields[2], "elapsed_ns": elapsed})
+    require(total <= int(run.get("launch_to_exit_ns")), "phase sum exceeds enclosing wall interval")
+    calls ∈ list[list[str]] ← event_rows(stderr, "provider_calls")
+    require(len(calls) == count, "missing endpoint call coverage")
+    expected_calls ∈ int ← 1
+    if echo:
+        expected_calls ← 0
+    for call_index in range(len(calls)):
+        call ∈ list[str] ← calls[call_index]
+        require(len(call) == 3 and int(call[1]) == call_index and int(call[2]) == expected_calls, "wrong endpoint call coverage")
+    return samples
+
+def text_modes(folder ∈ str, report ∈ object, log ∈ list[object], selected ∈ list[object], corpus ∈ list[object], mutants ∈ list[object], require_gmp ∈ bool) → None:
+    compiler ∈ str ← str(resolve_executable("cc"))
+    probe ∈ object ← command([compiler, "-M", ROOT + "/providers/gmp.c"], log, "")
+    available ∈ bool ← int(probe.returncode) == 0
+    require(not require_gmp or available, "required GMP conversion header absent")
+    if not available:
+        report.__setitem__("text_modes", "NOT_RUN: GMP conversion development header absent")
+        return
+    instrumented ∈ str ← text_endpoint(folder + "/phases", log, "MB_ENDPOINT_PHASES")
+    plain ∈ str ← text_endpoint(folder + "/plain", log, "")
+    require(digest(instrumented) != digest(plain), "text phase instrumentation identity collapsed")
+    metadata ∈ object ← checked([plain, "--metadata"], log)
+    runtime ∈ list[list[str]] ← event_rows(str(metadata.stdout), "runtime_version")
+    header ∈ list[list[str]] ← event_rows(str(metadata.stdout), "header_version")
+    require(len(runtime) == 1 and len(header) == 1 and runtime[0] == ["runtime_version", "6.3.0"] and header[0] == ["header_version", "6.3.0"], "text GMP header/runtime pin differs")
+    report.__setitem__("text_conversion_library", {"metadata_tsv": metadata.stdout, "purpose": "GMP text/binary conversion only; multiplication stays the named schoolbook/Karatsuba provider; internal algorithm UNKNOWN"})
+    large ∈ list[object] ← []
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        if len(left) >= 128 and len(right) >= 128 and integer_value(left) > 1 and integer_value(right) > 1:
+            large.append(case)
+            break
+    require(len(large) == 1, "large text-product fixture missing")
+    require(text_payload(selected, 10) != text_payload(selected, 16), "decimal/hex representation identity collapsed")
+    groups ∈ list[list[object]] ← [selected, large]
+    group_names ∈ list[str] ← ["varied-small", "large-product"]
+    bases ∈ list[int] ← [16, 10]
+    base_names ∈ list[str] ← ["hex", "decimal"]
+    programs ∈ list[str] ← [instrumented, plain]
+    measurements ∈ list[str] ← ["phase-instrumented", "uninstrumented"]
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded", "echo"]
+    runs ∈ list[object] ← []
+    for base_index in range(2):
+        for build_index in range(2):
+            for provider in providers:
+                for group_index in range(2):
+                    group ∈ list[object] ← groups[group_index]
+                    data ∈ bytes ← text_payload(group, bases[base_index])
+                    expected_bytes ∈ int ← 0
+                    digits_per_word ∈ int ← 8
+                    if bases[base_index] == 10:
+                        digits_per_word ← 10
+                    identities ∈ list[str] ← []
+                    for group_case in group:
+                        group_left ∈ list[int] ← group_case.get("left")
+                        group_right ∈ list[int] ← group_case.get("right")
+                        expected_bytes ← expected_bytes + digits_per_word * (len(group_left) + len(group_right)) + 1
+                        identities.append(str(group_case.get("case_sha256")))
+                    for trial in range(3):
+                        run ∈ object ← collect_text([programs[build_index], base_names[base_index], provider], data, group, bases[base_index], provider == "echo", 10.0)
+                        require(int(run.get("input_bytes")) == len(data) and int(run.get("output_bytes")) == expected_bytes, "text/echo wire-size mismatch")
+                        samples ∈ list[object] ← []
+                        if build_index == 0:
+                            samples ← phase_samples(run, len(group), provider == "echo")
+                        else:
+                            stderr ∈ str ← str(run.get("stderr"))
+                            require(contains(stderr, "measurement\tuninstrumented\n") and len(event_rows(stderr, "phase")) == 0, "text speed build still instrumented")
+                        run.update({"mode": "persistent-counted-limb-text-" + base_names[base_index], "measurement": measurements[build_index],
+                                    "provider": provider, "trial": trial, "case_sha256": identities, "group": group_names[group_index],
+                                    "phase_samples": samples, "framing": "na nb unsigned-left unsigned-right newline; fixed-width product newline; flush every response",
+                                    "wire_equivalence": "same input bytes and output length for arithmetic and zero echo within this representation",
+                                    "phase_boundary": "instrumented clock differences only; library allocations may occur during import/export; process startup and line-buffer allocation are outside phase totals",
+                                    "interpretation": "separate distributions; no subtraction of echo medians or phase times into an uninstrumented kernel result"})
+                        runs.append(run)
+                        if group_index == 0:
+                            one ∈ list[object] ← group[:1]
+                            single ∈ object ← collect_text([programs[build_index], base_names[base_index], provider], text_payload(one, bases[base_index]), one, bases[base_index], provider == "echo", 10.0)
+                            single_samples ∈ list[object] ← []
+                            if build_index == 0:
+                                single_samples ← phase_samples(single, 1, provider == "echo")
+                            single.update({"mode": "process-per-request-counted-limb-text-" + base_names[base_index], "measurement": measurements[build_index],
+                                           "provider": provider, "trial": trial, "phase_samples": single_samples, "case_sha256": [str(group[0].get("case_sha256"))]})
+                            runs.append(single)
+    report.__setitem__("text_modes", runs)
+    defects ∈ list[str] ← ["MB_TEXT_WRONG_PRODUCT", "MB_TEXT_TRUNCATE", "MB_TEXT_SURPLUS", "MB_EXIT_AFTER_OUTPUT"]
+    for defect in defects:
+        faulty ∈ str ← text_endpoint(folder + "/" + defect, log, defect)
+        for defect_base in range(2):
+            rejected ∈ bool ← False
+            try:
+                collect_text([faulty, base_names[defect_base], "schoolbook"], text_payload(large, bases[defect_base]), large, bases[defect_base], False, 10.0)
+            except ValueError as error:
+                reason ∈ str ← str(error)
+                if defect == "MB_EXIT_AFTER_OUTPUT":
+                    require(contains(reason, "99"), "wrong text child-status diagnostic")
+                else:
+                    require(contains(reason, "text") or contains(reason, "complete first result"), "wrong text corruption diagnostic")
+                mutants.append({"name": defect, "base": bases[defect_base], "status": "EXPECTED_REFUSAL", "reason": reason})
+                rejected ← True
+            require(rejected, "defective text endpoint accepted")
+    wrong_unit ∈ str ← text_endpoint(folder + "/wrong-unit", log, "MB_TEXT_PHASE_UNIT")
+    unit_run ∈ object ← collect_text([wrong_unit, "hex", "schoolbook"], text_payload(large, 16), large, 16, False, 10.0)
+    unit_rejected ∈ bool ← False
+    try:
+        phase_samples(unit_run, 1, False)
+    except ValueError as error:
+        require(str(error) == "wrong endpoint phase units", "wrong text phase-unit diagnostic")
+        mutants.append({"name": "MB_TEXT_PHASE_UNIT", "status": "EXPECTED_REFUSAL", "reason": str(error)})
+        unit_rejected ← True
+    require(unit_rejected, "wrong text phase units accepted")
+
+def endpoint_job(folder ∈ str, report ∈ object, log ∈ list[object], require_gmp ∈ bool) → None:
+    corpus ∈ list[object] ← cases(False)
+    selected ∈ list[object] ← corpus[31:39]
+    data ∈ bytes ← binary_payload(selected)
+    program ∈ str ← endpoint(folder, log, "")
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded", "echo"]
+    runs ∈ list[object] ← []
+    for provider in providers:
+        for trial in range(3):
+            run ∈ object ← collect([program, provider], data, selected, True, provider == "echo", 10.0)
+            run.update({"trial": trial, "mode": "persistent-binary", "provider": provider})
+            runs.append(run)
+            for case_index in range(2):
+                one ∈ list[object] ← [selected[case_index]]
+                run ∈ object ← collect([program, provider], binary_payload(one), one, True, provider == "echo", 10.0)
+                run.update({"trial": trial, "mode": "process-per-request-binary", "provider": provider})
+                runs.append(run)
+    hex_program ∈ str ← folder + "/hex-endpoint"
+    compiler ∈ str ← str(resolve_executable("cc"))
+    argv ∈ list[str] ← [compiler]
+    argv.extend(FLAGS)
+    argv.extend([ROOT + "/mulbench.c", "-o", hex_program])
+    checked(argv, log)
+    hex_text ∈ str ← ""
+    for case in selected:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        left_text ∈ str ← format(integer_value(left), "x")
+        right_text ∈ str ← format(integer_value(right), "x")
+        hex_text ← hex_text + left_text + " " + right_text + "\n"
+    encoded ∈ bytes ← hex_text.encode()
+    run ∈ object ← collect([hex_program, "--pipe"], encoded, selected, False, False, 10.0)
+    run.__setitem__("mode", "persistent-hex")
+    runs.append(run)
+    report.__setitem__("runs", runs)
+    mutants ∈ list[object] ← []
+    defects ∈ list[str] ← ["MB_DELAY_START", "MB_DELAY_OUTPUT", "MB_EXIT_AFTER_OUTPUT", "MB_ENDPOINT_HANG"]
+    one ∈ list[object] ← selected[:1]
+    for defect in defects:
+        bad ∈ str ← endpoint(folder, log, defect)
+        if defect == "MB_EXIT_AFTER_OUTPUT" or defect == "MB_ENDPOINT_HANG":
+            rejected ∈ bool ← False
+            timeout ∈ float ← 10.0
+            diagnostic ∈ str ← "99"
+            if defect == "MB_ENDPOINT_HANG":
+                timeout ← 0.1
+                diagnostic ← "deadline"
+            try:
+                collect([bad, "schoolbook"], binary_payload(one), one, True, False, timeout)
+            except ValueError as error:
+                require(contains(str(error), diagnostic), "wrong endpoint refusal diagnostic")
+                mutants.append({"name": defect, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+                rejected ← True
+            require(rejected, "endpoint failure hidden")
+        else:
+            run ∈ object ← collect([bad, "schoolbook"], binary_payload(one), one, True, False, 10.0)
+            require(int(run.get("launch_to_first_result_ns")) >= 15000000, "known delay absent")
+            mutants.append({"name": defect, "status": "PASS_DELAY_OBSERVED", "run": run})
+    expected ∈ bytes ← expected_binary(selected)
+    bad_outputs ∈ list[bytes] ← [expected[:-1], expected + b"x"]
+    for output in bad_outputs:
+        rejected ∈ bool ← False
+        try:
+            validate_binary(output, selected, False)
+        except ValueError as error:
+            mutants.append({"status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "invalid frame accepted")
+    text_modes(folder + "/text", report, log, selected, corpus, mutants, require_gmp)
+    report.__setitem__("mutants", mutants)
+
+def memory_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    corpus ∈ list[object] ← cases(False)
+    sequence ∈ list[object] ← [corpus[31], corpus[-1], corpus[32]]
+    program ∈ str ← build(folder, log, "", True, False)
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
+    runs ∈ list[object] ← []
+    for provider in providers:
+        for case in sequence:
+            run ∈ object ← run_mode(program, "profile", provider, [case], log, 1, 1, 0)
+            rows ∈ list[object] ← run.get("raw_samples")
+            row ∈ object ← rows[0]
+            require(int(row.get("live_bytes")) == 0, "provider leaked workspace")
+            if provider == "karatsuba32-bounded":
+                require(int(row.get("allocations")) > 0 and int(row.get("peak_bytes")) > 0, "allocation tracking bypassed")
+            else:
+                require(int(row.get("allocations")) == 0, "schoolbook incorrectly attributed scratch")
+            run.__setitem__("timing_kind", "instrumented; not speed samples")
+            runs.append(run)
+    compiler ∈ str ← str(resolve_executable("cc"))
+    gmp_probe ∈ object ← command([compiler, "-M", ROOT + "/providers/gmp.c"], log, "")
+    if int(gmp_probe.returncode) == 0:
+        gmp_program ∈ str ← build(folder + "/gmp-profile", log, "", True, True)
+        workspaces ∈ list[str] ← ["fresh", "reused-native"]
+        for workspace in workspaces:
+            for native_case in sequence:
+                native_run ∈ object ← run_mode_configured(gmp_program, "profile", "gmp-mpn-mul", [native_case], log, 1, 1, 0, workspace, "call-counted")
+                native_rows ∈ list[object] ← native_run.get("raw_samples")
+                native_row ∈ object ← native_rows[0]
+                if workspace == "fresh":
+                    require(int(native_row.get("live_bytes")) == 0 and int(native_row.get("allocations")) > 0, "fresh GMP workspace was not released/tracked")
+                else:
+                    live ∈ int ← int(native_row.get("live_bytes"))
+                    require(live > 0 and int(native_row.get("allocations")) == 0 and int(native_row.get("peak_bytes")) == live, "reused GMP workspace allocated during kernel interval")
+                native_run.__setitem__("timing_kind", "instrumented; not speed samples")
+                runs.append(native_run)
+        report.__setitem__("gmp_workspace", "fresh and prepared native reuse observed; GMP internal allocations remain outside wrapper coverage")
+        failed_workspace ∈ str ← build(folder + "/workspace-failure", log, "MB_WORKSPACE_FAIL", True, True)
+        failed_result ∈ object ← command([failed_workspace, "profile", "gmp-mpn-mul", "1", "4096", "1", "8388608", "0", "reused-native"], log, payload(sequence[:1]))
+        require(int(failed_result.returncode) == 2 and str(failed_result.stdout) == "" and contains(str(failed_result.stderr), "final_live_bytes\t0\n"), "workspace allocation failure leaked or yielded timing")
+        report.__setitem__("workspace_failure_control", "EXPECTED_REFUSAL: second tracked allocation fails; partially prepared GMP context is freed; no timing rows")
+    else:
+        report.__setitem__("gmp_workspace", "NOT_RUN: development header absent")
+    unavailable ∈ object ← rss_details("rss_max\tNOT_AVAILABLE\n")
+    require(str(unavailable.get("status")) == "NOT_AVAILABLE", "unsupported RSS fabricated an observation")
+    report.__setitem__("rss_unit_control", "NOT_RUN: Linux RSS units unavailable on this platform")
+    if str(platform.system()) == "Linux":
+        wrong_rss ∈ str ← build(folder + "/rss-mutant", log, "MB_RSS_WRONG_UNIT", False, False)
+        rss_rejected ∈ bool ← False
+        try:
+            run_mode(wrong_rss, "profile", "schoolbook", sequence[:1], log, 1, 1, 0)
+        except ValueError as error:
+            require(str(error) == "RSS unit conversion differs", "wrong RSS defect diagnosis")
+            rss_rejected ← True
+        require(rss_rejected, "RSS wrong-unit observation accepted")
+        report.__setitem__("rss_unit_control", "EXPECTED_REFUSAL: raw KiB cannot be relabeled as bytes")
+    report.__setitem__("runs", runs)
+    budget_refusal ∈ object ← command([program, "profile", "schoolbook", "1", "8", "1", "4096", "0"], log, payload(sequence))
+    require(int(budget_refusal.returncode) == 2 and str(budget_refusal.stdout) == "", "undersized workspace budget admitted")
+    report.__setitem__("budget_refusal", "EXPECTED_REFUSAL: 4 KiB budget rejected before descriptor allocation or timing")
+    defects ∈ list[str] ← ["", "MB_TRACKER_LEAK", "MB_TRACKER_ERROR_LEAK"]
+    for defect in defects:
+        fixture ∈ str ← folder + "/tracker-fixture"
+        argv ∈ list[str] ← [compiler]
+        argv.extend(FLAGS)
+        if len(defect) > 0:
+            argv.append("-D" + defect)
+        argv.extend([ROOT + "/memory/tracker.c", ROOT + "/memory/tracker_fixture.c", "-o", fixture])
+        checked(argv, log)
+        result ∈ object ← command([fixture], log, "")
+        if defect == "MB_TRACKER_ERROR_LEAK":
+            require(int(result.returncode) == 7 and contains(str(result.stderr), "error cleanup leak"), "error cleanup leak fixture accepted")
+        elif len(defect) > 0:
+            require(int(result.returncode) == 6 and contains(str(result.stderr), "tracked leak"), "leak fixture accepted")
+        else:
+            require(int(result.returncode) == 0 and contains(str(result.stdout), "peak=224"), "allocator counters wrong")
+    report.__setitem__("mutants", [{"name": "tracked leak", "status": "EXPECTED_REFUSAL"}, {"name": "error cleanup leak", "status": "EXPECTED_REFUSAL"}])
+    report.__setitem__("tracked", "provider C requested heap payload, including GMP adapter arrays; excludes GMP internal heap, runtime/corpus and allocator headers")
+    report.__setitem__("rss", "Linux: raw RUSAGE_SELF KiB and normalized bytes per fresh process; other platforms: NOT_AVAILABLE; separate from provider heap; includes oracle/corpus/I/O")
+
+def main(job ∈ str) → int:
+    parser ∈ object ← argparse.ArgumentParser(description="Scoped MB controls; full acceptance remains incomplete")
+    parser.add_argument("--output", default="")
+    parser.add_argument("--input", default=ROOT + "/release/last-run/mb07.json")
+    parser.add_argument("--require-gmp", action="store_true")
+    parser.add_argument("--controls-only", action="store_true")
+    parser.add_argument("--expected-arch", default=platform.machine())
+    parser.add_argument("--require-bc", action="store_true")
+    parser.add_argument("--parser-sanitizers-only", action="store_true")
+    parser.add_argument("--allow-unavailable-lsan", action="store_true")
+    args ∈ object ← parser.parse_args()
+    log ∈ list[object] ← []
+    report ∈ object ← {"job": job, "status": "FAIL", "complete": False, "commands": log,
+                       "remaining_obligations": "See modes/README.md; scoped controls do not discharge the original assignment"}
+    exit_status ∈ int ← 1
+    try:
+        with tempfile.TemporaryDirectory(prefix="bigmul-" + job + "-") as temporary:
+            folder ∈ str ← str(temporary)
+            if job == "MB07":
+                hot_job(folder, report, log, bool(args.require_gmp))
+            elif job == "MB08":
+                mixed_job(folder, report, log)
+            elif job == "MB09":
+                cache_job(folder, report, log)
+            elif job == "MB10":
+                if bool(args.parser_sanitizers_only):
+                    text_parser_controls(folder, report, log, bool(args.allow_unavailable_lsan))
+                else:
+                    endpoint_job(folder, report, log, bool(args.require_gmp))
+            elif job == "MB11":
+                memory_job(folder, report, log)
+            elif job == "MB12":
+                analysis_job(report, str(args.input))
+            elif job == "MB13":
+                native_job(folder, report, log, str(args.expected_arch), bool(args.require_bc))
+            elif job == "MB14":
+                android_job(folder, report, log)
+            elif job == "MB15":
+                power_job(folder, report, log)
+            elif job == "MB16":
+                paper_job(report)
+            else:
+                raise ValueError("unsupported job")
+        report.__setitem__("status", "PASS_SCOPED_HOST_CONTROLS")
+        exit_status ← 0
+        if job == "MB14":
+            report.__setitem__("status", "PASS_LOCAL_TRANSPORT_FIXTURES")
+        if job == "MB15":
+            report.__setitem__("status", "PASS_LOCAL_PORTABILITY_FIXTURES")
+        if job == "MB16":
+            report.__setitem__("status", "PASS_GATE_FIXTURES_ONLY")
+            if not bool(args.controls_only):
+                report.__setitem__("status", "BLOCKED")
+                exit_status ← 2
+    except (ValueError, TypeError, OSError, subprocess.SubprocessError) as error:
+        report.__setitem__("error", str(error))
+    emit(report, str(args.output))
+    return exit_status
+
+def index_records(records ∈ list[object]) → object:
+    indexed ∈ object ← {}
+    for record in records:
+        duration ∈ float ← float(record.get("ns_per_call"))
+        finite ∈ bool ← math.isfinite(duration)
+        require(finite and duration > 0.0, "invalid duration")
+        key ∈ str ← str(int(record.get("process_block"))) + ":" + str(record.get("case_id"))
+        exists ∈ bool ← indexed.__contains__(key)
+        require(not exists, "duplicate process/case row")
+        indexed.__setitem__(key, record)
+    require(len(records) > 0, "empty comparison")
+    return indexed
+
+def paired_blocks(baseline ∈ list[object], candidate ∈ list[object]) → object:
+    left_index ∈ object ← index_records(baseline)
+    right_index ∈ object ← index_records(candidate)
+    left_keys ∈ list[str] ← list(left_index.keys())
+    right_keys ∈ list[str] ← list(right_index.keys())
+    left_keys.sort()
+    right_keys.sort()
+    require(left_keys == right_keys, "missing paired row")
+    fields ∈ list[str] ← ["case_sha256", "machine", "compiler", "profile", "mode", "operation", "measurement", "workspace", "cost_boundary", "left_stored_limbs", "right_stored_limbs"]
+    grouped ∈ object ← {}
+    first_order ∈ list[float] ← []
+    second_order ∈ list[float] ← []
+    for key in left_keys:
+        left ∈ object ← left_index.get(key)
+        right ∈ object ← right_index.get(key)
+        for field in fields:
+            left_value ∈ str ← str(left.get(field, ""))
+            right_value ∈ str ← str(right.get(field, ""))
+            left_known ∈ bool ← len(left_value) > 0 and left_value != "None" and left_value != "UNKNOWN" and left_value != "NOT_RUN" and left_value != "NOT_AVAILABLE"
+            right_known ∈ bool ← len(right_value) > 0 and right_value != "None" and right_value != "UNKNOWN" and right_value != "NOT_RUN" and right_value != "NOT_AVAILABLE"
+            require(left_known and right_known, "missing or unknown identity: " + field)
+            require(left_value == right_value, "incompatible " + field)
+        ratio ∈ float ← float(left.get("ns_per_call")) / float(right.get("ns_per_call"))
+        finite ∈ bool ← math.isfinite(ratio)
+        require(finite and ratio > 0.0, "invalid ratio")
+        block ∈ str ← str(int(left.get("process_block")))
+        exists ∈ bool ← grouped.__contains__(block)
+        if not exists:
+            initial ∈ list[float] ← []
+            grouped.__setitem__(block, initial)
+        group ∈ list[float] ← grouped.get(block)
+        group.append(ratio)
+        if int(left.get("provider_order")) < int(right.get("provider_order")):
+            first_order.append(ratio)
+        else:
+            second_order.append(ratio)
+    blocks ∈ list[str] ← list(grouped.keys())
+    blocks.sort()
+    ratios ∈ list[float] ← []
+    for block in blocks:
+        values ∈ list[float] ← grouped.get(block)
+        median ∈ float ← statistics.median(values)
+        ratios.append(median)
+    estimates ∈ list[float] ← []
+    generator ∈ object ← random.Random(1204)
+    for resample in range(2000):
+        chosen ∈ list[float] ← generator.choices(ratios, k=len(ratios))
+        estimate ∈ float ← statistics.median(chosen)
+        estimates.append(estimate)
+    estimates.sort()
+    interval ∈ object ← "INSUFFICIENT_PROCESS_BLOCKS"
+    if len(ratios) >= 5:
+        interval ← [estimates[49], estimates[1949]]
+    order_medians ∈ object ← {"baseline_first": "NOT_OBSERVED", "candidate_first": "NOT_OBSERVED"}
+    if len(first_order) > 0:
+        order_medians.__setitem__("baseline_first", statistics.median(first_order))
+    if len(second_order) > 0:
+        order_medians.__setitem__("candidate_first", statistics.median(second_order))
+    overall ∈ float ← statistics.median(ratios)
+    return {"blocks": len(ratios), "block_ids": blocks, "paired_cases": len(baseline), "block_median_ratios": ratios, "median_ratio": overall,
+            "ratio_interval_95": interval, "order_medians": order_medians,
+            "resampling_unit": "whole process block; inner calls are not independent observations",
+            "quantile_convention": "sorted bootstrap estimates at floor(p*(2000-1)), p=0.025,0.975",
+            "assumption": "exchangeable independent process blocks; descriptive interval under this assumption",
+            "scope": "measured finite sizes; no complexity or universal winner claim"}
+
+def analysis_fixture(ratio ∈ float) → list[list[object]]:
+    baseline ∈ list[object] ← []
+    candidate ∈ list[object] ← []
+    for block in range(8):
+        for case_index in range(3):
+            row ∈ object ← {"process_block": block, "case_id": str(case_index), "case_sha256": str(case_index),
+                            "machine": "fixture", "compiler": "fixture", "profile": "fixture", "mode": "hot", "operation": "multiply",
+                            "measurement": "uninstrumented", "workspace": "fresh", "cost_boundary": "complete-limb32-adapter",
+                            "left_stored_limbs": case_index + 2, "right_stored_limbs": case_index + 2,
+                            "provider_order": block % 2, "ns_per_call": 100.0 * (case_index + 1)}
+            other ∈ object ← row.copy()
+            other.update({"provider_order": 1 - block % 2, "ns_per_call": 100.0 * (case_index + 1) / ratio})
+            baseline.append(row)
+            candidate.append(other)
+    return [baseline, candidate]
+
+def finite_slopes(sizes ∈ list[float], times ∈ list[float]) → object:
+    require(len(sizes) == len(times) and len(sizes) >= 3, "insufficient sizes")
+    slopes ∈ list[float] ← []
+    for size_index in range(len(sizes)):
+        finite_size ∈ bool ← math.isfinite(sizes[size_index])
+        finite_time ∈ bool ← math.isfinite(times[size_index])
+        require(finite_size and finite_time and sizes[size_index] > 1.0 and times[size_index] > 0.0, "invalid size/time series")
+        if size_index > 0:
+            require(sizes[size_index] > sizes[size_index - 1], "sizes must increase")
+        if size_index > 0 and size_index < len(sizes) - 1:
+            numerator ∈ float ← math.log(times[size_index] / times[size_index - 1])
+            denominator ∈ float ← math.log(sizes[size_index] / sizes[size_index - 1])
+            slopes.append(numerator / denominator)
+    exponent ∈ float ← statistics.median(slopes)
+    prediction ∈ float ← times[-2] * (sizes[-1] / sizes[-2]) ** exponent
+    return {"median_log_slope": exponent, "adjacent_log_slopes": slopes, "fit_sizes": sizes[:-1],
+            "held_out_size": sizes[-1], "held_out_observed_over_prediction": times[-1] / prediction,
+            "claim": "finite-range diagnostic; no asymptotic exponent inferred"}
+
+def crossover_bracket(sizes ∈ list[float], ratios ∈ list[float]) → object:
+    require(len(sizes) == len(ratios) and len(sizes) >= 2, "insufficient crossover grid")
+    if ratios[0] > 1.0:
+        return {"status": "LEFT_CENSORED", "first_measured_size": sizes[0]}
+    for size_index in range(1, len(sizes)):
+        if ratios[size_index - 1] <= 1.0 and ratios[size_index] > 1.0:
+            return {"status": "BRACKETED", "lower": sizes[size_index - 1], "upper": sizes[size_index]}
+    return {"status": "RIGHT_CENSORED", "last_measured_size": sizes[-1]}
+
+def finite_crossover(sizes ∈ list[float], columns ∈ list[list[float]]) → object:
+    require(len(sizes) == len(columns) and len(sizes) >= 2, "invalid crossover shape")
+    blocks ∈ int ← len(columns[0])
+    require(blocks >= 5, "insufficient crossover process blocks")
+    medians ∈ list[float] ← []
+    for column_index in range(len(columns)):
+        column ∈ list[float] ← columns[column_index]
+        require(len(column) == blocks and sizes[column_index] > 1.0, "unpaired crossover blocks")
+        if column_index > 0:
+            require(sizes[column_index] > sizes[column_index - 1], "unordered crossover grid")
+        for ratio in column:
+            finite ∈ bool ← math.isfinite(ratio)
+            require(finite and ratio > 0.0, "invalid crossover ratio")
+        median ∈ float ← statistics.median(column)
+        medians.append(median)
+    observed ∈ object ← crossover_bracket(sizes, medians)
+    lower_bounds ∈ list[float] ← []
+    upper_bounds ∈ list[float] ← []
+    generator ∈ object ← random.Random(1205)
+    for resample in range(2000):
+        chosen ∈ list[int] ← generator.choices(range(blocks), k=blocks)
+        sampled_medians ∈ list[float] ← []
+        for resample_column in columns:
+            sampled ∈ list[float] ← []
+            for block_index in chosen:
+                sampled.append(resample_column[block_index])
+            sampled_median ∈ float ← statistics.median(sampled)
+            sampled_medians.append(sampled_median)
+        bracket ∈ object ← crossover_bracket(sizes, sampled_medians)
+        if str(bracket.get("status")) == "BRACKETED":
+            lower_bounds.append(float(bracket.get("lower")))
+            upper_bounds.append(float(bracket.get("upper")))
+    interval ∈ object ← "NOT_IDENTIFIED: at least one bootstrap replicate is censored"
+    if len(lower_bounds) == 2000:
+        lower_bounds.sort()
+        upper_bounds.sort()
+        interval ← [lower_bounds[49], upper_bounds[1949]]
+    return {"observed": observed, "grid_interval_95": interval, "bracketed_resamples": len(lower_bounds), "resamples": 2000,
+            "process_blocks": blocks, "size_grid": sizes, "median_speedup_by_size": medians,
+            "resampling_unit": "same whole process-block indices reused across every size; exchangeable independent blocks assumed",
+            "definition": "first ascending baseline/candidate ratio crossing above one on the measured balanced stored-limb grid; no interpolation or sustained/universal winner claim",
+            "interval_convention": "outer grid bounds, sorted resample lower[49], upper[1949]; censored replicates prevent a finite interval"}
+
+def normalized_model(sizes ∈ list[float], times ∈ list[float]) → object:
+    require(len(sizes) == len(times), "normalization size mismatch")
+    rows ∈ list[object] ← []
+    for size_index in range(len(sizes)):
+        size ∈ float ← sizes[size_index]
+        elapsed ∈ float ← times[size_index]
+        logarithm ∈ float ← math.log2(size)
+        require(size > 1.0 and elapsed > 0.0, "invalid normalization input")
+        rows.append({"stored_limbs_per_operand": size, "median_ns_per_call": elapsed, "ns_over_n": elapsed / size,
+                     "ns_over_n_log2_n": elapsed / (size * logarithm), "ns_over_n_squared": elapsed / (size * size)})
+    return {"normalizations": rows, "finite_range_fit": finite_slopes(sizes, times),
+            "interpretation": "fixed balanced corpus mixture at each stored length; held-out largest size; finite diagnostics, not an asymptotic model selection"}
+
+def finite_models(baseline ∈ list[object], candidate ∈ list[object]) → object:
+    present ∈ object ← {}
+    for record in baseline:
+        size ∈ int ← int(record.get("left_stored_limbs"))
+        if size > 1 and size == int(record.get("right_stored_limbs")):
+            present.__setitem__(str(size), True)
+    keys ∈ list[str] ← list(present.keys())
+    lengths ∈ list[int] ← []
+    for key in keys:
+        lengths.append(int(key))
+    lengths.sort()
+    sizes ∈ list[float] ← []
+    baseline_times ∈ list[float] ← []
+    candidate_times ∈ list[float] ← []
+    comparisons ∈ list[object] ← []
+    columns ∈ list[list[float]] ← []
+    reference_ids ∈ list[str] ← []
+    for length in lengths:
+        left ∈ list[object] ← []
+        right ∈ list[object] ← []
+        left_times ∈ list[float] ← []
+        right_times ∈ list[float] ← []
+        for left_record in baseline:
+            if int(left_record.get("left_stored_limbs")) == length and int(left_record.get("right_stored_limbs")) == length:
+                left.append(left_record)
+                left_times.append(float(left_record.get("ns_per_call")))
+        for right_record in candidate:
+            if int(right_record.get("left_stored_limbs")) == length and int(right_record.get("right_stored_limbs")) == length:
+                right.append(right_record)
+                right_times.append(float(right_record.get("ns_per_call")))
+        comparison ∈ object ← paired_blocks(left, right)
+        block_ids ∈ list[str] ← comparison.get("block_ids")
+        if len(reference_ids) == 0:
+            reference_ids ← list(block_ids)
+        require(block_ids == reference_ids, "missing cross-size process block")
+        ratios ∈ list[float] ← comparison.get("block_median_ratios")
+        columns.append(ratios)
+        comparison.__setitem__("stored_limbs_per_operand", length)
+        comparisons.append(comparison)
+        sizes.append(float(length))
+        baseline_median ∈ float ← statistics.median(left_times)
+        candidate_median ∈ float ← statistics.median(right_times)
+        baseline_times.append(baseline_median)
+        candidate_times.append(candidate_median)
+    return {"baseline": normalized_model(sizes, baseline_times), "candidate": normalized_model(sizes, candidate_times),
+            "per_size_comparisons": comparisons, "crossover": finite_crossover(sizes, columns)}
+
+def analysis_job(report ∈ object, source_path ∈ str) → None:
+    known ∈ list[list[object]] ← analysis_fixture(2.0)
+    result ∈ object ← paired_blocks(known[0], known[1])
+    require(float(result.get("median_ratio")) == 2.0 and str(result.get("ratio_interval_95")) == "[2.0, 2.0]", "known speedup fixture")
+    fixtures ∈ object ← {"known_speedup": result}
+    equal ∈ list[list[object]] ← analysis_fixture(1.0)
+    result ∈ object ← paired_blocks(equal[0], equal[1])
+    require(float(result.get("median_ratio")) == 1.0, "equal-speed fixture")
+    fixtures.__setitem__("equal_speed", result)
+    varied ∈ list[list[object]] ← analysis_fixture(2.0)
+    for varied_index in range(len(varied[0])):
+        varied_left ∈ object ← varied[0][varied_index]
+        varied_right ∈ object ← varied[1][varied_index]
+        scale ∈ float ← 1.0 + float(varied_index % 5) * float(varied_index % 5)
+        varied_left.__setitem__("ns_per_call", float(varied_left.get("ns_per_call")) * scale)
+        amplitude ∈ float ← 0.1 * float(varied_index % 3 + 1)
+        varied_ratio ∈ float ← 2.0 - amplitude
+        if varied_index // 3 % 2 == 1:
+            varied_ratio ← 2.0 + amplitude
+        varied_right.__setitem__("ns_per_call", float(varied_left.get("ns_per_call")) / varied_ratio)
+    outlier ∈ object ← varied[1][0]
+    outlier.__setitem__("ns_per_call", float(outlier.get("ns_per_call")) * 1000.0)
+    robust ∈ object ← paired_blocks(varied[0], varied[1])
+    require(float(robust.get("median_ratio")) > 1.999999999 and float(robust.get("median_ratio")) < 2.000000001, "heteroscedastic/outlier sensitivity fixture")
+    fixtures.__setitem__("heteroscedastic_with_one_outlier", robust)
+    noise ∈ list[list[object]] ← analysis_fixture(1.0)
+    for noise_index in range(len(noise[0])):
+        noise_left ∈ object ← noise[0][noise_index]
+        noise_right ∈ object ← noise[1][noise_index]
+        factor ∈ float ← 1.0
+        if noise_index % 3 == 0:
+            factor ← 0.8
+        if noise_index % 3 == 2:
+            factor ← 1.2
+        noise_right.__setitem__("ns_per_call", float(noise_left.get("ns_per_call")) / factor)
+    noisy ∈ object ← paired_blocks(noise[0], noise[1])
+    require(float(noisy.get("median_ratio")) == 1.0, "equal-speed noise fixture")
+    fixtures.__setitem__("equal_speed_symmetric_noise", noisy)
+    require(quantile([4.0, 1.0, 3.0, 2.0], 0.5) == 2.5 and quantile([4.0, 1.0, 3.0, 2.0], 0.25) == 1.75, "analytic analysis quantile fixture")
+    fixtures.__setitem__("analytic_quantiles", {"samples": [4.0, 1.0, 3.0, 2.0], "p50": 2.5, "p25": 1.75})
+    names ∈ list[str] ← ["missing", "duplicate", "case_sha256", "machine", "compiler", "profile", "mode", "operation", "measurement", "workspace", "cost_boundary", "left_stored_limbs", "right_stored_limbs", "nan", "zero", "negative", "infinity", "both-missing-machine", "both-empty-compiler", "both-unknown-measurement"]
+    mutants ∈ list[object] ← []
+    for name in names:
+        pair ∈ list[list[object]] ← analysis_fixture(2.0)
+        baseline ∈ list[object] ← pair[0]
+        candidate ∈ list[object] ← pair[1]
+        if name == "both-missing-machine":
+            baseline[0].pop("machine")
+            candidate[0].pop("machine")
+        elif name == "both-empty-compiler":
+            baseline[0].__setitem__("compiler", "")
+            candidate[0].__setitem__("compiler", "")
+        elif name == "both-unknown-measurement":
+            baseline[0].__setitem__("measurement", "UNKNOWN")
+            candidate[0].__setitem__("measurement", "UNKNOWN")
+        elif name == "missing":
+            candidate.pop()
+        elif name == "duplicate":
+            candidate.append(candidate[-1])
+        else:
+            row ∈ object ← candidate[0]
+            if name == "nan":
+                row.__setitem__("ns_per_call", float("nan"))
+            elif name == "zero":
+                row.__setitem__("ns_per_call", 0.0)
+            elif name == "negative":
+                row.__setitem__("ns_per_call", -1.0)
+            elif name == "infinity":
+                row.__setitem__("ns_per_call", float("inf"))
+            else:
+                row.__setitem__(name, "wrong")
+        rejected ∈ bool ← False
+        try:
+            paired_blocks(baseline, candidate)
+        except ValueError as error:
+            mutants.append({"name": name, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "accepted analysis defect " + name)
+    slopes ∈ object ← finite_slopes([2.0, 4.0, 8.0, 16.0], [4.0, 16.0, 64.0, 256.0])
+    require(float(slopes.get("median_log_slope")) == 2.0 and float(slopes.get("held_out_observed_over_prediction")) == 1.0, "analytic slope fixture")
+    fixtures.__setitem__("finite_slopes", slopes)
+    crossover ∈ object ← finite_crossover([2.0, 4.0, 8.0, 16.0], [[0.5, 0.5, 0.5, 0.5, 0.5], [0.8, 0.8, 0.8, 0.8, 0.8], [1.3, 1.3, 1.3, 1.3, 1.3], [1.6, 1.6, 1.6, 1.6, 1.6]])
+    require(str(crossover.get("grid_interval_95")) == "[4.0, 8.0]", "known crossover bracket fixture")
+    fixtures.__setitem__("known_crossover", crossover)
+    censored ∈ object ← finite_crossover([2.0, 4.0], [[0.5, 0.5, 0.5, 0.5, 0.5], [0.8, 0.8, 0.8, 0.8, 0.8]])
+    require(int(censored.get("bracketed_resamples")) == 0 and contains(str(censored.get("grid_interval_95")), "NOT_IDENTIFIED"), "censored crossover fixture")
+    fixtures.__setitem__("censored_crossover", censored)
+    report.update({"fixtures": fixtures, "mutants": mutants})
+    require(bool(Path(source_path).is_file()), "real MB07 receipt missing")
+    source ∈ object ← json.loads(Path(source_path).read_text())
+    require(str(source.get("status")) == "PASS_SCOPED_HOST_CONTROLS", "MB07 receipt failed")
+    report.__setitem__("input_receipt", {"path": source_path, "sha256": digest(source_path), "source_sha": source.get("source_sha"),
+                                         "ithon_core_sha256": source.get("ithon_core_sha256"), "machine_identity": source.get("machine_identity")})
+    runs ∈ list[object] ← source.get("runs")
+    baseline ∈ list[object] ← []
+    candidate ∈ list[object] ← []
+    for run in runs:
+        provider ∈ str ← str(run.get("provider"))
+        if str(run.get("mode")) != "hot" or str(run.get("operation")) != "multiply":
+            continue
+        if str(run.get("measurement")) != "uninstrumented" or str(run.get("cost_boundary")) != "complete-limb32-adapter":
+            continue
+        if provider != "schoolbook" and provider != "karatsuba32-bounded":
+            continue
+        rows ∈ list[object] ← run.get("raw_samples")
+        for sample in rows:
+            compiler ∈ object ← source.get("compiler")
+            flags ∈ str ← json.dumps(compiler.get("flags"))
+            record ∈ object ← {"process_block": run.get("process_block"), "provider_order": run.get("provider_order"),
+                               "case_id": sample.get("source_case_sha256"), "case_sha256": sample.get("case_sha256"),
+                               "ns_per_call": float(sample.get("elapsed_ns")) / int(sample.get("repetitions")),
+                               "machine": source.get("machine_identity"), "compiler": str(compiler.get("sha256")) + flags,
+                               "profile": "unsigned-limb32-v1", "mode": "hot-adapter32", "operation": "multiply",
+                               "measurement": run.get("measurement"), "workspace": run.get("workspace"), "cost_boundary": run.get("cost_boundary"),
+                               "left_stored_limbs": sample.get("left_stored_limbs"), "right_stored_limbs": sample.get("right_stored_limbs")}
+            if provider == "schoolbook":
+                baseline.append(record)
+            else:
+                candidate.append(record)
+    real ∈ object ← paired_blocks(baseline, candidate)
+    require(int(real.get("blocks")) >= 5, "insufficient uninstrumented process blocks")
+    real.__setitem__("acceptance", "diagnostic MB07 host controls, not an accepted full mode")
+    report.__setitem__("real_data", real)
+    report.__setitem__("finite_size_models", finite_models(baseline, candidate))
+
+def display_number(value ∈ object) → str:
+    return format(float(value), ".6g")
+
+def analysis_markdown(report ∈ object) → str:
+    real ∈ object ← report.get("real_data")
+    source ∈ object ← report.get("input_receipt")
+    text ∈ str ← "# MB12 paired host controls\n\n"
+    text ← text + "Status: scoped host diagnostics passed; full mode acceptance remains incomplete.\n\n"
+    text ← text + "Analysis base commit: `" + str(report.get("source_sha")) + "`; checked control-source SHA256 `" + str(report.get("ithon_core_sha256")) + "`.\n\n"
+    worktree ∈ str ← str(report.get("worktree_status"))
+    if len(worktree) > 0:
+        text ← text + "The analysis worktree was modified; the JSON receipt records its status and exact source hashes.\n\n"
+    else:
+        text ← text + "The analysis worktree was clean.\n\n"
+    text ← text + "Input receipt: `" + str(source.get("path")) + "`, SHA256 `" + str(source.get("sha256")) + "`.\n\n"
+    text ← text + "Input source: `" + str(source.get("source_sha")) + "`; machine identity `" + str(source.get("machine_identity")) + "`.\n\n"
+    text ← text + "## Paired comparison\n\nSchoolbook is the baseline; bounded Karatsuba is the candidate. Ratios are baseline time divided by candidate time, so a ratio above one favors the candidate on these measured inputs. Only matching uninstrumented complete-adapter runs enter this comparison.\n\n"
+    text ← text + "| Quantity | Observation |\n| --- | --- |\n"
+    text ← text + "| Independent process blocks | " + str(real.get("blocks")) + " |\n"
+    text ← text + "| Complete paired process/case rows | " + str(real.get("paired_cases")) + " |\n"
+    text ← text + "| Median of block median ratios | " + display_number(real.get("median_ratio")) + " |\n"
+    text ← text + "| Whole-block bootstrap 95% interval | " + str(real.get("ratio_interval_95")) + " |\n"
+    orders ∈ object ← real.get("order_medians")
+    text ← text + "| Baseline-first pooled median ratio | " + str(orders.get("baseline_first")) + " |\n"
+    text ← text + "| Candidate-first pooled median ratio | " + str(orders.get("candidate_first")) + " |\n\n"
+    text ← text + "The resampling unit is the whole process block. Repeated calls and input cases within a block are not independent trials. The descriptive intervals assume exchangeable independent process blocks; order medians expose, rather than remove, order sensitivity.\n\n"
+    models ∈ object ← report.get("finite_size_models")
+    names ∈ list[str] ← ["baseline", "candidate"]
+    labels ∈ list[str] ← ["Schoolbook", "Bounded Karatsuba"]
+    for lane_index in range(2):
+        model ∈ object ← models.get(names[lane_index])
+        rows ∈ list[object] ← model.get("normalizations")
+        text ← text + "## " + labels[lane_index] + " finite-size diagnostics\n\n"
+        text ← text + "n is the stored 32-bit limb count per operand in the fixed balanced corpus mixture. Time is nanoseconds per call; the three normalizations are diagnostic views of the same data.\n\n"
+        text ← text + "| n | Median ns | ns/n | ns/(n log2 n) | ns/n² |\n| ---: | ---: | ---: | ---: | ---: |\n"
+        for row in rows:
+            text ← text + "| " + display_number(row.get("stored_limbs_per_operand")) + " | " + display_number(row.get("median_ns_per_call")) + " | " + display_number(row.get("ns_over_n")) + " | " + display_number(row.get("ns_over_n_log2_n")) + " | " + display_number(row.get("ns_over_n_squared")) + " |\n"
+        fit ∈ object ← model.get("finite_range_fit")
+        text ← text + "\nMedian adjacent log slope on the fit sizes: " + display_number(fit.get("median_log_slope")) + ". The largest size, n=" + display_number(fit.get("held_out_size")) + ", was held out; its observed time divided by the finite-range prediction is " + display_number(fit.get("held_out_observed_over_prediction")) + ". These finite diagnostics do not establish asymptotic complexity.\n\n"
+    crossover ∈ object ← models.get("crossover")
+    observed ∈ object ← crossover.get("observed")
+    text ← text + "## Finite-grid crossover\n\nThe reported event is the first ascending median-ratio crossing above one on the measured balanced size grid. It does not claim a sustained or universal winner.\n\n"
+    text ← text + "Observed status: " + str(observed.get("status")) + "."
+    if str(observed.get("status")) == "BRACKETED":
+        text ← text + " Grid bracket: " + display_number(observed.get("lower")) + " to " + display_number(observed.get("upper")) + " stored limbs per operand."
+    text ← text + "\n\n95% outer grid interval: " + str(crossover.get("grid_interval_95")) + ". Bracketed resamples: " + str(crossover.get("bracketed_resamples")) + " of " + str(crossover.get("resamples")) + ". The same resampled process-block indices span every size; any censored replicate prevents a finite interval.\n\n"
+    fixtures ∈ object ← report.get("fixtures")
+    fixture_names ∈ list[str] ← list(fixtures.keys())
+    fixture_list ∈ str ← ", ".join(fixture_names)
+    text ← text + "## Checks and acceptance boundary\n\nSynthetic checks passed: " + fixture_list + ". Incompatible identities, incomplete pairs and invalid durations are refused. Exact products were checked outside arithmetic timing in the input MB07 controls.\n\n"
+    text ← text + "Displayed numbers are rounded for reading; the JSON receipt preserves raw samples, full precision, assumptions and provenance. Accepted predecessors, qualified ICK, the actual admitted candidate and physical/native target evidence remain outstanding.\n"
+    return text
+
+def verify_identity(observed ∈ object, expected ∈ object) → None:
+    fields ∈ list[str] ← ["architecture", "source_sha", "binary_sha256"]
+    for field in fields:
+        require(str(observed.get(field)) == str(expected.get(field)), "wrong native identity: " + field)
+
+def native_prerequisite_controls(folder ∈ str, report ∈ object, log ∈ list[object], compiler ∈ str) → None:
+    frontend ∈ str ← str(os.environ.get("ITHON", ""))
+    if len(frontend) == 0:
+        report.__setitem__("prerequisite_controls", "NOT_RUN: explicit verified ITHON launcher not configured")
+        return
+    require(bool(Path(frontend).is_absolute()) and bool(Path(frontend).is_file()), "invalid native-control Ithon launcher")
+    environment ∈ str ← str(resolve_executable("env"))
+    limited ∈ str ← folder + "/missing-bc-path"
+    Path(limited).mkdir()
+    tools ∈ list[str] ← ["git", "dirname"]
+    for tool in tools:
+        Path(limited + "/" + tool).symlink_to(str(resolve_executable(tool)))
+    missing ∈ object ← command([environment, "PATH=" + limited, "CC=" + compiler, "ITHON_PYTHON=" + str(sys.executable), frontend,
+                                ROOT + "/platforms/native/check_mb13.pi", "--require-bc", "--output", folder + "/missing-bc.json"], log, "")
+    require(len(str(missing.stdout)) > 0, "missing-bc child produced no receipt: " + str(missing.stderr))
+    missing_report ∈ object ← json.loads(str(missing.stdout))
+    require(int(missing.returncode) != 0 and str(missing_report.get("error")) == "required bc missing", "missing mandatory bc accepted or masked")
+    candidate ∈ object ← command([frontend, ROOT + "/providers/openai2026/check_mb16.pi"], log, "")
+    require(len(str(candidate.stdout)) > 0, "candidate gate produced no receipt: " + str(candidate.stderr))
+    candidate_report ∈ object ← json.loads(str(candidate.stdout))
+    require(int(candidate.returncode) == 2 and str(candidate_report.get("status")) == "BLOCKED", "missing actual candidate admitted")
+    outcomes ∈ list[str] ← ["failure", "success", ""]
+    for outcome in outcomes:
+        guard ∈ object ← command([environment, "MB13_UPLOAD_OUTCOME=" + outcome, frontend,
+                                  REPOSITORY + "/examples/autogenerated/mb07-16-controls/upload_control.pi"], log, "")
+        require(len(str(guard.stdout)) > 0, "upload guard produced no receipt: " + str(guard.stderr))
+        guard_report ∈ object ← json.loads(str(guard.stdout))
+        if outcome == "failure":
+            require(int(guard.returncode) == 0 and str(guard_report.get("status")) == "PASS_EXPECTED_FAILURE_OUTCOME", "upload outcome control failed")
+        else:
+            require(int(guard.returncode) != 0 and str(guard_report.get("status")) == "FAIL", "missing upload failure was silently accepted")
+    report.__setitem__("prerequisite_controls", {"missing_bc": "EXPECTED_REFUSAL in real child with isolated PATH",
+                                                "missing_candidate": "EXPECTED_REFUSAL from actual MB16 gate",
+                                                "upload_guard_fixtures": "expected failure accepted; success/absent outcome refused",
+                                                "hosted_missing_file_action": "NOT_RUN locally; actual workflow action and its logs are separate evidence"})
+
+def native_job(folder ∈ str, report ∈ object, log ∈ list[object], expected_arch ∈ str, require_bc ∈ bool) → None:
+    require(str(platform.machine()) == expected_arch, "wrong native architecture label")
+    compiler ∈ str ← str(resolve_executable(os.environ.get("CC", "cc")))
+    checked([compiler, "--version"], log)
+    revision ∈ object ← checked(["git", "-C", REPOSITORY, "rev-parse", "HEAD"], log)
+    bc_available ∈ bool ← bool(shutil.which("bc"))
+    require(not require_bc or bc_available, "required bc missing")
+    report.__setitem__("bc", "NOT_RUN: required bc absent on host")
+    if bc_available:
+        report.__setitem__("bc", "AVAILABLE: qualification remains owned by MB04")
+    report.update({"compiler": {"path": compiler, "sha256": digest(compiler), "flags": FLAGS},
+                   "qualified_ick": "NOT_RUN", "hosted_workflow": "NOT_RUN", "mandatory_artifact_upload": "NOT_RUN",
+                   "native_arm64": "NOT_RUN", "frequency_thermal": "UNKNOWN: no inference from CPU name"})
+    if Path("/proc/cpuinfo").is_file():
+        report.__setitem__("cpuinfo", Path("/proc/cpuinfo").read_text())
+    affinity ∈ str ← "NOT_AVAILABLE"
+    if Path("/proc/self/status").is_file():
+        process_status ∈ list[str] ← list(str(Path("/proc/self/status").read_text()).splitlines())
+        for status_line in process_status:
+            if contains(status_line, "Cpus_allowed_list:"):
+                affinity ← status_line
+    facts ∈ object ← {}
+    fact_paths ∈ list[str] ← ["/proc/self/cgroup", "/sys/devices/system/cpu/online", "/sys/devices/system/cpu/possible", "/sys/hypervisor/type", "/sys/devices/virtual/dmi/id/product_name"]
+    for fact_path in fact_paths:
+        fact_text ∈ str ← "NOT_AVAILABLE"
+        if Path(fact_path).is_file():
+            fact_text ← str(Path(fact_path).read_text()).strip()
+        facts.__setitem__(fact_path, fact_text)
+    report.__setitem__("execution_environment", {"allowed_cpu_list": affinity, "affinity_changed": False,
+                                               "observed_os_facts": facts, "virtualization_classification": "UNKNOWN; names/cgroups are observations, not proof of bare metal or exclusive resources"})
+    program ∈ str ← build(folder, log, "", False, False)
+    corpus ∈ list[object] ← cases(False)
+    report.__setitem__("run", run_mode(program, "hot", "schoolbook", corpus[-8:], log, 1, 1, 0))
+    identity ∈ object ← {"architecture": platform.machine(), "source_sha": str(revision.stdout).strip(), "binary_sha256": digest(program)}
+    report.__setitem__("observed_identity", identity)
+    tools ∈ list[str] ← ["objdump", "nm", "ldd"]
+    options ∈ list[list[str]] ← [["-d"], ["-u"], []]
+    for tool_index in range(3):
+        tool ∈ str ← str(resolve_executable(tools[tool_index]))
+        argv ∈ list[str] ← [tool]
+        argv.extend(options[tool_index])
+        argv.append(program)
+        checked(argv, log)
+    probe ∈ str ← compile_sources(folder, ["platforms/native/probe.c", "timing/engine.c"], log, "", False, False)
+    observation ∈ object ← checked([probe], log)
+    report.__setitem__("abi_timer_tsv", observation.stdout)
+    verify_identity(identity, identity)
+    fields ∈ list[str] ← ["architecture", "source_sha", "binary_sha256"]
+    mutants ∈ list[object] ← []
+    for field in fields:
+        changed ∈ object ← identity.copy()
+        changed.__setitem__(field, "wrong")
+        rejected ∈ bool ← False
+        try:
+            verify_identity(identity, changed)
+        except ValueError as error:
+            mutants.append({"field": field, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "native identity defect accepted")
+    report.__setitem__("mutants", mutants)
+    if str(platform.machine()) == "aarch64":
+        report.__setitem__("native_arm64", "PASS_SCOPED_HOST_CONTROL")
+    native_prerequisite_controls(folder, report, log, compiler)
+
+def validate_target(serial ∈ str, model ∈ str, abi ∈ str, sdk ∈ str) → None:
+    require(len(serial) > 0 and not contains(serial, "-"), "explicit device serial required")
+    normalized ∈ str ← model.strip().lower()
+    require(normalized == "miro a1" or normalized == "a1", "target is not MIRO A1")
+    require(abi == "armeabi-v7a" and sdk == "34", "wrong A1 ABI/API")
+
+def android_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    report.update({"physical_miro_a1": "NOT_RUN", "scope": "local real subprocess collection fixtures; no physical transport acceptance"})
+    corpus ∈ list[object] ← cases(False)
+    selected ∈ list[object] ← corpus[100:102]
+    validate_target("fixturea1", "MIRO A1", "armeabi-v7a", "34")
+    program ∈ str ← endpoint(folder, log, "")
+    report.__setitem__("collection_fixture", collect([program, "schoolbook"], binary_payload(selected), selected, True, False, 10.0))
+    defects ∈ list[str] ← ["MB_ENDPOINT_CARRY", "MB_ENDPOINT_TRUNCATE", "MB_EXIT_AFTER_OUTPUT"]
+    diagnostics ∈ list[str] ← ["wrong endpoint product", "truncated", "99"]
+    one ∈ list[object] ← selected[:1]
+    mutants ∈ list[object] ← []
+    for defect_index in range(3):
+        defect ∈ str ← defects[defect_index]
+        bad ∈ str ← endpoint(folder, log, defect)
+        rejected ∈ bool ← False
+        try:
+            collect([bad, "schoolbook"], binary_payload(one), one, True, False, 10.0)
+        except ValueError as error:
+            require(contains(str(error), diagnostics[defect_index]), "wrong transport diagnostic")
+            mutants.append({"name": defect, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "transport defect accepted")
+    disconnected ∈ bool ← False
+    try:
+        collect([folder + "/disconnected-transport"], binary_payload(one), one, True, False, 10.0)
+    except FileNotFoundError:
+        disconnected ← True
+        mutants.append({"name": "disconnected transport", "status": "EXPECTED_REFUSAL"})
+    require(disconnected, "disconnected transport accepted")
+    serials ∈ list[str] ← ["", "c67", "tablet"]
+    models ∈ list[str] ← ["MIRO A1", "Miro C67", "TAB_P10"]
+    for device_index in range(3):
+        rejected ∈ bool ← False
+        try:
+            validate_target(serials[device_index], models[device_index], "armeabi-v7a", "34")
+        except ValueError as error:
+            mutants.append({"name": "wrong device/serial", "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "wrong device accepted")
+    report.__setitem__("mutants", mutants)
+
+def verify_power(wire ∈ str, unit ∈ str, library ∈ str, status ∈ int) → None:
+    require(wire == "67452301efcdab89", "wrong limb wire endianness")
+    require(unit == "ns", "wrong timer units")
+    require(library == "observed", "missing native library identity")
+    require(status == 0, "remote failure masked")
+
+def power_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+    report.update({"native_aix": "BLOCKED_EXTERNAL: no authorized native AIX host", "scope": "Linux-compiled portability probe and evidence fixtures only"})
+    probe ∈ str ← compile_sources(folder, ["platforms/power/probe.c"], log, "", False, False)
+    result ∈ object ← checked([probe], log)
+    require(contains(str(result.stdout), "limb_wire\t67452301efcdab89"), "wire serialization differs")
+    report.__setitem__("probe_tsv", result.stdout)
+    verify_power("67452301efcdab89", "ns", "observed", 0)
+    mutants ∈ list[object] ← []
+    for defect_index in range(4):
+        wire ∈ str ← "67452301efcdab89"
+        unit ∈ str ← "ns"
+        library ∈ str ← "observed"
+        status ∈ int ← 0
+        if defect_index == 0:
+            wire ← "0123456789abcdef"
+        if defect_index == 1:
+            unit ← "ticks"
+        if defect_index == 2:
+            library ← "missing"
+        if defect_index == 3:
+            status ← 99
+        rejected ∈ bool ← False
+        try:
+            verify_power(wire, unit, library, status)
+        except ValueError as error:
+            mutants.append({"status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "portability evidence defect accepted")
+    report.__setitem__("mutants", mutants)
+
+def paper_gate(receipt ∈ object) → None:
+    require(str(receipt.get("mul5_acceptance")) == "PASS", "accepted MUL5 receipt missing")
+    require(str(receipt.get("fallback")) == "none", "forbidden whole-input fallback")
+    require(str(receipt.get("profile")) == "reduced-algebra", "unsupported published profile")
+    boolean_link ∈ bool ← isinstance(receipt.get("linked_multiply_exact"), bool)
+    linked ∈ bool ← bool(receipt.get("linked_multiply_exact"))
+    require(boolean_link and linked, "actual MUL5 symbol missing")
+    require(str(receipt.get("stage_contract")) == "PASS", "accepted stage/dimension contract missing")
+    require(str(receipt.get("independent_products")) == "PASS", "independent exact products missing")
+
+def paper_job(report ∈ object) → None:
+    report.update({"actual_adapter_build": "NOT_RUN", "actual_provider_acceptance": "BLOCKED: accepted MUL5 implementation and receipts unavailable",
+                   "scope": "synthetic gate controls; never paper execution evidence", "inspected_mul5_branch": "arithmetic/mul-5-composition",
+                   "inspected_mul5_sha": "696739c1ff786f918ae66ee509b8630b81145db7",
+                   "observed_blocker": "composition.h declarations have no multiply_exact/composition_prepare definitions under src"})
+    good ∈ object ← {"mul5_acceptance": "PASS", "fallback": "none", "profile": "reduced-algebra", "linked_multiply_exact": True, "stage_contract": "PASS", "independent_products": "PASS"}
+    paper_gate(good)
+    fields ∈ list[str] ← list(good.keys())
+    mutants ∈ list[object] ← []
+    for field in fields:
+        bad ∈ object ← good.copy()
+        bad.__setitem__(field, False)
+        rejected ∈ bool ← False
+        try:
+            paper_gate(bad)
+        except ValueError as error:
+            mutants.append({"field": field, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            rejected ← True
+        require(rejected, "missing gate field accepted: " + field)
+    report.update({"gate_controls": "PASS", "gate_mutants": mutants})

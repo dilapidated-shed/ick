@@ -1,0 +1,3 @@
+profile	input_domain	actual_build	actual_acceptance	blocker
+reduced-algebra	declared eight-bit values; 1..2048 stored 32-bit words; high stored words zero	NOT_RUN	BLOCKED	MUL5 has declarations but no composition_prepare/multiply_exact definitions
+published-fixed	unsupported	NOT_RUN	EXPECTED_REFUSAL	no accepted published stage/dimension/resource contract
