@@ -82,3 +82,16 @@ lane records NOT_AVAILABLE, executes ASan/UBSan with leak scanning disabled,
 and separately wraps owned C allocations for real error-cleanup/leak controls.
 Hosted CI keeps LeakSanitizer mandatory and must observe its actual leak mutant.
 No local reduced result is promoted to that hosted evidence.
+
+## Calibration remainder repair
+
+Inspection of the published native MB07 receipts at `6d4b035` exposed one-call
+samples when calibration exhausted a 4096-call budget as 1+2+...+2048+1. The last
+tiny sample replaced the large batch. An added deterministic fake-clock fixture
+failed against the unchanged engine with exit 11 in FP `mb-calibration-before`.
+The engine now stops when the remaining call budget cannot fit a nondecreasing
+batch, retaining 2048 repetitions after 4095 calls. Irregular six-call and minimal
+one-call limits also have exact controls. The hot Ithon driver executes this C
+fixture before taking measurements. Old receipts remain evidence of the failed
+calibration behavior; their timing interpretation is superseded. C remains the
+explicit foreign benchmark boundary, and this repair does not qualify ICK.

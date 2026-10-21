@@ -33,16 +33,17 @@ int mb_calibrate(mb_operation operation, void *context, mb_timer timer, void *cl
     memset(result, 0, sizeof(*result));
     size_t repetitions = 1, total_calls = 0;
     for (;;) {
-        if (repetitions > max_calls - total_calls) repetitions = max_calls - total_calls;
         int status = mb_batch(operation, context, timer, clock, repetitions, &result->sample);
         if (status) return status;
         total_calls += repetitions;
         if (result->sample.elapsed_ns > UINT64_MAX - result->accumulated_ns) return 4;
         result->accumulated_ns += result->sample.elapsed_ns;
         result->target_met = result->sample.elapsed_ns >= target_ns;
-        result->cap_hit = total_calls == max_calls || result->accumulated_ns >= max_total_ns;
+        size_t remaining = max_calls - total_calls;
+        /* Keep the largest completed batch when the budget cannot fit another
+           batch of that size. A tiny leftover must not become the sample. */
+        result->cap_hit = remaining < repetitions || result->accumulated_ns >= max_total_ns;
         if (result->target_met || result->cap_hit) return 0;
-        if (repetitions > SIZE_MAX / 2) return 4;
-        repetitions *= 2;
+        repetitions = repetitions > remaining / 2 ? remaining : repetitions * 2;
     }
 }

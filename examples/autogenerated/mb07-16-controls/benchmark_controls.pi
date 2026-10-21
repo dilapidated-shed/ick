@@ -517,6 +517,13 @@ def quantile(samples ∈ list[float], probability ∈ float) → float:
 def hot_job(folder ∈ str, report ∈ object, log ∈ list[object], require_gmp ∈ bool) → None:
     validate_legacy()
     compiler ∈ str ← str(resolve_executable(os.environ.get("CC", "cc")))
+    calibration_fixture ∈ str ← folder + "/calibration-cap-controls"
+    calibration_arguments ∈ list[str] ← [compiler]
+    calibration_arguments.extend(FLAGS)
+    calibration_arguments.extend([ROOT + "/timing/engine.c", ROOT + "/timing/fake_clock.c", "-o", calibration_fixture])
+    checked(calibration_arguments, log)
+    checked([calibration_fixture], log)
+    report.__setitem__("calibration_cap_control", "PASS: deterministic 4096-call cap retains the 2048-call batch; six-call and one-call limits remain bounded")
     probe ∈ object ← command([compiler, "-M", ROOT + "/providers/gmp.c"], log, "")
     has_gmp ∈ bool ← int(probe.returncode) == 0
     require(not require_gmp or has_gmp, "required GMP header absent")

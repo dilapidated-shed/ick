@@ -9,7 +9,7 @@ struct mb_sample { uint64_t elapsed_ns; size_t repetitions; };
 struct mb_calibration {
     struct mb_sample sample;
     int target_met;
-    int cap_hit;
+    int cap_hit; /* time cap, or insufficient calls for a nondecreasing batch */
     uint64_t accumulated_ns;
 };
 int mb_timespec_ns(const struct timespec *, uint64_t *);

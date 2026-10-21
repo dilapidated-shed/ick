@@ -26,5 +26,18 @@ int main(void) {
     if(!mb_timespec_ns(&time,&result)) return 8;
     time.tv_sec=(time_t)(UINT64_MAX/UINT64_C(1000000000)+1); time.tv_nsec=0;
     if(!mb_timespec_ns(&time,&result)) return 9;
+    /* An awkward call cap must not replace a large sample with its tiny tail. */
+    clock=(struct clock_fixture){0,100,0,0};
+    if(mb_calibrate(operation,&clock,timer,&clock,200,4096,10000,&calibration)) return 10;
+    if(calibration.target_met || !calibration.cap_hit || clock.calls!=4095 ||
+       calibration.sample.repetitions!=2048 || calibration.accumulated_ns!=1200) return 11;
+    /* A remaining batch may still grow when the cap is not a power of two. */
+    clock=(struct clock_fixture){0,100,0,0};
+    if(mb_calibrate(operation,&clock,timer,&clock,200,6,10000,&calibration)) return 12;
+    if(calibration.target_met || !calibration.cap_hit || clock.calls!=6 ||
+       calibration.sample.repetitions!=3 || calibration.accumulated_ns!=300) return 13;
+    clock=(struct clock_fixture){0,100,0,0};
+    if(mb_calibrate(operation,&clock,timer,&clock,200,1,10000,&calibration) ||
+       !calibration.cap_hit || clock.calls!=1 || calibration.sample.repetitions!=1) return 14;
     return 0;
 }

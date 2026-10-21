@@ -60,6 +60,13 @@ and receipt storage use host memory outside that C allocation budget.
 
 Hot/rotating runs record two explicit warmup calls before bounded calibration,
 and validate all warmup and calibration identities and cap/target flags.
+Calibration retains its largest completed batch when the remaining call budget
+cannot fit another batch of that size. With a 4096-call limit, an unmet target
+therefore retains 2048 repetitions after 4095 total calibration calls, instead
+of replacing that sample with the single leftover call. Deterministic fake-clock
+controls cover this limit and small irregular limits. A cap hit can leave unused
+calls and does not mean the target duration was reached. Earlier receipts through
+`6d4b035` preserve the old behavior and are superseded for timing interpretation.
 Clock-pair and volatile-callback control paths preserve 20 observations per
 build and repetition size separately. No measured overhead is subtracted.
 Fresh GMP timing includes import/allocation/kernel/export/free; reused native
