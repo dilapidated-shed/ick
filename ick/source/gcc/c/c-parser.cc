@@ -37,6 +37,7 @@ along with GCC; see the file COPYING3.  If not see
 
 #include "config.h"
 #define INCLUDE_STRING
+#define INCLUDE_VECTOR
 #include "system.h"
 #include "coretypes.h"
 #include "target.h"
@@ -342,7 +343,9 @@ c_lex_one_token (c_parser *parser, c_token *token, bool raw = false)
       token->type = c_lex_with_flags (&token->value, &token->location,
 				      &token->flags,
 				      (parser->lex_joined_string
-				       ? 0 : C_LEX_STRING_NO_JOIN));
+				       ? 0 : C_LEX_STRING_NO_JOIN),
+                                      &token->source_spelling,
+                                      &token->source_spelling_length);
       token->id_kind = C_ID_NONE;
       token->keyword = RID_MAX;
       token->pragma_kind = PRAGMA_NONE;
@@ -11892,6 +11895,8 @@ get_counted_by_ref (tree ref)
      Classname . identifier
 */
 
+#include "icky-consumer.h"
+
 static struct c_expr
 c_parser_postfix_expression (c_parser *parser)
 {
@@ -11945,6 +11950,12 @@ c_parser_postfix_expression (c_parser *parser)
       c_parser_consume_token (parser);
       break;
     case CPP_NAME:
+      if (strcmp (IDENTIFIER_POINTER (c_parser_peek_token (parser)->value),
+                  "__builtin_icky") == 0)
+        {
+          expr = c_parser_icky_expression (parser);
+          break;
+        }
       switch (c_parser_peek_token (parser)->id_kind)
 	{
 	case C_ID_ID:

@@ -1,0 +1,92 @@
+name: ICKY compiler consumer
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: icky-consumer-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  native-consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact ICK source and GCC reference
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: true
+          persist-credentials: false
+      - name: Acquire original qualified Idriç parser and runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: '11788713633'
+          repository: dilapidated-shed/icky
+          run-id: '38344914067'
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: .icky-evidence
+      - name: Verify the complete immutable package before extraction
+        run: sha256sum -c qualification/icky-consumer/package.sha256
+      - name: Prepare the unchanged native parser closure
+        run: |
+          mkdir .icky-package
+          tar -xzf .icky-evidence/located-bc2aad9006d3d44e896d2f5092a7ac82e7bf066b/icky-native.tar.gz -C .icky-package
+      - name: Check out the qualified native bootstrap recipe
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: isomorphisms/ai-ci
+          ref: f1c24ab67e0e93f7606aae88d7a6d123a3898288
+          path: .producer
+          persist-credentials: false
+          sparse-checkout: ick-host
+      - name: Install disposable bootstrap and observation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential flex texinfo libgmp-dev libmpfr-dev libmpc-dev strace
+      - name: Materialize the exact source
+        run: >-
+          make -f .producer/ick-host/Makefile "$RUNNER_TEMP/ick-build/source/.materialized"
+          ICK_SOURCE="$GITHUB_WORKSPACE"
+          ICK_REVISION='${{ github.event.pull_request.head.sha || github.sha }}'
+          ICK_BUILD="$RUNNER_TEMP/ick-build"
+          ICK_STAGE="$RUNNER_TEMP/ick-stage"
+      - name: Preserve K1 Bison isolation and gengtype Flex
+        run: sh qualification/bootstrap-tools/bison-guard.sh setup "${{ runner.temp }}/ick-build/source"
+      - name: Build exact current compiler
+        run: >-
+          make -f .producer/ick-host/Makefile all
+          ICK_SOURCE="$GITHUB_WORKSPACE"
+          ICK_REVISION='${{ github.event.pull_request.head.sha || github.sha }}'
+          ICK_BUILD="$RUNNER_TEMP/ick-build"
+          ICK_STAGE="$RUNNER_TEMP/ick-stage"
+      - name: Verify K1 bootstrap boundary
+        run: sh qualification/bootstrap-tools/bison-guard.sh verify "${{ runner.temp }}/ick-build/objects/gcc/gengtype-lex.cc"
+      - name: Prepare producer evidence directory
+        run: mkdir -p "${{ runner.temp }}/icky-consumer"
+      - name: Exercise real compiler and retain external process observations
+        run: >-
+          strace -f -qq -s 8192 -e trace=execve -o "$RUNNER_TEMP/icky-consumer/execve.trace"
+          make -f qualification/icky-consumer/Makefile all
+          ICK="$RUNNER_TEMP/ick-stage/bin/gcc"
+          BUILD="$RUNNER_TEMP/icky-consumer"
+          PARSER_ROOT="$GITHUB_WORKSPACE/.icky-package"
+      - name: Record exact source and produced compiler identities
+        run: |
+          git rev-parse HEAD > "$RUNNER_TEMP/icky-consumer/source.txt"
+          sha256sum "$RUNNER_TEMP/ick-stage/bin/gcc" "$RUNNER_TEMP/ick-stage/libexec/gcc/x86_64-pc-linux-gnu/17.0.0/cc1" > "$RUNNER_TEMP/icky-consumer/compiler.sha256"
+          sha256sum "$RUNNER_TEMP/icky-consumer/positive-O0" "$RUNNER_TEMP/icky-consumer/positive-O2" > "$RUNNER_TEMP/icky-consumer/outputs.sha256"
+      - name: Retain source maps, parser output, process observations and programs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: icky-compiler-consumer-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/icky-consumer
+          if-no-files-found: error
+          retention-days: 30

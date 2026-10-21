@@ -24,6 +24,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "c-common.h"
 #include "timevar.h"
 #include "stringpool.h"
+#include "ggc.h"
 #include "stor-layout.h"
 #include "c-pragma.h"
 #include "debug.h"
@@ -585,7 +586,8 @@ c_common_has_feature (cpp_reader *pfile, bool strict_p)
 
 enum cpp_ttype
 c_lex_with_flags (tree *value, location_t *loc, unsigned char *cpp_flags,
-		  int lex_flags)
+		  int lex_flags, const char **source_spelling,
+                  unsigned int *source_spelling_length)
 {
   const cpp_token *tok;
   enum cpp_ttype type;
@@ -594,8 +596,26 @@ c_lex_with_flags (tree *value, location_t *loc, unsigned char *cpp_flags,
 
   timevar_push (TV_CPP);
  retry:
+  if (source_spelling) *source_spelling = NULL;
+  if (source_spelling_length) *source_spelling_length = 0;
   tok = get_token (parse_in, loc);
   type = tok->type;
+
+  /* Copy the actual CPP token, not a reconstructed integer value or a
+     mapped ASCII operator.  In particular, 010 and U+2190 survive here.  */
+  if (source_spelling && source_spelling_length
+      && (ick_icky_parser || ick_icky_parser_package)
+      && (type == CPP_NAME || type == CPP_NUMBER || type == CPP_OTHER
+          || type == CPP_OPEN_PAREN || type == CPP_CLOSE_PAREN
+          || type == CPP_EQ))
+    {
+      unsigned char *written = XNEWVEC (unsigned char, cpp_token_len (tok) + 1);
+      unsigned char *finishing = cpp_spell_token (parse_in, tok, written, true);
+      *source_spelling_length = finishing - written;
+      *source_spelling = ggc_alloc_string ((const char *) written,
+                                           *source_spelling_length);
+      free (written);
+    }
 
  retry_after_at:
   switch (type)
