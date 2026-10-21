@@ -36,3 +36,19 @@ dispatch and validation must remain visible in timing identities. No universal
 speed claim, accepted paper execution, physical A1 run, native AIX run, independent
 AICI acceptance or Kitchen/Ike production build follows from these diagnostics.
 Every missing obligation remains in `benchmarks/bigmul/modes/README.md`.
+
+## Host continuation
+
+The continuation keeps counted and uninstrumented measurements in different
+builds, with exact input-digest coverage and explicit fresh/native preparation
+boundaries. Clock/control distributions are observations, not subtraction
+corrections. Actual C workload faults now exercise the same response checker
+used by successful mixed runs. Linux RSS units and tracked provider payload
+remain distinct; native preparation failure must free partial state before
+refusing without a timing record.
+
+Typed finite-size analysis pairs complete process/case sets at matching
+measurement/workspace boundaries. It resamples whole process blocks across all
+sizes, exposes censored crossover estimates, and checks analytic, noisy and
+outlier fixtures. This remains checked Ithon; the explicitly selected existing
+C provider/timer boundary is retained. No new Python or shell helper is added.

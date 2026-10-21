@@ -15,12 +15,12 @@ through foreign boundaries; it does not count their checks as Ithon checking.
 
 | Job | Executable slice | Remaining obligations |
 | --- | --- | --- |
-| MB07 | Three randomized provider-order process blocks; 424 pinned medium input representations; hot, rotating and generic equal-value inputs; optional pinned GMP 6.3.0 multiply/square adapters; callback/cached/carry mutants | Accepted predecessor receipts; qualified ICK; matched uninstrumented builds; timer overhead controls and complete warmup reporting; reused provider-native workspace comparison; full outer-call cost interpretation |
-| MB08 | One persistent single-worker process per deterministic small-heavy, alternating, size-change and varied-small workload; batches 1/8/64; exact request IDs/products; raw service and batch spans; drop/duplicate/reorder/stale response validators | Known delay/quantile fixture; actual mid-stream failure injection; timestamp overhead; isolated batch-only arithmetic throughput; accepted predecessors |
-| MB09 | Hot/rotating pools, fresh output allocation, 64 KiB/1 MiB eviction attempts; observed cache/page/cgroup facts; skipped-precondition and 4 KiB budget refusals | Sweeps across observed cache boundaries; separate input/output/scratch residency; fresh/reuse and single-operand coverage mutants; native/physical qualification |
+| MB07 | Counted and matched uninstrumented hot/rotating/equal-value builds; seven uninstrumented hot process blocks; replayable provider/configuration order; 424 pinned medium input representations; GMP 6.3.0 fresh adapter versus prepared native reuse, multiply versus square; explicit warmup/calibration; clock-pair/callback distributions and identity/callback/cached/carry mutants | Accepted predecessor receipts; qualified ICK; admitted actual candidate and its workspace policy; native/physical qualification |
+| MB08 | One persistent single-worker process per deterministic small-heavy, alternating, size-change and varied-small workload; batches 1/8/64; exact IDs/products; individual service p50/p90 and raw batch spans; actual process drop/duplicate/reorder/stale faults, 20 ms delay and mid-stream failure with retained partial output; analytic quantile fixture | Local timestamp-overhead distributions; isolated batch-only arithmetic throughput; accepted predecessors |
+| MB09 | Hot/rotating pools, fresh output allocation, bounded half/equal/double observed-cache-size eviction attempts; observed cache/page/cgroup facts; skipped-precondition, false single-operand and pre-allocation 4 KiB budget refusals | Separate input/output/scratch residency; reused supposedly fresh-buffer fixture; native/physical qualification; cache boundaries outside the safe budget explicitly NOT_RUN |
 | MB10 | Binary persistent and process-per-request endpoints; persistent hexadecimal for identical integers; framed echo of matching output size; first-complete-frame and exit clocks; start/output delay, exit99, hanging child, truncated/surplus output controls | Internal parsing/allocation/import/export intervals; equivalent hex echo; decimal mode; full prerequisite acceptance |
-| MB11 | Separate wrapped-provider profile objects; fresh subprocess per case; allocation/live/peak payload bytes; nested/aligned/realloc/failure allocator fixtures and leak refusal | RSS with platform units; reused-workspace tradeoff; growth/shrink/error cleanup coverage; unit-conversion and saturation controls; accepted predecessors |
-| MB12 | Strict complete process/case pairing; case/machine/compiler/profile/mode/operation checks; block bootstrap with assumptions and order medians; exact speedup/equality/slope fixtures; actual MB07 controls; NaN/infinite/nonpositive/missing/duplicate rejection | Accepted real mode; crossover intervals; heteroscedastic/outlier sensitivity; readable real-data model normalizations |
+| MB11 | Separate wrapped-provider profile objects; fresh subprocess per case; allocation/live/peak payload; GMP fresh/prepared reuse; raw Linux RSS KiB and normalized bytes; nested/aligned/realloc growth/shrink/error-cleanup fixtures; ordinary/error leak and unit mutants; failed partial native preparation and small-budget refusals | Same-process variable-size reusable-context growth/shrink policy; accepted predecessor receipts; qualified actual candidate workspace |
+| MB12 | Strict complete process/case and measurement/workspace/boundary pairing; whole-process bootstrap and order medians; speedup/equality/noise/heteroscedastic/outlier/quantile/slope/crossover fixtures; seven-block uninstrumented MB07 data; balanced finite-size normalizations, held-out largest size and censored grid crossover intervals; invalid-data refusals | Accepted real mode; human-readable standalone statistical report; full candidate/platform evidence |
 | MB13 | Observed host architecture/compiler/runtime widths/clock, binary digest, disassembly/helper/link inspection and identity mutants; existing workflow extended with pinned Ithon and raw uploads | Exact-head hosted receipts; qualified ICK; full compiler lanes; affinity/virtualization facts; missing-bc/candidate/upload adversarial controls; independent AICI |
 | MB14 | Real local subprocess collection and carry/truncation/exit/disconnection fixtures; explicit A1 identity validators | Existing MUL6 explicit-serial build/deploy/collect integration, Cat Food artifact delivery and actual MIRO A1 bytes/status/device receipts; no physical run performed |
 | MB15 | Host-independent least-significant-first wire serialization probe; local endian/timer-unit/library/status validators | Qualified native AIX clock/compiler/object format; existing authorized-host remote integration; LPAR/SMT/sharing/library facts; actual native outputs/statuses; no rental authorized |
@@ -49,14 +49,22 @@ runner. Existing full-readiness mode still exits nonzero.
 
 The C workload consumes exact pregenerated input bytes. Schoolbook output and
 input snapshots are prepared outside timing, while Ithon independently checks
-every full output afterward. Dispatch and callback-count instrumentation remain
-inside the kernel interval: these are diagnostic controls, not uninstrumented
-provider-speed results. The C pool is capped at 1024 requests, 2048 stored words
+every full output afterward. Dispatch and the opaque callback remain inside
+the interval. Counted builds add a call counter; matched uninstrumented builds
+compile it out and label the raw zero call field NOT_MEASURED. Every
+uninstrumented workload digest has a counted counterpart. Neither is an
+accepted actual-candidate speed result. The C pool is capped at 1024 requests, 2048 stored words
 per operand and a configured memory budget of at most 16 MiB; the drivers use
 8 MiB including conservative provider scratch reservation. Corpus generation
 and receipt storage use host memory outside that C allocation budget.
 
-Hot calibration has bounded calls/time and records cap flags separately.
+Hot/rotating runs record two explicit warmup calls before bounded calibration,
+and validate all warmup and calibration identities and cap/target flags.
+Clock-pair and volatile-callback control paths preserve 20 observations per
+build and repetition size separately. No measured overhead is subtracted.
+Fresh GMP timing includes import/allocation/kernel/export/free; reused native
+timing includes the kernel callback only, with preparation and export outside.
+Three randomized configuration blocks retain these different cost boundaries.
 First-touch and eviction modes skip calibration and measure exactly one call.
 Allocation counters reset before that measured call. A new malloc allocation
 may reuse pages; it does not prove untouched OS pages or cold caches. Eviction
@@ -64,6 +72,24 @@ touches are timed separately and count one byte per 64-byte stride. No system
 cache drop, privileged counter request or machine-wide change is made.
 Mixed batch wall spans include validation and output formatting. Closed-loop
 service times are not open-loop queue latency. No p99 claim is made.
+Individual-request p50/p90 use linear interpolation at `(sample_count-1)*p`.
+The process delay is part of service time; queue time remains NOT_MEASURED.
+Process failures preserve partial stdout/stderr and cannot enter a successful
+throughput summary.
+
+Memory tracking covers requested provider payload, including GMP adapter arrays,
+but cannot see GMP internal allocations or allocator headers. Preparation may
+leave live native storage across calls; cleanup must end at zero. Linux
+`RUSAGE_SELF.ru_maxrss` is recorded in KiB and normalized to bytes, separately
+from tracked heap. The fresh process still includes corpus, oracle and I/O;
+its high-water mark is not a provider-only peak.
+
+MB12 pairs uninstrumented complete-adapter samples only. Normalizations use the
+fixed balanced stored-length corpus mixture, not mathematical bit length.
+Crossover means the first ascending median speedup crossing on that finite
+grid; the same resampled process blocks span all sizes. Censored resamples
+prevent a finite interval. None of this establishes a sustained winner or an
+asymptotic exponent.
 
 The binary endpoint caps both output streams and bounds its initial request
 below the local pipe envelope. A selector deadline covers the first read and
