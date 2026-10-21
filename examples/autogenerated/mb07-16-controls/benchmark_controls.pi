@@ -15,11 +15,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from builtins import list, bytes, bytearray, format, isinstance, ValueError, OSError, FileNotFoundError, BaseException
+from builtins import list, bytes, bytearray, format, isinstance, ValueError, TypeError, OSError, FileNotFoundError, BaseException
 from pathlib import Path
 
 REPOSITORY ∈ str ← str(Path(__file__).resolve().parent.parent.parent.parent)
 ROOT ∈ str ← REPOSITORY + "/benchmarks/bigmul"
+ENDPOINT_RECEIPTS ∈ list[object] ← []
 sys.path.insert(0, ROOT + "/acceptance")
 sys.path.insert(0, ROOT + "/corpus")
 sys.path.insert(0, ROOT + "/providers")
@@ -54,6 +55,9 @@ def checked(argv ∈ list[str], log ∈ list[object]) → object:
     return result
 
 def compile_sources(folder ∈ str, sources ∈ list[str], log ∈ list[object], defect ∈ str, profile ∈ bool, gmp ∈ bool) → str:
+    return compile_sources_options(folder, sources, log, defect, profile, gmp, [])
+
+def compile_sources_options(folder ∈ str, sources ∈ list[str], log ∈ list[object], defect ∈ str, profile ∈ bool, gmp ∈ bool, extra_flags ∈ list[str]) → str:
     Path(folder).mkdir(parents=True, exist_ok=True)
     compiler ∈ str ← str(resolve_executable(os.environ.get("CC", "cc")))
     objects ∈ list[str] ← []
@@ -62,12 +66,13 @@ def compile_sources(folder ∈ str, sources ∈ list[str], log ∈ list[object],
         output ∈ str ← folder + "/object-" + str(source_index) + ".o"
         argv ∈ list[str] ← [compiler]
         argv.extend(FLAGS)
+        argv.extend(extra_flags)
         argv.append("-fno-lto")
         if source == "mulbench.c":
             argv.append("-Dmain=mb_unused_main")
         if gmp and source == "modes/workload.c":
             argv.append("-DMB_WITH_GMP")
-        if profile and (source == "mulbench.c" or source == "providers/karatsuba.c" or source == "providers/gmp.c"):
+        if profile and (source == "mulbench.c" or source == "providers/karatsuba.c" or source == "providers/gmp.c" or source == "modes/end_to_end/text_endpoint.c"):
             argv.extend(["-include", ROOT + "/memory/tracker.h", "-Dmalloc=mb_malloc", "-Dcalloc=mb_calloc", "-Dfree=mb_free"])
         if len(defect) > 0:
             argv.append("-D" + defect)
@@ -76,6 +81,7 @@ def compile_sources(folder ∈ str, sources ∈ list[str], log ∈ list[object],
         objects.append(output)
     program ∈ str ← folder + "/program"
     link ∈ list[str] ← [compiler]
+    link.extend(extra_flags)
     link.extend(objects)
     if gmp:
         link.append("-lgmp")
@@ -158,6 +164,28 @@ def rss_details(text ∈ str) → object:
     return {"status": "OBSERVED", "raw": raw, "raw_unit": "KiB", "peak_bytes": normalized,
             "scope": "Linux RUSAGE_SELF process high-water mark; includes corpus/oracle/I/O; not provider-owned heap"}
 
+def kernel_batches(stderr ∈ str, rows ∈ list[object], trials ∈ int, case_count ∈ int, batch ∈ int) → list[object]:
+    events ∈ list[list[str]] ← event_rows(stderr, "kernel_batch")
+    per_trial ∈ int ← (case_count + batch - 1) // batch
+    require(len(events) == trials * per_trial, "missing arithmetic batch spans")
+    spans ∈ list[object] ← []
+    for event_index in range(len(events)):
+        fields ∈ list[str] ← events[event_index]
+        trial ∈ int ← event_index // per_trial
+        first ∈ int ← event_index % per_trial * batch
+        count ∈ int ← batch
+        if first + count > case_count:
+            count ← case_count - first
+        require(len(fields) == 5 and int(fields[1]) == trial and int(fields[2]) == first and int(fields[3]) == count, "wrong arithmetic batch identity")
+        elapsed ∈ int ← int(fields[4])
+        require(elapsed > 0, "invalid arithmetic batch duration")
+        for offset in range(count):
+            row ∈ object ← rows[trial * case_count + first + offset]
+            require(int(row.get("elapsed_ns")) == elapsed and int(row.get("repetitions")) == count, "arithmetic batch span/response mismatch")
+            row.__setitem__("batch_id", event_index)
+        spans.append({"trial": trial, "first_request": first, "request_count": count, "elapsed_ns": elapsed})
+    return spans
+
 def run_mode_configured(program ∈ str, mode ∈ str, provider ∈ str, corpus ∈ list[object], log ∈ list[object], trials ∈ int, batch ∈ int, eviction ∈ int, workspace ∈ str, measurement ∈ str) → object:
     text ∈ str ← payload(corpus)
     result ∈ object ← command([program, mode, provider, str(trials), "4096", str(batch), "8388608", str(eviction), workspace], log, text)
@@ -181,7 +209,7 @@ def run_mode_configured(program ∈ str, mode ∈ str, provider ∈ str, corpus 
             require(measurement == "uninstrumented" and calls == 0, "unexpected call instrumentation")
         if mode == "mixed" or mode == "first-touch" or mode == "eviction-preconditioned" or mode == "profile":
             require(repetitions == 1, "first call warmed by repetition")
-        if mode == "rotating":
+        if mode == "rotating" or mode == "rotating-pool":
             require(repetitions >= len(corpus), "rotating pool not covered")
         if mode == "eviction-preconditioned":
             require(int(row.get("precondition_bytes")) == (eviction + 63) // 64, "preconditioning was skipped")
@@ -202,22 +230,71 @@ def run_mode_configured(program ∈ str, mode ∈ str, provider ∈ str, corpus 
         boundary ← "native-prepared-kernel; import/allocation/export excluded"
         workspace_kind ← "prepared native context reused for identical operands"
     warmup ∈ list[list[str]] ← event_rows(stderr, "warmup")
-    if mode == "hot" or mode == "rotating":
-        require(len(warmup) == trials * len(corpus), "missing warmup coverage")
+    allocation_events ∈ list[list[str]] ← event_rows(stderr, "output_allocation")
+    if mode == "first-touch":
+        require(len(allocation_events) == trials * len(corpus), "missing fresh-output allocation coverage")
+        for allocation_index in range(len(allocation_events)):
+            allocation_event ∈ list[str] ← allocation_events[allocation_index]
+            require(len(allocation_event) == 4 and int(allocation_event[1]) == allocation_index // len(corpus) and int(allocation_event[2]) == allocation_index % len(corpus) and allocation_event[3] == "1", "fresh output buffer was reused")
+    else:
+        require(len(allocation_events) == 0, "unexpected fresh-output allocation identity")
+    if mode == "hot" or mode == "rotating" or mode == "rotating-pool":
+        warmup_cases ∈ int ← len(corpus)
+        if mode == "rotating-pool":
+            warmup_cases ← 1
+        require(len(warmup) == trials * warmup_cases, "missing warmup coverage")
         calibration ∈ list[list[str]] ← event_rows(stderr, "calibration")
         require(len(calibration) == len(warmup), "missing calibration coverage")
         for warmup_index in range(len(warmup)):
             event ∈ list[str] ← warmup[warmup_index]
             calibrated ∈ list[str] ← calibration[warmup_index]
-            require(len(event) == 4 and int(event[1]) == warmup_index // len(corpus) and int(event[2]) == warmup_index % len(corpus) and event[3] == "2", "wrong warmup identity")
+            require(len(event) == 4 and int(event[1]) == warmup_index // warmup_cases and int(event[2]) == warmup_index % warmup_cases and event[3] == "2", "wrong warmup identity")
             require(len(calibrated) == 5 and calibrated[1] == event[1] and calibrated[2] == event[2], "wrong calibration identity")
             require((calibrated[3] == "0" or calibrated[3] == "1") and (calibrated[4] == "0" or calibrated[4] == "1") and (calibrated[3] == "1" or calibrated[4] == "1"), "unbounded calibration")
+    else:
+        require(len(warmup) == 0 and len(event_rows(stderr, "calibration")) == 0, "unexpected warming of a single-pass workload")
+    batch_samples ∈ list[object] ← []
+    units ∈ str ← "ns per measured batch"
+    repetition_field ∈ str ← "provider calls in this measured batch"
+    warmup_policy ∈ str ← "two explicit calls before calibration for each hot/rotating case; neither warmup nor calibration enters measured batches"
+    call_field ∈ str ← "observed calls"
+    if measurement == "uninstrumented":
+        call_field ← "NOT_MEASURED; raw zero is a sentinel, coverage comes from the matched counted build"
+    if mode == "mixed-throughput":
+        batch_samples ← kernel_batches(stderr, rows, trials, len(corpus), batch)
+        units ← "ns per whole arithmetic batch; response rows reference a shared batch sample, never per-request latency"
+        repetition_field ← "total requests in the shared arithmetic batch; one provider call per request; count once by batch_id"
+        if measurement == "call-counted":
+            call_field ← "observed calls in the shared arithmetic batch; repeated per response row; count once by batch_id"
+    if mode == "rotating-pool":
+        warmup_policy ← "two calls at the start of each pool trial before bounded calibration; measured repetitions cover the full pool; residency unproven"
+        pool_events ∈ list[list[str]] ← event_rows(stderr, "pool_batch")
+        require(len(pool_events) == trials, "missing rotating-pool spans")
+        for pool_trial in range(trials):
+            pool_event ∈ list[str] ← pool_events[pool_trial]
+            require(len(pool_event) == 5 and int(pool_event[1]) == pool_trial and int(pool_event[2]) == len(corpus), "wrong rotating-pool identity")
+            pool_repetitions ∈ int ← int(pool_event[3])
+            pool_elapsed ∈ int ← int(pool_event[4])
+            for pool_index in range(len(corpus)):
+                pool_row ∈ object ← rows[pool_trial * len(corpus) + pool_index]
+                require(int(pool_row.get("elapsed_ns")) == pool_elapsed and int(pool_row.get("repetitions")) == pool_repetitions, "rotating-pool span/response mismatch")
+                pool_row.__setitem__("batch_id", pool_trial)
+            batch_samples.append({"trial": pool_trial, "pool_size": len(corpus), "provider_calls": pool_repetitions, "elapsed_ns": pool_elapsed})
+        units ← "ns per whole rotating-pool batch; response rows reference a shared sample, never per-request latency"
+        repetition_field ← "total provider calls cycling through the pool; count once per trial/batch_id"
+        if measurement == "call-counted":
+            call_field ← "observed calls in shared rotating-pool batch; count once per trial/batch_id"
     return {"mode": mode, "provider": provider, "operation": operation, "request_sha256": request_hash,
             "raw_samples": rows, "events_tsv": result.stderr, "binary_sha256": digest(program), "trials": trials,
+            "arithmetic_batches": batch_samples,
             "batch_size": batch, "eviction_span_bytes": eviction, "cost_boundary": boundary, "measurement": measurement,
-            "workspace": workspace_kind, "timer": "CLOCK_MONOTONIC", "units": "ns per measured batch", "rss": rss_details(stderr),
-            "warmup": "two explicit calls before calibration for each hot/rotating case; neither warmup nor calibration enters measured batches",
-            "call_field": "observed calls" if measurement == "call-counted" else "NOT_MEASURED; raw zero is a sentinel, coverage comes from the matched counted build",
+            "workspace": workspace_kind, "timer": "CLOCK_MONOTONIC", "units": units, "rss": rss_details(stderr),
+            "warmup": warmup_policy,
+            "call_field": call_field, "repetition_field": repetition_field,
+            "residency_components": {"input": "pregenerated, copied and read before timing; physical residency unproven",
+                                     "output": "new malloc lifetime with guard write for first-touch; otherwise existing output prefilled before timing",
+                                     "scratch": workspace_kind + "; provider-owned allocation is inside complete-adapter timing",
+                                     "code": "no instruction-cache flush; process startup excluded from kernel timing; residency unproven"},
             "precondition_bytes_meaning": "one byte per 64-byte stride; no proven cache state",
             "scope": "host comparison; callback/dispatch and complete provider work at the stated boundary; no overhead subtraction or universal speed claim"}
 
@@ -255,6 +332,12 @@ def validate_binary(output ∈ bytes, corpus ∈ list[object], echo ∈ bool) �
     require(offset == len(output), "surplus output")
 
 def collect(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], binary ∈ bool, echo ∈ bool, timeout ∈ float) → object:
+    return collect_configured(argv, data, corpus, binary, echo, 16, False, timeout)
+
+def collect_text(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], base ∈ int, echo ∈ bool, timeout ∈ float) → object:
+    return collect_configured(argv, data, corpus, False, echo, base, True, timeout)
+
+def collect_configured(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], binary ∈ bool, echo ∈ bool, base ∈ int, padded ∈ bool, timeout ∈ float) → object:
     require(len(data) < 4096, "request exceeds bounded pipe envelope")
     start ∈ int ← time.monotonic_ns()
     deadline ∈ int ← start + int(timeout * 1000000000.0)
@@ -314,21 +397,41 @@ def collect(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], binary 
             process.stdin.close()
         process.stdout.close()
         process.stderr.close()
-    end ∈ int ← time.monotonic_ns()
+        observed_exit ∈ int ← time.monotonic_ns()
+        process_record ∈ object ← {"argv": argv, "input_hex": data.hex(), "stdout_hex": bytes(output).hex(),
+                                   "stderr_hex": bytes(errors).hex(), "exit_status": process.returncode,
+                                   "launch_to_collection_end_ns": observed_exit - start,
+                                   "validation": "UNVERIFIED; outer negative control may expect refusal"}
+        ENDPOINT_RECEIPTS.append(process_record)
+    end ∈ int ← observed_exit
     require(int(process.returncode) == 0, "endpoint failed after output: " + str(process.returncode))
     captured ∈ bytes ← bytes(output)
     if binary:
         validate_binary(captured, corpus, echo)
     else:
         lines ∈ list[bytes] ← list(captured.splitlines())
-        require(len(lines) == len(corpus), "hex output count differs")
+        require(len(lines) == len(corpus), "text output count differs")
         for line_index in range(len(lines)):
             case ∈ object ← corpus[line_index]
-            require(int(lines[line_index], 16) == int(case.get("product")), "hex product differs")
+            expected ∈ int ← int(case.get("product"))
+            if echo:
+                expected ← 0
+            require(int(lines[line_index], base) == expected, "text product differs")
+            if padded:
+                left ∈ list[int] ← case.get("left")
+                right ∈ list[int] ← case.get("right")
+                digits_per_word ∈ int ← 8
+                if base == 10:
+                    digits_per_word ← 10
+                require(len(lines[line_index]) == digits_per_word * (len(left) + len(right)), "text output width differs")
+                for digit_index in range(len(lines[line_index])):
+                    digit ∈ int ← int(lines[line_index].__getitem__(digit_index))
+                    require((digit >= 48 and digit <= 57) or (base == 16 and digit >= 97 and digit <= 102), "invalid output digit")
     require(first > 0, "no complete first result")
     input_hash ∈ str ← hashlib.sha256(data).hexdigest()
     output_hash ∈ str ← hashlib.sha256(captured).hexdigest()
     error_text ∈ str ← bytes(errors).decode()
+    process_record.__setitem__("validation", "PASS_EXACT_OUTPUT")
     return {"argv": argv, "exit_status": process.returncode, "binary_sha256": digest(argv[0]),
             "launch_to_first_result_ns": first - start, "launch_to_exit_ns": end - start,
             "input_bytes": len(data), "output_bytes": len(captured), "input_sha256": input_hash,
@@ -336,6 +439,7 @@ def collect(argv ∈ list[str], data ∈ bytes, corpus ∈ list[object], binary 
             "includes": "launch, import/allocation/arithmetic/export, I/O and observed first complete frame; validation excluded"}
 
 def emit(report ∈ object, output ∈ str) → None:
+    report.__setitem__("endpoint_processes", ENDPOINT_RECEIPTS)
     revision ∈ object ← subprocess.run(["git", "-C", REPOSITORY, "rev-parse", "HEAD"], text=True, capture_output=True, check=True)
     changes ∈ object ← subprocess.run(["git", "-C", REPOSITORY, "status", "--porcelain"], text=True, capture_output=True, check=True)
     environment ∈ object ← {}
@@ -354,6 +458,11 @@ def emit(report ∈ object, output ∈ str) → None:
             if suffix == ".c" or suffix == ".h" or suffix == ".pi" or suffix == ".py":
                 hashes.__setitem__(str(file.relative_to(ROOT)), digest(str(file)))
     report.__setitem__("source_hashes", hashes)
+    if str(report.get("job")) == "MB12" and str(report.get("status")) == "PASS_SCOPED_HOST_CONTROLS" and len(output) > 0:
+        readable ∈ str ← str(Path(output).with_suffix(".md"))
+        Path(readable).parent.mkdir(parents=True, exist_ok=True)
+        Path(readable).write_text(analysis_markdown(report))
+        report.__setitem__("readable_report", readable)
     text ∈ str ← json.dumps(report, sort_keys=True)
     if len(output) > 0:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -433,7 +542,7 @@ def hot_job(folder ∈ str, report ∈ object, log ∈ list[object], require_gmp
     corpus ∈ list[object] ← cases(False)
     equal ∈ list[object] ← cases(True)
     modes ∈ list[str] ← ["hot", "rotating", "hot"]
-    groups ∈ list[list[object]] ← [corpus, corpus[:8], equal[:30]]
+    groups ∈ list[list[object]] ← [corpus, corpus[:8], equal]
     runs ∈ list[object] ← []
     for block in range(3):
         order ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
@@ -468,14 +577,14 @@ def hot_job(folder ∈ str, report ∈ object, log ∈ list[object], require_gmp
                 plain_rotating ∈ object ← run_mode_configured(plain, "rotating", plain_provider, corpus[:8], log, 1, 1, 0, "fresh", "uninstrumented")
                 plain_rotating.update({"process_block": plain_block, "provider_order": plain_index, "seed": 1704 + plain_block})
                 runs.append(plain_rotating)
-                plain_equal ∈ object ← run_mode_configured(plain, "hot", plain_provider, equal[:30], log, 1, 1, 0, "fresh", "uninstrumented")
+                plain_equal ∈ object ← run_mode_configured(plain, "hot", plain_provider, equal, log, 1, 1, 0, "fresh", "uninstrumented")
                 plain_equal.update({"process_block": plain_block, "provider_order": plain_index, "seed": 1704 + plain_block, "operation": "generic-equal-values"})
                 runs.append(plain_equal)
     if has_gmp:
         native_programs ∈ list[str] ← [program, plain]
         measurements ∈ list[str] ← ["call-counted", "uninstrumented"]
         native_providers ∈ list[str] ← ["gmp-mpn-mul", "gmp-mpn-sqr"]
-        native_groups ∈ list[list[object]] ← [corpus, equal[:30]]
+        native_groups ∈ list[list[object]] ← [corpus, equal]
         native_workspaces ∈ list[str] ← ["fresh", "reused-native"]
         for native_block in range(3):
             configuration_order ∈ list[int] ← list(range(8))
@@ -510,6 +619,7 @@ def hot_job(folder ∈ str, report ∈ object, log ∈ list[object], require_gmp
     report.__setitem__("call_coverage", "every uninstrumented mode/provider/operation/workspace/input digest has a counted counterpart; raw uninstrumented calls=0 means NOT_MEASURED")
     report.__setitem__("runs", runs)
     report.__setitem__("case_count", len(corpus))
+    report.__setitem__("operation_case_counts", {"multiply": len(corpus), "generic_equal_values": len(equal), "specialized_square": len(equal) if has_gmp else "NOT_RUN"})
     defects ∈ list[str] ← ["MB_MUTANT_SKIP_CALL", "MB_MUTANT_CACHED", "MB_MUTANT_CARRY"]
     mutants ∈ list[object] ← []
     for defect in defects:
@@ -533,6 +643,8 @@ def same_responses(observed ∈ list[object], expected ∈ list[object]) → boo
 
 def mixed_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
     program ∈ str ← build(folder, log, "", False, False)
+    plain ∈ str ← build(folder + "/uninstrumented", log, "MB_UNINSTRUMENTED", False, False)
+    report.__setitem__("timestamp_controls", [overhead_control(folder + "/overhead-counted", log, False), overhead_control(folder + "/overhead-plain", log, True)])
     corpus ∈ list[object] ← cases(False)
     small ∈ list[object] ← []
     large ∈ list[object] ← []
@@ -561,6 +673,9 @@ def mixed_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
     providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded"]
     batches ∈ list[int] ← [1, 8, 64]
     runs ∈ list[object] ← []
+    throughput_runs ∈ list[object] ← []
+    throughput_programs ∈ list[str] ← [program, plain]
+    measurements ∈ list[str] ← ["call-counted", "uninstrumented"]
     for schedule_index in range(4):
         for batch in batches:
             for provider in providers:
@@ -587,7 +702,29 @@ def mixed_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
                             "throughput_requests_per_second": len(rows) * 1000000000.0 / total_span,
                             "batch_wall_ns": spans, "batch_wall_includes": "validation and TSV output; no isolated arithmetic throughput claim"})
                 runs.append(run)
+                for throughput_build in range(2):
+                    throughput_run ∈ object ← run_mode_configured(throughput_programs[throughput_build], "mixed-throughput", provider, groups[schedule_index], log, 2, batch, 0, "fresh", measurements[throughput_build])
+                    batch_samples ∈ list[object] ← throughput_run.get("arithmetic_batches")
+                    arithmetic_ns ∈ int ← 0
+                    request_count ∈ int ← 0
+                    durations ∈ list[float] ← []
+                    for batch_sample in batch_samples:
+                        arithmetic_ns ← arithmetic_ns + int(batch_sample.get("elapsed_ns"))
+                        request_count ← request_count + int(batch_sample.get("request_count"))
+                        durations.append(float(batch_sample.get("elapsed_ns")))
+                    require(arithmetic_ns > 0 and request_count == 2 * len(groups[schedule_index]), "arithmetic throughput coverage")
+                    require(str(throughput_run.get("request_sha256")) == str(run.get("request_sha256")), "batch/service input identity differs")
+                    throughput_run.update({"schedule": names[schedule_index], "total_requests": request_count,
+                                           "arithmetic_batch_count": len(batch_samples), "arithmetic_elapsed_ns": arithmetic_ns,
+                                           "throughput_requests_per_second": request_count * 1000000000.0 / arithmetic_ns,
+                                           "batch_duration_p50_ns": quantile(durations, 0.5),
+                                           "arrival_policy": "closed-loop single worker; pregenerated requests; no exogenous queue",
+                                           "timed_boundary": "opaque dispatch and provider calls, including provider-owned fresh adaptation/allocation; excludes pregeneration, prefill, validation and output",
+                                           "latency": "NOT_MEASURED: only one clock pair per arithmetic batch",
+                                           "warmup_policy": "no separate warmup; trial/order retained; process and earlier batches may warm later calls"})
+                    throughput_runs.append(throughput_run)
     report.__setitem__("runs", runs)
+    report.__setitem__("arithmetic_throughput_runs", throughput_runs)
     first_run ∈ object ← runs[0]
     original ∈ list[object] ← first_run.get("raw_samples")
     mutants ∈ list[object] ← []
@@ -625,14 +762,16 @@ def mixed_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
     for defect_index in range(len(process_defects)):
         defect ∈ str ← process_defects[defect_index]
         faulty ∈ str ← build(folder + "/" + defect, log, defect, False, False)
-        refused ∈ bool ← False
-        try:
-            run_mode(faulty, "mixed", "schoolbook", fixture_cases, log, 1, 8, 0)
-        except ValueError as error:
-            require(str(error) == reasons[defect_index], "wrong process defect diagnosis: " + str(error))
-            mutants.append({"kind": defect, "status": "EXPECTED_REFUSAL", "reason": str(error)})
-            refused ← True
-        require(refused, "workload process response defect accepted")
+        fault_modes ∈ list[str] ← ["mixed", "mixed-throughput"]
+        for fault_mode in fault_modes:
+            refused ∈ bool ← False
+            try:
+                run_mode(faulty, fault_mode, "schoolbook", fixture_cases, log, 1, 8, 0)
+            except ValueError as error:
+                require(str(error) == reasons[defect_index], "wrong process defect diagnosis: " + str(error))
+                mutants.append({"kind": defect, "mode": fault_mode, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+                refused ← True
+            require(refused, "workload process response defect accepted")
     delayed ∈ str ← build(folder + "/delay", log, "MB_MIXED_DELAY", False, False)
     delay_run ∈ object ← run_mode(delayed, "mixed", "schoolbook", fixture_cases, log, 1, 8, 0)
     delay_rows ∈ list[object] ← delay_run.get("raw_samples")
@@ -655,6 +794,31 @@ def mixed_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
         require(contains(str(error), "workload failed:"), "wrong failed-request diagnosis")
         failure_rejected ← True
     require(failure_rejected, "failed request entered successful summary")
+    throughput_failure_rejected ∈ bool ← False
+    try:
+        run_mode(failed, "mixed-throughput", "schoolbook", fixture_cases, log, 1, 8, 0)
+    except ValueError as error:
+        require(contains(str(error), "workload failed:"), "wrong failed-batch diagnosis")
+        throughput_failure_rejected ← True
+    require(throughput_failure_rejected, "failed batch entered successful throughput summary")
+    batch_defects ∈ list[str] ← ["MB_BATCH_TIME_MISMATCH", "MB_BATCH_COUNT_MISMATCH"]
+    for batch_defect in batch_defects:
+        faulty_batch ∈ str ← build(folder + "/" + batch_defect, log, batch_defect, False, False)
+        batch_rejected ∈ bool ← False
+        try:
+            run_mode(faulty_batch, "mixed-throughput", "schoolbook", fixture_cases, log, 1, 8, 0)
+        except ValueError as error:
+            require(contains(str(error), "arithmetic batch"), "wrong batch metadata defect diagnosis")
+            mutants.append({"kind": batch_defect, "status": "EXPECTED_REFUSAL", "reason": str(error)})
+            batch_rejected ← True
+        require(batch_rejected, "bad arithmetic batch metadata accepted")
+    tails ∈ list[object] ← []
+    for tail_build in range(2):
+        tail ∈ object ← run_mode_configured(throughput_programs[tail_build], "mixed-throughput", "schoolbook", fixture_cases[:7], log, 2, 64, 0, "fresh", measurements[tail_build])
+        tail_batches ∈ list[object] ← tail.get("arithmetic_batches")
+        require(len(tail_batches) == 2, "short final batch lost")
+        tails.append(tail)
+    report.__setitem__("short_batch_control", tails)
     report.__setitem__("failure_control", {"status": "EXPECTED_REFUSAL", "failed_request": 3, "partial_responses": partial,
                                            "scope": "partial stdout/stderr retained; failed run excluded from successful throughput summaries"})
     report.__setitem__("mutants", mutants)
@@ -668,6 +832,33 @@ def cache_size_bytes(text ∈ str) → int:
     if suffix == "M":
         return int(stripped[:-1]) * 1048576
     return int(stripped)
+
+def derived_pool(count ∈ int) → list[object]:
+    require(count > 0 and count <= 1024, "derived pool count exceeds budget")
+    pool ∈ list[object] ← []
+    for case_index in range(count):
+        left ∈ list[int] ← []
+        right ∈ list[int] ← []
+        for word_index in range(128):
+            left.append(4294967295)
+            right.append(2863311530)
+        left.__setitem__(0, left[0] ^ case_index)
+        right.__setitem__(0, right[0] ^ ((case_index + 1) * 65537))
+        combined ∈ list[int] ← list(left)
+        combined.extend(right)
+        fields ∈ list[str] ← ["128", "128"]
+        encoded ∈ bytes ← len(left).to_bytes(4, "little")
+        right_count ∈ bytes ← len(right).to_bytes(4, "little")
+        encoded ← encoded + right_count
+        for word in combined:
+            fields.append(format(word, "08x"))
+            word_bytes ∈ bytes ← word.to_bytes(4, "little")
+            encoded ← encoded + word_bytes
+        identity ∈ str ← hashlib.sha256(encoded).hexdigest()
+        wire ∈ str ← " ".join(fields)
+        pool.append({"left": left, "right": right, "wire": wire, "case_sha256": identity, "source_case_sha256": identity,
+                     "product": integer_value(left) * integer_value(right), "family": "MB09-derived-pool-v1", "variant": case_index})
+    return pool
 
 def cache_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
     report.__setitem__("page_size", int(os.sysconf("SC_PAGE_SIZE")))
@@ -724,6 +915,50 @@ def cache_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
                                       "residency": "input snapshots, outputs, native scratch and OS pages are not independently resident-qualified; span is not proof of eviction"})
                     sweep_controls.append(sweep_run)
     report.__setitem__("cache_boundary_sweeps", sweep_controls)
+    plain ∈ str ← build(folder + "/uninstrumented", log, "MB_UNINSTRUMENTED", False, False)
+    pool_controls ∈ list[object] ← []
+    pool_seen ∈ object ← {}
+    pool_programs ∈ list[str] ← [program, plain]
+    pool_measurements ∈ list[str] ← ["call-counted", "uninstrumented"]
+    for pool_path in cache_paths:
+        pool_size_path ∈ str ← str(pool_path) + "/size"
+        pool_type_path ∈ str ← str(pool_path) + "/type"
+        if not Path(pool_size_path).is_file() or not Path(pool_type_path).is_file():
+            continue
+        pool_type ∈ str ← str(Path(pool_type_path).read_text()).strip()
+        if pool_type != "Data" and pool_type != "Unified":
+            continue
+        pool_boundary ∈ int ← cache_size_bytes(str(Path(pool_size_path).read_text()))
+        pool_targets ∈ list[int] ← [pool_boundary // 2, pool_boundary, pool_boundary * 2]
+        for pool_target in pool_targets:
+            pool_count ∈ int ← (pool_target + 1023) // 1024
+            pool_key ∈ str ← str(pool_count)
+            pool_exists ∈ bool ← pool_seen.__contains__(pool_key)
+            if pool_exists:
+                continue
+            pool_seen.__setitem__(pool_key, True)
+            if pool_count <= 0 or pool_count > 1024:
+                pool_controls.append({"cache": str(pool_path.name), "reported_boundary_bytes": pool_boundary,
+                                      "target_input_bytes": pool_target, "status": "NOT_RUN_RESOURCE_LIMIT",
+                                      "reason": "1024 unique pairs / 1 MiB operand-payload cap; snapshots, outputs, descriptors and scratch remain inside 8 MiB C budget"})
+                continue
+            pool ∈ list[object] ← derived_pool(pool_count)
+            pool_order ∈ list[int] ← [0, 1, 2, 3]
+            random.Random(909 + pool_count).shuffle(pool_order)
+            for pool_order_index in range(len(pool_order)):
+                configuration ∈ int ← pool_order[pool_order_index]
+                pool_provider ∈ str ← providers[configuration // 2]
+                pool_build ∈ int ← configuration % 2
+                pool_run ∈ object ← run_mode_configured(pool_programs[pool_build], "rotating-pool", pool_provider, pool, log, 2, 1, 0, "fresh", pool_measurements[pool_build])
+                pool_run.update({"cache": str(pool_path.name), "reported_boundary_bytes": pool_boundary,
+                                 "target_input_bytes": pool_target, "actual_operand_payload_bytes": pool_count * 1024,
+                                 "actual_output_payload_bytes": pool_count * 1024, "unique_pairs": pool_count,
+                                 "seed": 909 + pool_count, "configuration_order": pool_order_index,
+                                 "corpus_profile": "MB09-derived-pool-v1; separate unadmitted diagnostic family, never substituted for pinned MB03 cases",
+                                 "generator": "128 words per operand; left all 0xffffffff with low word XOR variant; right all 0xaaaaaaaa with low word XOR ((variant+1)*65537)",
+                                 "cache_observation": "cpu0 sysfs Data/Unified cache; affinity unchanged; executing-CPU topology/residency unproven"})
+                pool_controls.append(pool_run)
+    report.__setitem__("operand_working_set_sweeps", pool_controls)
     report.__setitem__("runs", runs)
     single ∈ str ← build(folder + "/single-operand", log, "MB_SINGLE_OPERAND", False, False)
     single_rejected ∈ bool ← False
@@ -733,7 +968,23 @@ def cache_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
         require(contains(str(error), "workload failed: 3"), "wrong rotating-pool defect diagnosis")
         single_rejected ← True
     require(single_rejected, "rotating schedule reduced to one operand without refusal")
+    pool_rejected ∈ bool ← False
+    try:
+        run_mode(single, "rotating-pool", "schoolbook", corpus[:8], log, 1, 1, 0)
+    except ValueError as error:
+        require(contains(str(error), "workload failed: 3"), "wrong whole-pool coverage defect diagnosis")
+        pool_rejected ← True
+    require(pool_rejected, "whole-pool timing accepted one repeated operand")
     report.__setitem__("single_operand_control", "EXPECTED_REFUSAL: output poison exposes untouched rotating requests")
+    reused ∈ str ← build(folder + "/reused-fresh", log, "MB_REUSED_FRESH", False, False)
+    reused_rejected ∈ bool ← False
+    try:
+        run_mode(reused, "first-touch", "schoolbook", corpus[:8], log, 2, 1, 0)
+    except ValueError as error:
+        require(str(error) == "fresh output buffer was reused", "wrong fresh-lifetime defect diagnosis")
+        reused_rejected ← True
+    require(reused_rejected, "reused output claimed a fresh allocation lifetime")
+    report.__setitem__("fresh_output_control", "EXPECTED_REFUSAL: actual malloc-lifetime counter detects retained output; new allocation does not prove new OS pages")
     bad ∈ str ← build(folder, log, "MB_MUTANT_SKIP_PRECONDITION", False, False)
     rejected ∈ bool ← False
     try:
@@ -759,7 +1010,231 @@ def expected_binary(corpus ∈ list[object]) → bytes:
         output ← output + header + encoded
     return output
 
-def endpoint_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
+def text_endpoint(folder ∈ str, log ∈ list[object], defect ∈ str) → str:
+    return compile_sources(folder, ["mulbench.c", "providers/karatsuba.c", "timing/engine.c", "modes/end_to_end/text_endpoint.c"], log, defect, False, True)
+
+def text_payload(corpus ∈ list[object], base ∈ int) → bytes:
+    require(base == 10 or base == 16, "unsupported text base")
+    text ∈ str ← ""
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        left_digits ∈ str ← str(integer_value(left))
+        right_digits ∈ str ← str(integer_value(right))
+        if base == 16:
+            left_digits ← format(integer_value(left), "x")
+            right_digits ← format(integer_value(right), "x")
+        text ← text + str(len(left)) + " " + str(len(right)) + " " + left_digits + " " + right_digits + "\n"
+    return text.encode()
+
+def text_parser_controls(folder ∈ str, report ∈ object, log ∈ list[object], allow_unavailable_lsan ∈ bool) → None:
+    sources ∈ list[str] ← ["mulbench.c", "providers/karatsuba.c", "timing/engine.c", "modes/end_to_end/text_endpoint.c"]
+    flags ∈ list[str] ← ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
+    program ∈ str ← compile_sources_options(folder + "/sanitized", sources, log, "", False, True, flags)
+    environment ∈ str ← str(resolve_executable("env"))
+    prefix ∈ list[str] ← [environment, "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1", "LSAN_OPTIONS=exitcode=86"]
+    bases ∈ list[str] ← ["hex", "decimal"]
+    overlong_digits ∈ str ← "9".ljust(50000, "9")
+    bad ∈ list[str] ← ["0 1 0 0\n", "-1 1 0 0\n", "+1 1 0 0\n", "18446744073709551616 1 0 0\n", "1 1 +1 0\n", "1 1 -1 0\n", "1 1 1_0 0\n", "1 1 g 0\n", "1 1 0 0 extra\n", "1 1 0\n", "1 1 0 0", "1 1 0\x00 0\n", "1 1 " + overlong_digits + " 0\n"]
+    controls ∈ list[object] ← []
+    lsan_available ∈ bool ← True
+    report.__setitem__("allow_unavailable_lsan", allow_unavailable_lsan)
+    for base in bases:
+        argv ∈ list[str] ← list(prefix)
+        argv.extend([program, base, "schoolbook"])
+        valid ∈ object ← command(argv, log, "1 1 3 7\n")
+        if int(valid.returncode) != 0 and contains(str(valid.stderr), "LeakSanitizer has encountered a fatal error"):
+            require(allow_unavailable_lsan, "LeakSanitizer unavailable; mandatory lane refuses: " + str(valid.stderr))
+            lsan_available ← False
+            report.__setitem__("LeakSanitizer", {"status": "NOT_AVAILABLE", "observed_stderr": valid.stderr,
+                                                "scope": "explicit reduced local lane; hosted lane must not enable this allowance"})
+            prefix ← [environment, "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1", "LSAN_OPTIONS=exitcode=86"]
+            argv ← list(prefix)
+            argv.extend([program, base, "schoolbook"])
+            valid ← command(argv, log, "1 1 3 7\n")
+        require(int(valid.returncode) == 0 and not contains(str(valid.stderr), "Sanitizer") and not contains(str(valid.stderr), "runtime error:"), "sanitized text endpoint cannot execute cleanly")
+        expected ∈ int ← 21
+        output ∈ str ← str(valid.stdout).strip()
+        numeric_base ∈ int ← 16
+        if base == "decimal":
+            numeric_base ← 10
+        require(int(output, numeric_base) == expected, "sanitized endpoint exact product differs")
+        for bad_index in range(len(bad)):
+            result ∈ object ← command(argv, log, bad[bad_index])
+            require(int(result.returncode) == 2 and str(result.stdout) == "", "malformed text input admitted")
+            require(not contains(str(result.stderr), "Sanitizer") and not contains(str(result.stderr), "runtime error:"), "malformed input caused sanitizer/error-cleanup failure")
+            controls.append({"base": base, "invalid_case": bad_index, "status": "EXPECTED_REFUSAL"})
+        oversized ∈ str ← "1 1 100000000 0\n"
+        if base == "decimal":
+            oversized ← "1 1 4294967296 0\n"
+        overflow ∈ object ← command(argv, log, oversized)
+        require(int(overflow.returncode) == 2 and str(overflow.stdout) == "" and not contains(str(overflow.stderr), "Sanitizer"), "stored-width overflow crossed the conversion boundary")
+        controls.append({"base": base, "invalid_case": "operand exceeds declared stored width", "status": "EXPECTED_REFUSAL"})
+        after_output ∈ object ← command(argv, log, "1 1 3 7\n" + oversized)
+        require(int(after_output.returncode) == 2 and contains(str(after_output.stdout), "\n") and not contains(str(after_output.stderr), "Sanitizer"), "mid-stream parser failure lost output or leaked")
+        request_frames ∈ list[str] ← []
+        for frame_index in range(1025):
+            request_frames.append("1 1 3 7\n")
+        repeated ∈ str ← "".join(request_frames)
+        over_budget ∈ object ← command(argv, log, repeated)
+        completed ∈ list[str] ← list(str(over_budget.stdout).splitlines())
+        require(int(over_budget.returncode) == 2 and len(completed) == 1024 and not contains(str(over_budget.stderr), "Sanitizer"), "request-count budget was not enforced cleanly")
+        controls.append({"base": base, "invalid_case": "1025th request exceeds 1024-frame budget", "status": "EXPECTED_REFUSAL"})
+    tracked_sources ∈ list[str] ← list(sources)
+    tracked_sources.append("memory/tracker.c")
+    tracked_flags ∈ list[str] ← list(flags)
+    tracked_flags.append("-DMB_TEXT_TRACKED")
+    tracked ∈ str ← compile_sources_options(folder + "/tracked-cleanup", tracked_sources, log, "", True, True, tracked_flags)
+    tracked_prefix ∈ list[str] ← [environment, "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1", "LSAN_OPTIONS=exitcode=86"]
+    tracked_argv ∈ list[str] ← list(tracked_prefix)
+    tracked_argv.extend([tracked, "hex", "schoolbook"])
+    cleanup ∈ object ← command(tracked_argv, log, "1 1 100000000 0\n")
+    require(int(cleanup.returncode) == 2 and contains(str(cleanup.stderr), "tracked_live_bytes\t0\n"), "text error cleanup retained owned C payload")
+    tracked_leaky ∈ str ← compile_sources_options(folder + "/tracked-leak", tracked_sources, log, "MB_TEXT_ERROR_LEAK", True, True, tracked_flags)
+    tracked_leak_argv ∈ list[str] ← list(tracked_prefix)
+    tracked_leak_argv.extend([tracked_leaky, "hex", "schoolbook"])
+    tracked_leak ∈ object ← command(tracked_leak_argv, log, "1 1 100000000 0\n")
+    require(int(tracked_leak.returncode) == 87 and contains(str(tracked_leak.stderr), "tracked text endpoint leak"), "owned-payload error leak mutant accepted")
+    if lsan_available:
+        leaky ∈ str ← compile_sources_options(folder + "/leak", sources, log, "MB_TEXT_ERROR_LEAK", False, True, flags)
+        leak_argv ∈ list[str] ← list(prefix)
+        leak_argv.extend([leaky, "hex", "schoolbook"])
+        leak ∈ object ← command(leak_argv, log, "1 1 100000000 0\n")
+        require(int(leak.returncode) == 86 and contains(str(leak.stderr), "detected memory leaks"), "error-cleanup leak mutant was not observed by LeakSanitizer")
+        report.__setitem__("LeakSanitizer", {"status": "PASS_EXPECTED_LEAK_DETECTED", "exit_status": leak.returncode})
+    report.update({"text_parser_controls": controls, "owned_C_error_cleanup": "zero live payload on real error path; actual retained-allocation mutant refused; GMP internal heap excluded from this counter",
+                   "scope": "address/undefined-behavior text parser/conversion controls and separately tracked C error cleanup; LeakSanitizer status is separate; no speed result"})
+
+def phase_samples(run ∈ object, count ∈ int, echo ∈ bool) → list[object]:
+    stderr ∈ str ← str(run.get("stderr"))
+    require(contains(stderr, "measurement\tphase-instrumented\n"), "wrong phase build identity")
+    phases ∈ list[list[str]] ← event_rows(stderr, "phase")
+    require(len(phases) == count * 8, "missing endpoint phase samples")
+    names ∈ list[str] ← ["read", "parse", "allocation", "import", "arithmetic", "export-format", "write-flush", "cleanup"]
+    samples ∈ list[object] ← []
+    total ∈ int ← 0
+    for phase_index in range(len(phases)):
+        fields ∈ list[str] ← phases[phase_index]
+        require(len(fields) == 5 and int(fields[1]) == phase_index // 8 and fields[2] == names[phase_index % 8], "wrong endpoint phase identity")
+        require(fields[4] == "ns", "wrong endpoint phase units")
+        elapsed ∈ int ← int(fields[3])
+        require(elapsed >= 0, "negative endpoint phase duration")
+        total ← total + elapsed
+        samples.append({"request": phase_index // 8, "phase": fields[2], "elapsed_ns": elapsed})
+    require(total <= int(run.get("launch_to_exit_ns")), "phase sum exceeds enclosing wall interval")
+    calls ∈ list[list[str]] ← event_rows(stderr, "provider_calls")
+    require(len(calls) == count, "missing endpoint call coverage")
+    expected_calls ∈ int ← 1
+    if echo:
+        expected_calls ← 0
+    for call_index in range(len(calls)):
+        call ∈ list[str] ← calls[call_index]
+        require(len(call) == 3 and int(call[1]) == call_index and int(call[2]) == expected_calls, "wrong endpoint call coverage")
+    return samples
+
+def text_modes(folder ∈ str, report ∈ object, log ∈ list[object], selected ∈ list[object], corpus ∈ list[object], mutants ∈ list[object], require_gmp ∈ bool) → None:
+    compiler ∈ str ← str(resolve_executable("cc"))
+    probe ∈ object ← command([compiler, "-M", ROOT + "/providers/gmp.c"], log, "")
+    available ∈ bool ← int(probe.returncode) == 0
+    require(not require_gmp or available, "required GMP conversion header absent")
+    if not available:
+        report.__setitem__("text_modes", "NOT_RUN: GMP conversion development header absent")
+        return
+    instrumented ∈ str ← text_endpoint(folder + "/phases", log, "MB_ENDPOINT_PHASES")
+    plain ∈ str ← text_endpoint(folder + "/plain", log, "")
+    require(digest(instrumented) != digest(plain), "text phase instrumentation identity collapsed")
+    metadata ∈ object ← checked([plain, "--metadata"], log)
+    runtime ∈ list[list[str]] ← event_rows(str(metadata.stdout), "runtime_version")
+    header ∈ list[list[str]] ← event_rows(str(metadata.stdout), "header_version")
+    require(len(runtime) == 1 and len(header) == 1 and runtime[0] == ["runtime_version", "6.3.0"] and header[0] == ["header_version", "6.3.0"], "text GMP header/runtime pin differs")
+    report.__setitem__("text_conversion_library", {"metadata_tsv": metadata.stdout, "purpose": "GMP text/binary conversion only; multiplication stays the named schoolbook/Karatsuba provider; internal algorithm UNKNOWN"})
+    large ∈ list[object] ← []
+    for case in corpus:
+        left ∈ list[int] ← case.get("left")
+        right ∈ list[int] ← case.get("right")
+        if len(left) >= 128 and len(right) >= 128 and integer_value(left) > 1 and integer_value(right) > 1:
+            large.append(case)
+            break
+    require(len(large) == 1, "large text-product fixture missing")
+    require(text_payload(selected, 10) != text_payload(selected, 16), "decimal/hex representation identity collapsed")
+    groups ∈ list[list[object]] ← [selected, large]
+    group_names ∈ list[str] ← ["varied-small", "large-product"]
+    bases ∈ list[int] ← [16, 10]
+    base_names ∈ list[str] ← ["hex", "decimal"]
+    programs ∈ list[str] ← [instrumented, plain]
+    measurements ∈ list[str] ← ["phase-instrumented", "uninstrumented"]
+    providers ∈ list[str] ← ["schoolbook", "karatsuba32-bounded", "echo"]
+    runs ∈ list[object] ← []
+    for base_index in range(2):
+        for build_index in range(2):
+            for provider in providers:
+                for group_index in range(2):
+                    group ∈ list[object] ← groups[group_index]
+                    data ∈ bytes ← text_payload(group, bases[base_index])
+                    expected_bytes ∈ int ← 0
+                    digits_per_word ∈ int ← 8
+                    if bases[base_index] == 10:
+                        digits_per_word ← 10
+                    identities ∈ list[str] ← []
+                    for group_case in group:
+                        group_left ∈ list[int] ← group_case.get("left")
+                        group_right ∈ list[int] ← group_case.get("right")
+                        expected_bytes ← expected_bytes + digits_per_word * (len(group_left) + len(group_right)) + 1
+                        identities.append(str(group_case.get("case_sha256")))
+                    for trial in range(3):
+                        run ∈ object ← collect_text([programs[build_index], base_names[base_index], provider], data, group, bases[base_index], provider == "echo", 10.0)
+                        require(int(run.get("input_bytes")) == len(data) and int(run.get("output_bytes")) == expected_bytes, "text/echo wire-size mismatch")
+                        samples ∈ list[object] ← []
+                        if build_index == 0:
+                            samples ← phase_samples(run, len(group), provider == "echo")
+                        else:
+                            stderr ∈ str ← str(run.get("stderr"))
+                            require(contains(stderr, "measurement\tuninstrumented\n") and len(event_rows(stderr, "phase")) == 0, "text speed build still instrumented")
+                        run.update({"mode": "persistent-counted-limb-text-" + base_names[base_index], "measurement": measurements[build_index],
+                                    "provider": provider, "trial": trial, "case_sha256": identities, "group": group_names[group_index],
+                                    "phase_samples": samples, "framing": "na nb unsigned-left unsigned-right newline; fixed-width product newline; flush every response",
+                                    "wire_equivalence": "same input bytes and output length for arithmetic and zero echo within this representation",
+                                    "phase_boundary": "instrumented clock differences only; library allocations may occur during import/export; process startup and line-buffer allocation are outside phase totals",
+                                    "interpretation": "separate distributions; no subtraction of echo medians or phase times into an uninstrumented kernel result"})
+                        runs.append(run)
+                        if group_index == 0:
+                            one ∈ list[object] ← group[:1]
+                            single ∈ object ← collect_text([programs[build_index], base_names[base_index], provider], text_payload(one, bases[base_index]), one, bases[base_index], provider == "echo", 10.0)
+                            single_samples ∈ list[object] ← []
+                            if build_index == 0:
+                                single_samples ← phase_samples(single, 1, provider == "echo")
+                            single.update({"mode": "process-per-request-counted-limb-text-" + base_names[base_index], "measurement": measurements[build_index],
+                                           "provider": provider, "trial": trial, "phase_samples": single_samples, "case_sha256": [str(group[0].get("case_sha256"))]})
+                            runs.append(single)
+    report.__setitem__("text_modes", runs)
+    defects ∈ list[str] ← ["MB_TEXT_WRONG_PRODUCT", "MB_TEXT_TRUNCATE", "MB_TEXT_SURPLUS", "MB_EXIT_AFTER_OUTPUT"]
+    for defect in defects:
+        faulty ∈ str ← text_endpoint(folder + "/" + defect, log, defect)
+        for defect_base in range(2):
+            rejected ∈ bool ← False
+            try:
+                collect_text([faulty, base_names[defect_base], "schoolbook"], text_payload(large, bases[defect_base]), large, bases[defect_base], False, 10.0)
+            except ValueError as error:
+                reason ∈ str ← str(error)
+                if defect == "MB_EXIT_AFTER_OUTPUT":
+                    require(contains(reason, "99"), "wrong text child-status diagnostic")
+                else:
+                    require(contains(reason, "text") or contains(reason, "complete first result"), "wrong text corruption diagnostic")
+                mutants.append({"name": defect, "base": bases[defect_base], "status": "EXPECTED_REFUSAL", "reason": reason})
+                rejected ← True
+            require(rejected, "defective text endpoint accepted")
+    wrong_unit ∈ str ← text_endpoint(folder + "/wrong-unit", log, "MB_TEXT_PHASE_UNIT")
+    unit_run ∈ object ← collect_text([wrong_unit, "hex", "schoolbook"], text_payload(large, 16), large, 16, False, 10.0)
+    unit_rejected ∈ bool ← False
+    try:
+        phase_samples(unit_run, 1, False)
+    except ValueError as error:
+        require(str(error) == "wrong endpoint phase units", "wrong text phase-unit diagnostic")
+        mutants.append({"name": "MB_TEXT_PHASE_UNIT", "status": "EXPECTED_REFUSAL", "reason": str(error)})
+        unit_rejected ← True
+    require(unit_rejected, "wrong text phase units accepted")
+
+def endpoint_job(folder ∈ str, report ∈ object, log ∈ list[object], require_gmp ∈ bool) → None:
     corpus ∈ list[object] ← cases(False)
     selected ∈ list[object] ← corpus[31:39]
     data ∈ bytes ← binary_payload(selected)
@@ -827,6 +1302,7 @@ def endpoint_job(folder ∈ str, report ∈ object, log ∈ list[object]) → No
             mutants.append({"status": "EXPECTED_REFUSAL", "reason": str(error)})
             rejected ← True
         require(rejected, "invalid frame accepted")
+    text_modes(folder + "/text", report, log, selected, corpus, mutants, require_gmp)
     report.__setitem__("mutants", mutants)
 
 def memory_job(folder ∈ str, report ∈ object, log ∈ list[object]) → None:
@@ -916,6 +1392,8 @@ def main(job ∈ str) → int:
     parser.add_argument("--controls-only", action="store_true")
     parser.add_argument("--expected-arch", default=platform.machine())
     parser.add_argument("--require-bc", action="store_true")
+    parser.add_argument("--parser-sanitizers-only", action="store_true")
+    parser.add_argument("--allow-unavailable-lsan", action="store_true")
     args ∈ object ← parser.parse_args()
     log ∈ list[object] ← []
     report ∈ object ← {"job": job, "status": "FAIL", "complete": False, "commands": log,
@@ -931,7 +1409,10 @@ def main(job ∈ str) → int:
             elif job == "MB09":
                 cache_job(folder, report, log)
             elif job == "MB10":
-                endpoint_job(folder, report, log)
+                if bool(args.parser_sanitizers_only):
+                    text_parser_controls(folder, report, log, bool(args.allow_unavailable_lsan))
+                else:
+                    endpoint_job(folder, report, log, bool(args.require_gmp))
             elif job == "MB11":
                 memory_job(folder, report, log)
             elif job == "MB12":
@@ -957,7 +1438,7 @@ def main(job ∈ str) → int:
             if not bool(args.controls_only):
                 report.__setitem__("status", "BLOCKED")
                 exit_status ← 2
-    except (ValueError, OSError, subprocess.SubprocessError) as error:
+    except (ValueError, TypeError, OSError, subprocess.SubprocessError) as error:
         report.__setitem__("error", str(error))
     emit(report, str(args.output))
     return exit_status
@@ -991,7 +1472,12 @@ def paired_blocks(baseline ∈ list[object], candidate ∈ list[object]) → obj
         left ∈ object ← left_index.get(key)
         right ∈ object ← right_index.get(key)
         for field in fields:
-            require(str(left.get(field)) == str(right.get(field)), "incompatible " + field)
+            left_value ∈ str ← str(left.get(field, ""))
+            right_value ∈ str ← str(right.get(field, ""))
+            left_known ∈ bool ← len(left_value) > 0 and left_value != "None" and left_value != "UNKNOWN" and left_value != "NOT_RUN" and left_value != "NOT_AVAILABLE"
+            right_known ∈ bool ← len(right_value) > 0 and right_value != "None" and right_value != "UNKNOWN" and right_value != "NOT_RUN" and right_value != "NOT_AVAILABLE"
+            require(left_known and right_known, "missing or unknown identity: " + field)
+            require(left_value == right_value, "incompatible " + field)
         ratio ∈ float ← float(left.get("ns_per_call")) / float(right.get("ns_per_call"))
         finite ∈ bool ← math.isfinite(ratio)
         require(finite and ratio > 0.0, "invalid ratio")
@@ -1223,13 +1709,22 @@ def analysis_job(report ∈ object, source_path ∈ str) → None:
     fixtures.__setitem__("equal_speed_symmetric_noise", noisy)
     require(quantile([4.0, 1.0, 3.0, 2.0], 0.5) == 2.5 and quantile([4.0, 1.0, 3.0, 2.0], 0.25) == 1.75, "analytic analysis quantile fixture")
     fixtures.__setitem__("analytic_quantiles", {"samples": [4.0, 1.0, 3.0, 2.0], "p50": 2.5, "p25": 1.75})
-    names ∈ list[str] ← ["missing", "duplicate", "case_sha256", "machine", "compiler", "profile", "mode", "operation", "measurement", "workspace", "cost_boundary", "left_stored_limbs", "right_stored_limbs", "nan", "zero", "negative", "infinity"]
+    names ∈ list[str] ← ["missing", "duplicate", "case_sha256", "machine", "compiler", "profile", "mode", "operation", "measurement", "workspace", "cost_boundary", "left_stored_limbs", "right_stored_limbs", "nan", "zero", "negative", "infinity", "both-missing-machine", "both-empty-compiler", "both-unknown-measurement"]
     mutants ∈ list[object] ← []
     for name in names:
         pair ∈ list[list[object]] ← analysis_fixture(2.0)
         baseline ∈ list[object] ← pair[0]
         candidate ∈ list[object] ← pair[1]
-        if name == "missing":
+        if name == "both-missing-machine":
+            baseline[0].pop("machine")
+            candidate[0].pop("machine")
+        elif name == "both-empty-compiler":
+            baseline[0].__setitem__("compiler", "")
+            candidate[0].__setitem__("compiler", "")
+        elif name == "both-unknown-measurement":
+            baseline[0].__setitem__("measurement", "UNKNOWN")
+            candidate[0].__setitem__("measurement", "UNKNOWN")
+        elif name == "missing":
             candidate.pop()
         elif name == "duplicate":
             candidate.append(candidate[-1])
@@ -1265,6 +1760,8 @@ def analysis_job(report ∈ object, source_path ∈ str) → None:
     require(bool(Path(source_path).is_file()), "real MB07 receipt missing")
     source ∈ object ← json.loads(Path(source_path).read_text())
     require(str(source.get("status")) == "PASS_SCOPED_HOST_CONTROLS", "MB07 receipt failed")
+    report.__setitem__("input_receipt", {"path": source_path, "sha256": digest(source_path), "source_sha": source.get("source_sha"),
+                                         "ithon_core_sha256": source.get("ithon_core_sha256"), "machine_identity": source.get("machine_identity")})
     runs ∈ list[object] ← source.get("runs")
     baseline ∈ list[object] ← []
     candidate ∈ list[object] ← []
@@ -1297,10 +1794,99 @@ def analysis_job(report ∈ object, source_path ∈ str) → None:
     report.__setitem__("real_data", real)
     report.__setitem__("finite_size_models", finite_models(baseline, candidate))
 
+def display_number(value ∈ object) → str:
+    return format(float(value), ".6g")
+
+def analysis_markdown(report ∈ object) → str:
+    real ∈ object ← report.get("real_data")
+    source ∈ object ← report.get("input_receipt")
+    text ∈ str ← "# MB12 paired host controls\n\n"
+    text ← text + "Status: scoped host diagnostics passed; full mode acceptance remains incomplete.\n\n"
+    text ← text + "Analysis base commit: `" + str(report.get("source_sha")) + "`; checked control-source SHA256 `" + str(report.get("ithon_core_sha256")) + "`.\n\n"
+    worktree ∈ str ← str(report.get("worktree_status"))
+    if len(worktree) > 0:
+        text ← text + "The analysis worktree was modified; the JSON receipt records its status and exact source hashes.\n\n"
+    else:
+        text ← text + "The analysis worktree was clean.\n\n"
+    text ← text + "Input receipt: `" + str(source.get("path")) + "`, SHA256 `" + str(source.get("sha256")) + "`.\n\n"
+    text ← text + "Input source: `" + str(source.get("source_sha")) + "`; machine identity `" + str(source.get("machine_identity")) + "`.\n\n"
+    text ← text + "## Paired comparison\n\nSchoolbook is the baseline; bounded Karatsuba is the candidate. Ratios are baseline time divided by candidate time, so a ratio above one favors the candidate on these measured inputs. Only matching uninstrumented complete-adapter runs enter this comparison.\n\n"
+    text ← text + "| Quantity | Observation |\n| --- | --- |\n"
+    text ← text + "| Independent process blocks | " + str(real.get("blocks")) + " |\n"
+    text ← text + "| Complete paired process/case rows | " + str(real.get("paired_cases")) + " |\n"
+    text ← text + "| Median of block median ratios | " + display_number(real.get("median_ratio")) + " |\n"
+    text ← text + "| Whole-block bootstrap 95% interval | " + str(real.get("ratio_interval_95")) + " |\n"
+    orders ∈ object ← real.get("order_medians")
+    text ← text + "| Baseline-first pooled median ratio | " + str(orders.get("baseline_first")) + " |\n"
+    text ← text + "| Candidate-first pooled median ratio | " + str(orders.get("candidate_first")) + " |\n\n"
+    text ← text + "The resampling unit is the whole process block. Repeated calls and input cases within a block are not independent trials. The descriptive intervals assume exchangeable independent process blocks; order medians expose, rather than remove, order sensitivity.\n\n"
+    models ∈ object ← report.get("finite_size_models")
+    names ∈ list[str] ← ["baseline", "candidate"]
+    labels ∈ list[str] ← ["Schoolbook", "Bounded Karatsuba"]
+    for lane_index in range(2):
+        model ∈ object ← models.get(names[lane_index])
+        rows ∈ list[object] ← model.get("normalizations")
+        text ← text + "## " + labels[lane_index] + " finite-size diagnostics\n\n"
+        text ← text + "n is the stored 32-bit limb count per operand in the fixed balanced corpus mixture. Time is nanoseconds per call; the three normalizations are diagnostic views of the same data.\n\n"
+        text ← text + "| n | Median ns | ns/n | ns/(n log2 n) | ns/n² |\n| ---: | ---: | ---: | ---: | ---: |\n"
+        for row in rows:
+            text ← text + "| " + display_number(row.get("stored_limbs_per_operand")) + " | " + display_number(row.get("median_ns_per_call")) + " | " + display_number(row.get("ns_over_n")) + " | " + display_number(row.get("ns_over_n_log2_n")) + " | " + display_number(row.get("ns_over_n_squared")) + " |\n"
+        fit ∈ object ← model.get("finite_range_fit")
+        text ← text + "\nMedian adjacent log slope on the fit sizes: " + display_number(fit.get("median_log_slope")) + ". The largest size, n=" + display_number(fit.get("held_out_size")) + ", was held out; its observed time divided by the finite-range prediction is " + display_number(fit.get("held_out_observed_over_prediction")) + ". These finite diagnostics do not establish asymptotic complexity.\n\n"
+    crossover ∈ object ← models.get("crossover")
+    observed ∈ object ← crossover.get("observed")
+    text ← text + "## Finite-grid crossover\n\nThe reported event is the first ascending median-ratio crossing above one on the measured balanced size grid. It does not claim a sustained or universal winner.\n\n"
+    text ← text + "Observed status: " + str(observed.get("status")) + "."
+    if str(observed.get("status")) == "BRACKETED":
+        text ← text + " Grid bracket: " + display_number(observed.get("lower")) + " to " + display_number(observed.get("upper")) + " stored limbs per operand."
+    text ← text + "\n\n95% outer grid interval: " + str(crossover.get("grid_interval_95")) + ". Bracketed resamples: " + str(crossover.get("bracketed_resamples")) + " of " + str(crossover.get("resamples")) + ". The same resampled process-block indices span every size; any censored replicate prevents a finite interval.\n\n"
+    fixtures ∈ object ← report.get("fixtures")
+    fixture_names ∈ list[str] ← list(fixtures.keys())
+    fixture_list ∈ str ← ", ".join(fixture_names)
+    text ← text + "## Checks and acceptance boundary\n\nSynthetic checks passed: " + fixture_list + ". Incompatible identities, incomplete pairs and invalid durations are refused. Exact products were checked outside arithmetic timing in the input MB07 controls.\n\n"
+    text ← text + "Displayed numbers are rounded for reading; the JSON receipt preserves raw samples, full precision, assumptions and provenance. Accepted predecessors, qualified ICK, the actual admitted candidate and physical/native target evidence remain outstanding.\n"
+    return text
+
 def verify_identity(observed ∈ object, expected ∈ object) → None:
     fields ∈ list[str] ← ["architecture", "source_sha", "binary_sha256"]
     for field in fields:
         require(str(observed.get(field)) == str(expected.get(field)), "wrong native identity: " + field)
+
+def native_prerequisite_controls(folder ∈ str, report ∈ object, log ∈ list[object], compiler ∈ str) → None:
+    frontend ∈ str ← str(os.environ.get("ITHON", ""))
+    if len(frontend) == 0:
+        report.__setitem__("prerequisite_controls", "NOT_RUN: explicit verified ITHON launcher not configured")
+        return
+    require(bool(Path(frontend).is_absolute()) and bool(Path(frontend).is_file()), "invalid native-control Ithon launcher")
+    environment ∈ str ← str(resolve_executable("env"))
+    limited ∈ str ← folder + "/missing-bc-path"
+    Path(limited).mkdir()
+    tools ∈ list[str] ← ["git", "dirname"]
+    for tool in tools:
+        Path(limited + "/" + tool).symlink_to(str(resolve_executable(tool)))
+    missing ∈ object ← command([environment, "PATH=" + limited, "CC=" + compiler, "ITHON_PYTHON=" + str(sys.executable), frontend,
+                                ROOT + "/platforms/native/check_mb13.pi", "--require-bc", "--output", folder + "/missing-bc.json"], log, "")
+    require(len(str(missing.stdout)) > 0, "missing-bc child produced no receipt: " + str(missing.stderr))
+    missing_report ∈ object ← json.loads(str(missing.stdout))
+    require(int(missing.returncode) != 0 and str(missing_report.get("error")) == "required bc missing", "missing mandatory bc accepted or masked")
+    candidate ∈ object ← command([frontend, ROOT + "/providers/openai2026/check_mb16.pi"], log, "")
+    require(len(str(candidate.stdout)) > 0, "candidate gate produced no receipt: " + str(candidate.stderr))
+    candidate_report ∈ object ← json.loads(str(candidate.stdout))
+    require(int(candidate.returncode) == 2 and str(candidate_report.get("status")) == "BLOCKED", "missing actual candidate admitted")
+    outcomes ∈ list[str] ← ["failure", "success", ""]
+    for outcome in outcomes:
+        guard ∈ object ← command([environment, "MB13_UPLOAD_OUTCOME=" + outcome, frontend,
+                                  REPOSITORY + "/examples/autogenerated/mb07-16-controls/upload_control.pi"], log, "")
+        require(len(str(guard.stdout)) > 0, "upload guard produced no receipt: " + str(guard.stderr))
+        guard_report ∈ object ← json.loads(str(guard.stdout))
+        if outcome == "failure":
+            require(int(guard.returncode) == 0 and str(guard_report.get("status")) == "PASS_EXPECTED_FAILURE_OUTCOME", "upload outcome control failed")
+        else:
+            require(int(guard.returncode) != 0 and str(guard_report.get("status")) == "FAIL", "missing upload failure was silently accepted")
+    report.__setitem__("prerequisite_controls", {"missing_bc": "EXPECTED_REFUSAL in real child with isolated PATH",
+                                                "missing_candidate": "EXPECTED_REFUSAL from actual MB16 gate",
+                                                "upload_guard_fixtures": "expected failure accepted; success/absent outcome refused",
+                                                "hosted_missing_file_action": "NOT_RUN locally; actual workflow action and its logs are separate evidence"})
 
 def native_job(folder ∈ str, report ∈ object, log ∈ list[object], expected_arch ∈ str, require_bc ∈ bool) → None:
     require(str(platform.machine()) == expected_arch, "wrong native architecture label")
@@ -1317,6 +1903,21 @@ def native_job(folder ∈ str, report ∈ object, log ∈ list[object], expected
                    "native_arm64": "NOT_RUN", "frequency_thermal": "UNKNOWN: no inference from CPU name"})
     if Path("/proc/cpuinfo").is_file():
         report.__setitem__("cpuinfo", Path("/proc/cpuinfo").read_text())
+    affinity ∈ str ← "NOT_AVAILABLE"
+    if Path("/proc/self/status").is_file():
+        process_status ∈ list[str] ← list(str(Path("/proc/self/status").read_text()).splitlines())
+        for status_line in process_status:
+            if contains(status_line, "Cpus_allowed_list:"):
+                affinity ← status_line
+    facts ∈ object ← {}
+    fact_paths ∈ list[str] ← ["/proc/self/cgroup", "/sys/devices/system/cpu/online", "/sys/devices/system/cpu/possible", "/sys/hypervisor/type", "/sys/devices/virtual/dmi/id/product_name"]
+    for fact_path in fact_paths:
+        fact_text ∈ str ← "NOT_AVAILABLE"
+        if Path(fact_path).is_file():
+            fact_text ← str(Path(fact_path).read_text()).strip()
+        facts.__setitem__(fact_path, fact_text)
+    report.__setitem__("execution_environment", {"allowed_cpu_list": affinity, "affinity_changed": False,
+                                               "observed_os_facts": facts, "virtualization_classification": "UNKNOWN; names/cgroups are observations, not proof of bare metal or exclusive resources"})
     program ∈ str ← build(folder, log, "", False, False)
     corpus ∈ list[object] ← cases(False)
     report.__setitem__("run", run_mode(program, "hot", "schoolbook", corpus[-8:], log, 1, 1, 0))
@@ -1349,6 +1950,7 @@ def native_job(folder ∈ str, report ∈ object, log ∈ list[object], expected
     report.__setitem__("mutants", mutants)
     if str(platform.machine()) == "aarch64":
         report.__setitem__("native_arm64", "PASS_SCOPED_HOST_CONTROL")
+    native_prerequisite_controls(folder, report, log, compiler)
 
 def validate_target(serial ∈ str, model ∈ str, abi ∈ str, sdk ∈ str) → None:
     require(len(serial) > 0 and not contains(serial, "-"), "explicit device serial required")

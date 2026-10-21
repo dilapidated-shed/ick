@@ -1,0 +1,26 @@
+"""Check the actual workflow's expected missing-input failure outcome."""
+import argparse
+import os
+import sys
+from pathlib import Path
+from builtins import ValueError
+import benchmark_controls
+
+parser ∈ object ← argparse.ArgumentParser()
+parser.add_argument("--output", default="")
+args ∈ object ← parser.parse_args()
+outcome ∈ str ← str(os.environ.get("MB13_UPLOAD_OUTCOME", ""))
+root ∈ str ← str(benchmark_controls.ROOT)
+missing_path ∈ str ← root + "/release/last-run/__missing-artifact-control__/must-not-exist"
+report ∈ object ← {"job": "MB13-upload-control", "status": "FAIL", "complete": False, "observed_outcome": outcome,
+                   "scope": "expected action failure outcome with absent input; inspect hosted action logs for the failure cause; real receipt upload is a separate mandatory step"}
+exit_status ∈ int ← 1
+try:
+    benchmark_controls.require(not bool(Path(missing_path).exists()), "missing-artifact fixture input unexpectedly exists")
+    benchmark_controls.require(outcome == "failure", "missing-artifact action did not report expected failure")
+    report.__setitem__("status", "PASS_EXPECTED_FAILURE_OUTCOME")
+    exit_status ← 0
+except ValueError as error:
+    report.__setitem__("error", str(error))
+benchmark_controls.emit(report, str(args.output))
+sys.exit(exit_status)

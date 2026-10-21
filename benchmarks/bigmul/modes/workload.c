@@ -23,6 +23,12 @@ struct request {
 };
 struct state { struct request *requests; size_t count, index, calls; int rotate, reused, mixed; provider_fn provider; };
 static const uint32_t guard = UINT32_C(0x9137cafe);
+static size_t fresh_output_allocations;
+static uint32_t *fresh_output(size_t words) {
+    uint32_t *output=malloc(4*words);
+    if (output) ++fresh_output_allocations;
+    return output;
+}
 static int invoke(void *opaque) {
     struct state *s = opaque;
     struct request *r = &s->requests[s->index];
@@ -102,9 +108,11 @@ int main(int argc, char **argv) {
         number(argv[6],&budget) || number(argv[7],&eviction) || !trials || trials>20 || !cap || cap>65536 ||
         !batch || batch>64 || budget>16777216 || budget<4096 || eviction>budget) return 2;
     const char *mode=argv[1];
-    int mixed=!strcmp(mode,"mixed"), rotating=!strcmp(mode,"rotating");
+    int pooled=!strcmp(mode,"rotating-pool");
+    int mixed=!strcmp(mode,"mixed"), rotating=!strcmp(mode,"rotating") || pooled;
+    int throughput=!strcmp(mode,"mixed-throughput");
     int first=!strcmp(mode,"first-touch"), evict=!strcmp(mode,"eviction-preconditioned");
-    if (strcmp(mode,"hot") && !mixed && !rotating && !first && !evict && strcmp(mode,"profile")) return 2;
+    if (strcmp(mode,"hot") && !mixed && !throughput && !rotating && !first && !evict && strcmp(mode,"profile")) return 2;
     if ((evict && !eviction) || (!evict && eviction)) return 2;
     const char *workspace=argc==9 ? argv[8] : "fresh";
     int reused=!strcmp(workspace,"reused-native");
@@ -154,7 +162,7 @@ int main(int argc, char **argv) {
     unsigned char *sweep=NULL;
     if (!failed && eviction) { sweep=calloc(eviction,1); if (!sweep) failed=2; }
     if (!count) failed=2;
-    struct state state={rows,count,0,0,rotating,reused,mixed,provider};
+    struct state state={rows,count,0,0,rotating || throughput,reused,mixed || throughput,provider};
 #ifdef MB_UNINSTRUMENTED
     fputs("measurement\tuninstrumented\n",stderr);
 #else
@@ -166,6 +174,43 @@ int main(int argc, char **argv) {
         uint64_t batch_start=0; size_t in_batch=0;
         for (size_t index=0;index<count && !failed;++index) {
             struct request *r=&rows[index]; struct mb_sample sample; size_t repetitions=1;
+            if (throughput) {
+                repetitions=count-index<batch ? count-index : batch;
+                for (size_t j=index;j<index+repetitions;++j) {
+                    memset(rows[j].out,0xa5,4*(rows[j].na+rows[j].nb));
+                    rows[j].out[rows[j].na+rows[j].nb]=guard;
+                }
+                mb_tracking_reset(); state.index=index; state.calls=0;
+                if (mb_batch(invoke,&state,mb_monotonic,NULL,repetitions,&sample)) { failed=3; break; }
+#ifndef MB_UNINSTRUMENTED
+                if (state.calls!=repetitions) { failed=3; break; }
+#endif
+                for (size_t j=index;j<index+repetitions;++j) {
+#ifdef MB_WITH_GMP
+                    if (reused && mb05_gmp_export(&rows[j].native,rows[j].out)) failed=3;
+#endif
+                    if (verify(&rows[j])) failed=3;
+                }
+                if (failed) break;
+                uint64_t reported_ns=sample.elapsed_ns;
+#ifdef MB_BATCH_TIME_MISMATCH
+                reported_ns^=1;
+#endif
+                size_t reported_count=repetitions;
+#ifdef MB_BATCH_COUNT_MISMATCH
+                ++reported_count;
+#endif
+                fprintf(stderr,"kernel_batch\t%zu\t%zu\t%zu\t%" PRIu64 "\n",trial,index,reported_count,reported_ns);
+                for (size_t j=index;j<index+repetitions;++j) {
+                    /* Each response references this shared batch sample, not request latency. */
+                    emit_row(trial,j,rows,&sample,state.calls,0,0);
+#ifdef MB_DUPLICATE_RESPONSE
+                    emit_row(trial,j,rows,&sample,state.calls,0,0);
+#endif
+                }
+                index+=repetitions-1;
+                continue;
+            }
             uint64_t pre_start=0,pre_end=0; size_t touched=0;
             if (mixed && !in_batch && mb_monotonic(NULL,&batch_start)) { failed=3; break; }
             if (!mixed && !first && !evict && strcmp(mode,"profile")) {
@@ -180,9 +225,15 @@ int main(int argc, char **argv) {
                 fprintf(stderr,"calibration\t%zu\t%zu\t%d\t%d\n",trial,index,calibration.target_met,calibration.cap_hit);
             }
             if (first) {
-                free(r->out); r->out=malloc(4*(r->na+r->nb+1));
+                size_t before=fresh_output_allocations;
+#ifndef MB_REUSED_FRESH
+                free(r->out); r->out=fresh_output(r->na+r->nb+1);
+#else
+                (void)fresh_output;
+#endif
                 if (!r->out) { failed=2; break; }
                 r->out[r->na+r->nb]=guard;
+                fprintf(stderr,"output_allocation\t%zu\t%zu\t%zu\n",trial,index,fresh_output_allocations-before);
             } else {
                 size_t begin=rotating ? 0 : index, end=rotating ? count : index+1;
                 for (size_t j=begin;j<end;++j) { memset(rows[j].out,0xa5,4*(rows[j].na+rows[j].nb)); rows[j].out[rows[j].na+rows[j].nb]=guard; }
@@ -208,10 +259,15 @@ int main(int argc, char **argv) {
             if (rotating) { for (size_t j=0;j<count;++j) if (verify(&rows[j])) failed=3; }
             else if (verify(r)) failed=3;
             if (failed) break;
-            emit_row(trial,index,rows,&sample,state.calls,pre_end-pre_start,touched);
+            if (pooled) fprintf(stderr,"pool_batch\t%zu\t%zu\t%zu\t%" PRIu64 "\n",trial,count,repetitions,sample.elapsed_ns);
+            size_t response_end=pooled ? count : index+1;
+            for (size_t response=index;response<response_end;++response) {
+                emit_row(trial,response,rows,&sample,state.calls,pre_end-pre_start,touched);
 #ifdef MB_DUPLICATE_RESPONSE
-            emit_row(trial,index,rows,&sample,state.calls,pre_end-pre_start,touched);
+                emit_row(trial,response,rows,&sample,state.calls,pre_end-pre_start,touched);
 #endif
+            }
+            if (pooled) index=count-1;
             if (mixed && (++in_batch==batch || index+1==count)) {
                 uint64_t end; if (mb_monotonic(NULL,&end)) { failed=3; break; }
                 fprintf(stderr,"batch\t%zu\t%zu\t%zu\t%" PRIu64 "\n",trial,index+1-in_batch,in_batch,end-batch_start); in_batch=0;
